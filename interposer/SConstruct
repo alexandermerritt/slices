@@ -1,0 +1,60 @@
+"""@file SConstruct
+   @author Magdalena Slawinska magg@gatech.edu
+   @date 2011-02-15
+   @brief Building the interposer
+"""
+
+# LIBS - A list of one or more libraries that will be linked with 
+# any executable programs created by this environment.
+# LIBPATH - The list of directories that will be searched for libraries.
+# CPPPATH  - The $CPPPATH value tells SCons to look in the current 
+#   directory ('.') for any files included by C source files (.c or .h files)
+
+
+# create the construction environment for building those
+import os
+
+# 
+envRemote = Environment(LIBS    = ['pthread'],
+				  LIBPATH = ['/opt/cuda/libs'],
+				  CPPPATH = ['../include',  '/opt/cuda/include'],
+                  CCFLAGS = '-g -Wall -Wextra')
+
+#envRemote.Object('../network/remote_api_wrapper.o', ['../network/remote_api_wrapper.c'])		
+
+
+interposerEnv = Environment(LIBS = ['rt', 'dl'],
+					  LIBPATH = ['/opt/cuda/lib64'],
+					  CPPPATH = [
+					  '.',
+					  '/opt/cuda/include', 
+					  '../include', 
+					  '../remote',
+					  '../backend'],					  
+					  CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra' ] )
+
+# create a regular library
+#cudaEnv.Library('libstaticciutils.a', ['libciutils.c'])
+
+# create a shared library					  
+interposerEnv.SharedLibrary('libci.so', ['libci.c',
+									'libciutils.c', 
+   									'../remote/remote_api_wrapper.c', 
+   									'../remote/connection.c',    									
+   									'../remote/remote_packet.c',
+   									'../backend/local_api_wrapper.c'])
+   									
+# building tests
+envTest = Environment(LIBS = ['cunit', 'ncurses', 'pthread'],
+					  LIBPATH= ['/opt/cunit212/lib', '.'],
+					  CPPPATH= ['/opt/cunit212/include',
+					  			'/opt/cuda/include',
+					            '../include',
+					            '../remote',
+					            '../backend'],
+					  CCFLAGS = ['-Wall', '-Wextra', '-g'] )
+
+# libci and libciutils should be compiled earlier
+envTest.Program('testLibci', ['testLibci.c', 
+							  'libci.so' 
+							])
