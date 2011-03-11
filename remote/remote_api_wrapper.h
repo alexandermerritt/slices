@@ -24,6 +24,16 @@ int do_cuda_rpc( cuda_packet_t *packet,
                  int request_buf_size, 
                  void *response_buf, 
                  int response_buf_size);
+
+/**
+ * executes the cuda call over the network
+ * @param pPacket the packet that contains data to be send and executed over the
+ * network
+ * @return OK everything went OK,
+ *         ERROR if something went wrong
+ */
+int do_cuda_rpc1( cuda_packet_t *pPacket);
+
 //////////////////////////
 // CLIENT SIDE FUNCTIONS
 // *_rpc means it marshalls the call and sends it to the remote host for execution.

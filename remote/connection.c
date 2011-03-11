@@ -3,7 +3,7 @@
  * @brief Provides network related functions
  * copied from remote_gpu/network/network.c
  * @date Feb 23, 2011
- * @author Magda Slawinska, magg@gatech.edu
+ * @author Extended and modified by Magda Slawinska, magg@gatech.edu
  */
 
 #include "connection.h"
@@ -14,6 +14,51 @@
 #include <stdlib.h> // calloc()
 #include <errno.h>  // errno
 #include <unistd.h>
+
+#include "libciutils.h"
+
+
+/**
+ * Sends the cuda packet header over the connection pConn
+ * @param pConn The connection we use to send the packet
+ * @param num_cuda_pkts say how many cuda packets you promise to send
+ * @return OK if everything went ok
+ *         ERROR there were problems with sending the packet of network
+ */
+int conn_sendCudaPktHdr(conn_t * pConn, const uint32_t num_cuda_pkts){
+	strm_hdr_t * pHdr = &pConn->strm.hdr;
+
+	// prepare data for the header
+	pHdr->num_cuda_pkts = num_cuda_pkts;
+	pHdr->data_size = sizeof(rpkt_t);
+
+	// send request header (including data size) for the batch of remote packets
+	// 1 is the normal put exit
+	if (1 != put(pConn, pHdr, sizeof(strm_hdr_t))) {
+		printd(DBG_DEBUG, "%s.%d: Problems with sending the request header.\n",
+				__FUNCTION__, __LINE__);
+		return ERROR;
+	}
+
+	printd(DBG_DEBUG, "%s.%d: Request header sent.\n", __FUNCTION__, __LINE__);
+
+	return OK;
+}
+
+/**
+ * Allocates the memory for the connection;
+ * @return myconn The allocated place for myconn
+ *         NULL
+ */
+conn_t * conn_malloc(const char* const pFuncName, const char* const pExtraMsg){
+	conn_t * myconn = malloc(sizeof(conn_t));
+
+	if( mallocCheck(myconn, pFuncName, pExtraMsg) != 0)
+		myconn = NULL;
+
+	return myconn;
+}
+
 
 /**
  *  Establish a connection (for local domUs to go remote)

@@ -27,6 +27,7 @@ int cuda_main(void) {
 
 	int deviceCount;
 	cudaGetDeviceCount(&deviceCount);
+	printf("%s.%d: The number of cuda devices is %d\n", __FUNCTION__, __LINE__, deviceCount);
 
 	a_h = (float *) malloc(size); // Allocate array on host
 	cudaMalloc((void **) &a_d, size); // Allocate array on device

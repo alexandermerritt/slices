@@ -162,16 +162,19 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
     printd(DBG_DEBUG, "%s: \tcalling function %d\n", __FUNCTION__, rpkt->method_id);
 
     // FIXME Use the provided function table instead of this large switch statement.
-    switch(rpkt->method_id)
-    {
-        case __CUDA_REGISTER_FAT_BINARY:
-            __nvback_cudaRegisterFatBinary_srv(rpkt, pConn);
-            break;
+    switch (rpkt->method_id) {
+	case CUDA_GET_DEVICE_COUNT:
+		nvbackGetDeviceCount_srv(rpkt, pConn);
+		break;
 
-        default:
-            printd(DBG_ERROR, "%s: Error: Unknown method ID %d\n", __FUNCTION__, rpkt->method_id);
-            rpkt->flags = CUDA_error;
-    }
+	case __CUDA_REGISTER_FAT_BINARY:
+		__nvback_cudaRegisterFatBinary_srv(rpkt, pConn);
+		break;
+
+	default:
+		printd(DBG_ERROR, "%s: Error: Unknown method ID %d\n", __FUNCTION__, rpkt->method_id);
+		rpkt->flags = CUDA_error;
+	}
     if(rpkt->method_id != __CUDA_REGISTER_FAT_BINARY)
         if(0 != rpkt->ret_ex_val.err)
             printd(DBG_ERROR, "%s, Error: method returned an error\n", __FUNCTION__);

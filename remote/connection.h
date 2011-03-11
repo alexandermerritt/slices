@@ -13,7 +13,7 @@
 #include "rconfig.h"
 #include <netinet/in.h>
 #include "packetheader.h"
-#include "remote_packet_data.h" 		// strm_t; if you include this as the first
+#include "remote_packet_types.h" 		// strm_t; if you include this as the first
 								// include the compilation errors appear
 
 
@@ -81,6 +81,23 @@ typedef struct connection
 
 } conn_t;
 
+/**
+ * Sends the cuda packet header over the connection pConn
+ * @param pConn The connection we use to send the packet
+ * @param num_cuda_pkts say how many cuda packets you promise to send
+ * @return OK if everything went ok
+ *         ERROR there were problems with sending the packet of network
+ */
+int conn_sendCudaPktHdr(conn_t * pConn, const uint32_t num_cuda_pkts);
+
+/**
+ * Allocates the memory for the connection;
+ * @param pFuncName The name of the function
+ * @param pExtraMsg The extra information you want to print
+ * @return myconn The allocated place for myconn
+ *         NULL
+ */
+conn_t * conn_malloc(const char* const pFuncName, const char* const pExtraMsg);
 
 /**
  * Connect to a machine/port using the specified information. Populates the

@@ -12,7 +12,7 @@
 
 #include "packetheader.h"  // cuda_packet_t
 #include "connection.h"		// conn_t
-#include "remote_packet_data.h"  // strm_t
+#include "remote_packet_types.h"  // strm_t
 
 int strm_full(strm_t * strm);
 int strm_expects_response(strm_t *strm);

@@ -272,7 +272,10 @@ cudaError_t cudaGetDeviceCount(int *count) {
 
 	// send the packet
 	if(nvbackGetDeviceCount_rpc(pPacket) != CUDA_SUCCESS )
-		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value. ", __FUNCTION__, __LINE__);
+		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+	else
+		printd(DBG_INFO, "%s.%d: the number of devices is %ld\n", __FUNCTION__, __LINE__,
+				pPacket->args[0].argi);
 
 	// remember the count number what we get from the remote device
 	*count = pPacket->args[0].argi;
