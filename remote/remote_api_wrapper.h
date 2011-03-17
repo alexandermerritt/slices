@@ -40,13 +40,19 @@ int do_cuda_rpc1( cuda_packet_t *pPacket);
 // dom_info argument is void to fit into a jump table along with the functions from
 // local_api_wrapper.c
 //////////////////////////
-int nvbackGetDeviceCount_rpc(cuda_packet_t *packet);
+int nvbackCudaMalloc_rpc(cuda_packet_t * packet);
+int nvbackCudaFree_rpc(cuda_packet_t * packet);
+int nvbackCudaGetDeviceCount_rpc(cuda_packet_t *packet);
+int nvbackCudaGetDeviceProperties_rpc(cuda_packet_t *packet);
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet);
-
 
 /////////////////////////
 // SERVER SIDE CODE
 /////////////////////////
-int nvbackGetDeviceCount_srv(cuda_packet_t *packet, conn_t * pConn);
+int nvbackCudaMalloc_srv(cuda_packet_t * packet, conn_t * pConn);
+int nvbackCudaGetDeviceCount_srv(cuda_packet_t * packet, conn_t * pConn);
+int nvbackCudaGetDeviceProperties_srv(cuda_packet_t * packet, conn_t *pConn);
+int nvbackCudaFree_srv(cuda_packet_t * packet, conn_t * pConn);
 int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn);
+
 #endif

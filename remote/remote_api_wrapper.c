@@ -39,6 +39,9 @@
 #	define REMOTE_HOSTNAME "cuda2.cc.gt.atl.ga.us"
 #endif
 
+//! open the connection forever; if you open and then close the
+//! connection the program stops to work, so you have to make it static
+static conn_t myconn;
 
 ///////////////////
 // RPC CALL UTILS//
@@ -70,29 +73,29 @@ int do_cuda_rpc(cuda_packet_t *packet,
 		void *rspbuf,
 		int rspbuf_size) {
 
-	int retval = OK;
+/*	int retval = OK;
 	strm_hdr_t *pHdr;  // declared to help with my connection
 	rpkt_t * pRpkts;   // declared to help with connections
 
 	// apparently the myconn has something interesting already, since
 	// it previously was the domu_info or something, now we create
 	// a connection here so, we have a problem since it is empty
-	conn_t * myconn;
+	//conn_t * myconn;
 
-	if( (myconn = conn_malloc( __FUNCTION__, "connections")) == NULL ){
-		exit(-1);
-	}
+	//if( (myconn = conn_malloc( __FUNCTION__, "connections")) == NULL ){
+	//	exit(-1);
+	//}
 	conn_connect(myconn, REMOTE_HOSTNAME);
 
-	pHdr = &myconn->strm.hdr;
+	pHdr = myconn.strm.hdr;
 	// right now we are sending only one packet, normally it should
 	// contain a current number of packets
 	pHdr->num_cuda_pkts = 0;
-	pRpkts = myconn->strm.rpkts;
+	pRpkts = myconn.strm.rpkts;
 
 	// send the header with info of what is the size
 	// 1 is the normal put exit
-	if (1 != put(myconn, &myconn->strm.hdr, sizeof(strm_hdr_t))) {
+	if (1 != put(myconn, myconn.strm.hdr, sizeof(strm_hdr_t))) {
 		retval = ERROR;
 		goto exit_do_cuda_rpc; // @todo change it
 	}
@@ -118,7 +121,7 @@ int do_cuda_rpc(cuda_packet_t *packet,
 		goto finalize_do_cuda_rpc;
 	}
 	printd(DBG_DEBUG, "%s.%d: Here. \n", __FUNCTION__, __LINE__);
-
+*/
 	// -------------------------------
 
 /*	// Add to stream packet. TODO use the appropriate function
@@ -242,7 +245,7 @@ int do_cuda_rpc(cuda_packet_t *packet,
         printd(DBG_INFO, "received response data. %d bytes. \n", hdr->data_size);
     }
 */
-finalize_do_cuda_rpc:
+/*finalize_do_cuda_rpc:
 
 	    memset(pHdr, 0, sizeof(strm_hdr_t));
 	    memset(pRpkts, 0, MAX_REMOTE_BATCH_SIZE*sizeof(rpkt_t));
@@ -251,6 +254,8 @@ exit_do_cuda_rpc:
 	conn_close(myconn);
 	free(myconn);
 	return retval;
+	*/
+	return 0;
 }
 
 /**
@@ -263,14 +268,16 @@ exit_do_cuda_rpc:
  * @todo check with passing pointers to functions
  */
 int l_cleanUpConn(conn_t * pConn, const int exit_code){
-	conn_close(pConn);
-	free(pConn);
-	pConn = NULL;
+//	conn_close(pConn);
+//	free(pConn);
+//	pConn = NULL;
 
 	return exit_code;
 }
 /**
  * executes the cuda call over the network
+ * This is the entire protocol of sending and receiving requests.
+ * Including data send as arguments, as well as extra responses
  * @param pPacket the packet that contains data to be send and executed over the
  * network
  * @return OK everything went OK,
@@ -281,48 +288,47 @@ int do_cuda_rpc1(cuda_packet_t *packet) {
 	strm_hdr_t *pHdr;  // declared to help with my connection, will be a pointer
 					   // to the header in my packet I want to send
 	rpkt_t * pRpkts;   // declared to help with connections
-	// @todo currently every time do_cuda_rpc1 is called then the connection
-	// is setup, it shouldn't be so, the information about it should
-	// be stored somewhere
-	conn_t * myconn;	// the connection we use to do rpc stuff
 
-	if( (myconn = conn_malloc( __FUNCTION__, "connections")) == NULL ){
-		exit(-1);
+	// connect if not connected, otherwise reuse the connection
+	// if you close and open the connection, the program exits
+	if( 0 == myconn.valid){
+		conn_connect(&myconn, REMOTE_HOSTNAME);
+		myconn.valid = 1;
 	}
-	conn_connect(myconn, REMOTE_HOSTNAME);
 
 	// for simplicity we use aliases for particular fields of the myconn
-	pHdr = &myconn->strm.hdr;
-	pRpkts = myconn->strm.rpkts;
+	pHdr = &myconn.strm.hdr;
+	pRpkts = myconn.strm.rpkts;
 
-	if ( conn_sendCudaPktHdr(&*myconn, 1) == ERROR ){
-		return l_cleanUpConn(&*myconn, ERROR);
+	if ( conn_sendCudaPktHdr(&myconn, 1) == ERROR ){
+		return l_cleanUpConn(&myconn, ERROR);
 	}
 
-	// now we are preparing for sending a packet
+	// now we are preparing for sending a cuda packet
 	// start with  copying the packet into a contiguous space
-	memcpy(&pRpkts[0], packet, sizeof(cuda_packet_t));
+	memcpy(&pRpkts[0], packet, sizeof(rpkt_t));
 
-	printd(DBG_DEBUG, "%s.%d: Send request data %d bytes. \n", __FUNCTION__, __LINE__, pHdr->data_size);
+	printd(DBG_DEBUG, "%s.%d: Send request packet %d bytes. \n", __FUNCTION__, __LINE__, pHdr->data_size);
 	// send the packet
-	if (1 != put(myconn, (char *) pRpkts, pHdr->data_size * pHdr->num_cuda_pkts)) {
-		return l_cleanUpConn(&*myconn, ERROR);
+	if (1 != put(&myconn, (char *) pRpkts, pHdr->data_size * pHdr->num_cuda_pkts)) {
+		return l_cleanUpConn(&myconn, ERROR);
 	}
+
 
 	// check if the packet expects the response
-	if (!strm_expects_response(&myconn->strm)) {
+	if (!strm_expects_response(&myconn.strm)) {
 		// apparently this indicates that the strm doesn't expect the response
 		packet->ret_ex_val.err = 0;
-		return l_cleanUpConn(&*myconn, OK);
+		return l_cleanUpConn(&myconn, OK);
 	}
 
-	// ok now get the response
+	// so we are expecting the response; ok now get the response
 	memset(pHdr, 0, sizeof(strm_hdr_t));
 	memset(pRpkts, 0, MAX_REMOTE_BATCH_SIZE * sizeof(rpkt_t));
 
 	// recv response header for the batch
-	if (1 != get(myconn, pHdr, sizeof(strm_hdr_t))) {
-		return l_cleanUpConn(&*myconn, ERROR);
+	if (1 != get(&myconn, pHdr, sizeof(strm_hdr_t))) {
+		return l_cleanUpConn(&myconn, ERROR);
 	}
 
 	printd(DBG_DEBUG, "%s.%d: received response header. Expecting %d packets of size %u in response batch\n",
@@ -331,8 +337,8 @@ int do_cuda_rpc1(cuda_packet_t *packet) {
 	assert(pHdr->num_cuda_pkts == 1);
 
 	// recv the  response data
-	if(1 != get(myconn, pRpkts, pHdr->num_cuda_pkts * pHdr->data_size)) {
-		return l_cleanUpConn(&*myconn, ERROR);
+	if(1 != get(&myconn, pRpkts, pHdr->num_cuda_pkts * pHdr->data_size)) {
+		return l_cleanUpConn(&myconn, ERROR);
 	 }
 
 	printd(DBG_INFO, "%s.%d: Received response batch. %d packets, each size of %d.\n", __FUNCTION__, __LINE__,
@@ -349,7 +355,7 @@ int do_cuda_rpc1(cuda_packet_t *packet) {
 	memset(pHdr, 0, sizeof(strm_hdr_t));
 	memset(pRpkts, 0, MAX_REMOTE_BATCH_SIZE*sizeof(rpkt_t));
 
-	return l_cleanUpConn(&*myconn, OK);
+	return l_cleanUpConn(&myconn, OK);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -359,7 +365,7 @@ int do_cuda_rpc1(cuda_packet_t *packet) {
 // They should convert dom_info + cpkt -> remote packet stream
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int nvbackGetDeviceCount_rpc(cuda_packet_t *packet){
+int nvbackCudaGetDeviceCount_rpc(cuda_packet_t *packet){
     printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
             packet->ret_ex_val.err, packet->method_id);
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -369,9 +375,41 @@ int nvbackGetDeviceCount_rpc(cuda_packet_t *packet){
     //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     do_cuda_rpc1(packet);
 
-
-    return CUDA_SUCCESS;
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
+
+int nvbackCudaGetDeviceProperties_rpc(cuda_packet_t *packet){
+    printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+            packet->ret_ex_val.err, packet->method_id);
+
+    do_cuda_rpc1(packet);
+    return (packet->ret_ex_val.err == 0) ? OK : ERROR;
+}
+
+int nvbackCudaFree_rpc(cuda_packet_t *packet){
+
+    printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+            packet->ret_ex_val.err, packet->method_id);
+
+    do_cuda_rpc1(packet);
+
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
+int nvbackCudaMalloc_rpc(cuda_packet_t *packet){
+
+    printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+            packet->ret_ex_val.err, packet->method_id);
+    // clear the packet, we are also sending the size of
+    // the memory to allocate
+    packet->args[0].argp = NULL;
+    do_cuda_rpc1(packet);
+
+    printd(DBG_DEBUG,"%s: devPtr is %p",__FUNCTION__, packet->args[0].argp);
+
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
 
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet) {
 	// @todo currently not called
@@ -390,7 +428,7 @@ int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet) {
 // SERVER SIDE CODE
 /////////////////////////
 
-int nvbackGetDeviceCount_srv(cuda_packet_t *packet, conn_t * pConn){
+int nvbackCudaGetDeviceCount_srv(cuda_packet_t *packet, conn_t * pConn){
     int devCount = 0;
 
     // just call the function
@@ -399,7 +437,43 @@ int nvbackGetDeviceCount_srv(cuda_packet_t *packet, conn_t * pConn){
 
     printd(DBG_DEBUG, "%s.%d: CUDA_ERROR=%p for method id=%d after calling method\n",
     		__FUNCTION__, __LINE__, packet->ret_ex_val.handle, packet->method_id);
-    return CUDA_SUCCESS;
+    return OK;
+}
+
+int nvbackCudaGetDeviceProperties_srv(cuda_packet_t *packet, conn_t * pConn){
+    struct cudaDeviceProp *prop;
+
+    prop = (struct cudaDeviceProp *)&myconn.response_data_buffer;
+    myconn.response_data_size = sizeof(struct cudaDeviceProp);
+
+    packet->ret_ex_val.err = cudaGetDeviceProperties(prop, packet->args[1].argi);
+
+    // I guess you need to pack the change somehow the do_cuda_rpc1
+    // to use and send the response_data_buffer
+    printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+
+    printd(DBG_INFO, "\nDevice \"%s\"\n",  prop->name);
+
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
+int nvbackCudaMalloc_srv(cuda_packet_t * packet, conn_t * pConn){
+	// just call the function
+	packet->args[0].argp = NULL;
+
+	packet->ret_ex_val.err = cudaMalloc(&packet->args[0].argp, packet->args[1].argi);
+
+    printd(DBG_DEBUG,"%s: devPtr is %p, size %ld\n",__FUNCTION__,packet->args[0].argp, packet->args[1].argi);
+    printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d after execution\n",
+    		packet->ret_ex_val.handle, packet->method_id);
+	return OK;
+}
+
+int nvbackCudaFree_srv(cuda_packet_t *packet, conn_t *pConn){
+	printd(DBG_DEBUG,"%s: devPtr is %p\n",__FUNCTION__,packet->args[0].argp);
+    packet->ret_ex_val.err = cudaFree(packet->args[0].argp);
+    printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+    return OK;
 }
 
 int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn){

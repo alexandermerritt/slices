@@ -73,12 +73,11 @@ const char * SERVER_HOSTNAME = "cuda2.cc.gt.atl.ga.us";
  */
 int l_handleDlError() {
 	char * error; // handles error description
-	int ret = 0; // return value
+	int ret = OK; // return value
 
 	if ((error = dlerror()) != NULL) {
-		printf("%s\n", error);
-		//std::cout << error << std::endl;
-		ret = -1;
+		printf("%s.%d: %s\n", __FUNCTION__, __LINE__, error);
+		ret = ERROR;
 	}
 
 	return ret;
@@ -93,7 +92,17 @@ int l_printFuncSig(const char* pSignature) {
 	//std::cout << ">>>>>>>>>> " << pSignature << std::endl;
 	return OK;
 }
-
+/**
+ * Prints function signature; should be used for the
+ * implemented functions
+ * @param pSignature The string describing the function signature
+ * @return always true
+ */
+int l_printFuncSigImpl(const char* pSignature) {
+	printf(">>>>>>>>>> Implemented: %s\n", pSignature);
+	//std::cout << ">>>>>>>>>> " << pSignature << std::endl;
+	return OK;
+}
 /**
  * sets the method_id, thr_id, flags in the packet structure to default values
  * @param pPacket The packet to be changed
@@ -262,31 +271,34 @@ const char* cudaGetErrorString(cudaError_t error) {
 cudaError_t cudaGetDeviceCount(int *count) {
 	cuda_packet_t * pPacket;
 
+	l_printFuncSigImpl(__FUNCTION__);
+
 	// Now make a packet and send
 	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
-		return ERROR;
+		return cuda_err;
 	}
 
 	l_setMetThrReq(&pPacket, CUDA_GET_DEVICE_COUNT);
 
-
 	// send the packet
-	if(nvbackGetDeviceCount_rpc(pPacket) != CUDA_SUCCESS )
+	if(nvbackCudaGetDeviceCount_rpc(pPacket) != OK ){
 		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
-	else
-		printd(DBG_INFO, "%s.%d: the number of devices is %ld\n", __FUNCTION__, __LINE__,
+		// @todo some cleaning or setting cuda_err
+		cuda_err = cudaErrorUnknown;
+	} else {
+		printd(DBG_INFO, "%s.%d: the number of devices is %ld. Got from the RPC call\n", __FUNCTION__, __LINE__,
 				pPacket->args[0].argi);
-
-	// remember the count number what we get from the remote device
-	*count = pPacket->args[0].argi;
-	cuda_err = pPacket->ret_ex_val.err;
+		// remember the count number what we get from the remote device
+		*count = pPacket->args[0].argi;
+		cuda_err = pPacket->ret_ex_val.err;
+	}
 
 	free(pPacket);
 
 
 	// TODO call the function locally right now - it should be removed in the future
 	// when it should react appropriately and call rpc or local version.
-	l_printFuncSig(__FUNCTION__);
+
 
 	/*
 	typedef cudaError_t (* pFuncType)(int *count);
@@ -303,9 +315,63 @@ cudaError_t cudaGetDeviceCount(int *count) {
 	return cuda_err;
 }
 
-cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop,
-		int device) {
-	typedef cudaError_t (* pFuncType)(struct cudaDeviceProp *prop, int device);
+/**
+ * Prints the device properties
+ */
+int l_printCudaDeviceProp(const struct cudaDeviceProp * const pProp){
+	printd(DBG_INFO, "\nDevice \"%s\"\n",  pProp->name);
+	printd(DBG_INFO, "  CUDA Capability Major/Minor version number:    %d.%d\n", pProp->major, pProp->minor);
+	printd(DBG_INFO, "  Total amount of global memory:                 %llu bytes\n", (unsigned long long) pProp->totalGlobalMem);
+	printd(DBG_INFO, "  Multiprocessors: %d (MP) \n", pProp->multiProcessorCount);
+    printd(DBG_INFO, "  Total amount of constant memory:               %lu bytes\n", pProp->totalConstMem);
+    printd(DBG_INFO, "  Total amount of shared memory per block:       %lu bytes\n", pProp->sharedMemPerBlock);
+    printd(DBG_INFO, "  Total number of registers available per block: %d\n", pProp->regsPerBlock);
+    printd(DBG_INFO, "  Warp size:                                     %d\n", pProp->warpSize);
+    printd(DBG_INFO, "  Maximum number of threads per block:           %d\n", pProp->maxThreadsPerBlock);
+    printd(DBG_INFO, "  Maximum sizes of each dimension of a block:    %d x %d x %d\n",
+           pProp->maxThreadsDim[0],
+           pProp->maxThreadsDim[1],
+           pProp->maxThreadsDim[2]);
+    printd(DBG_INFO, "  Maximum sizes of each dimension of a grid:     %d x %d x %d\n",
+           pProp->maxGridSize[0],
+           pProp->maxGridSize[1],
+           pProp->maxGridSize[2]);
+    return OK;
+}
+
+cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
+	cuda_packet_t *pPacket;
+
+	l_printFuncSigImpl(__FUNCTION__);
+	// Now make a packet and send
+	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
+		return cuda_err;
+	}
+
+	l_setMetThrReq(&pPacket, CUDA_GET_DEVICE_PROPERTIES);
+	// override the flags
+	pPacket->flags = CUDA_request | CUDA_Copytype;
+	pPacket->args[0].argp = (void *) prop; // I do not understand why we do this
+	pPacket->args[1].argi = device;   // I understand this
+	pPacket->args[2].argi = sizeof(struct cudaDeviceProp); // for driver; I do not understand why we do this
+
+	// send the packet
+	if (nvbackCudaGetDeviceProperties_rpc(pPacket) != OK) {
+		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		// @todo some cleaning or setting cuda_err
+		cuda_err = cudaErrorUnknown;
+	} else {
+		l_printCudaDeviceProp(prop);
+		// remember the count number what we get from the remote device
+		cuda_err = pPacket->ret_ex_val.err;
+	}
+
+	free(pPacket);
+
+	return cuda_err;
+
+
+/*	typedef cudaError_t (* pFuncType)(struct cudaDeviceProp *prop, int device);
 	static pFuncType pFunc = NULL;
 
 	if (!pFunc) {
@@ -318,6 +384,7 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop,
 	l_printFuncSig(__FUNCTION__);
 
 	return (pFunc(prop, device));
+	*/
 }
 cudaError_t cudaChooseDevice(int *device,
 		const struct cudaDeviceProp *prop) {
@@ -686,6 +753,8 @@ cudaError_t cudaSetDoubleForDevice(double *d) {
 	return (pFunc(d));
 }
 cudaError_t cudaSetDoubleForHost(double *d) {
+	l_printFuncSig(__FUNCTION__);
+
 	typedef cudaError_t (* pFuncType)(double *d);
 	static pFuncType pFunc = NULL;
 
@@ -696,12 +765,38 @@ cudaError_t cudaSetDoubleForHost(double *d) {
 			return cudaErrorDL;
 	}
 
-	l_printFuncSig(__FUNCTION__);
-
 	return (pFunc(d));
 }
 // --------------------------------------------
 cudaError_t cudaMalloc(void **devPtr, size_t size) {
+	cuda_packet_t * pPacket;
+
+	l_printFuncSigImpl(__FUNCTION__);
+
+	// Now make a packet and send
+	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
+		return cuda_err;
+	}
+
+	l_setMetThrReq(&pPacket, CUDA_MALLOC);
+	pPacket->args[0].argdp = devPtr;
+	pPacket->args[1].argi = size;
+
+	if(nvbackCudaMalloc_rpc(pPacket) != OK ){
+		printd(DBG_ERROR, "%s.%d: Return from the RPC with an error\n", __FUNCTION__, __LINE__);
+		cuda_err = cudaErrorMemoryAllocation;
+		*devPtr = NULL;
+	} else {
+		printd(DBG_INFO, "%s.%d: Return from the RPC call DevPtr and size: %p\n", __FUNCTION__, __LINE__,
+				pPacket->args[0].argdp);
+		// unpack what we have got from the packet
+		*devPtr = pPacket->args[0].argp;
+		cuda_err = pPacket->ret_ex_val.err;
+	}
+
+	free(pPacket);
+
+	/*
 	typedef cudaError_t (* pFuncType)(void **devPtr, size_t size);
 	static pFuncType pFunc = NULL;
 
@@ -712,9 +807,8 @@ cudaError_t cudaMalloc(void **devPtr, size_t size) {
 			return cudaErrorDL;
 	}
 
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(devPtr, size));
+	return (pFunc(devPtr, size)); */
+	return cuda_err;
 }
 
 cudaError_t cudaMallocHost(void **ptr, size_t size) {
@@ -777,7 +871,35 @@ cudaError_t cudaMallocArray(struct cudaArray **array,
  * of this function.
  */
 cudaError_t cudaFree(void * devPtr) {
-	typedef cudaError_t (* pFuncType)(void *);
+	cuda_packet_t *pPacket;
+
+	// print the function name and the parameters
+	l_printFuncSigImpl(__FUNCTION__);
+
+	// Now make a packet and send
+	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
+		return cuda_err;
+	}
+
+	l_setMetThrReq(&pPacket, CUDA_FREE);
+	pPacket->args[0].argp = devPtr;
+
+	// send the packet
+	if(nvbackCudaFree_rpc(pPacket) != OK ){
+		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		// @todo some cleaning or setting cuda_err
+		cuda_err = cudaErrorUnknown;
+	} else {
+		printd(DBG_INFO, "%s.%d: The used pointer %p\n", __FUNCTION__, __LINE__,
+				pPacket->args[0].argp);
+		cuda_err = pPacket->ret_ex_val.err;
+	}
+
+	free(pPacket);
+
+	return cuda_err;
+
+/*	typedef cudaError_t (* pFuncType)(void *);
 	static pFuncType pFunc = NULL;
 
 	if (!pFunc) {
@@ -790,12 +912,10 @@ cudaError_t cudaFree(void * devPtr) {
 			return cudaErrorDL;
 	}
 
-	// print the function name and the parameters
-	l_printFuncSig(__FUNCTION__);
 
 	// call the function that was found by the dlsym - we hope this is
 	// the original function
-	return (pFunc(devPtr));
+	return (pFunc(devPtr)); */
 }
 
 cudaError_t cudaFreeHost(void * ptr) {

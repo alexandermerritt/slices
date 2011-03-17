@@ -23,7 +23,14 @@ int strm_full(strm_t * strm)
     return (strm->hdr.num_cuda_pkts >= strm->batch_size ? 1 : 0);
 }
 
-
+/**
+ * indicates if some data somehow needs to be transferred from the execution
+ * place (callee) to the calling (caller)
+ *
+ * @return 1 means yes, some data need to be transferred via (rsp_buffer or via
+ *          parameters)
+ *         0 it doesn't expect the response
+ */
 int strm_expects_response(strm_t *strm)
 {
     int n = strm->hdr.num_cuda_pkts;
@@ -130,7 +137,16 @@ int req_strm_has_data(strm_t * strm)
     return ret_val;
 }
 
-int rsp_strm_has_data(strm_t * strm)
+/**
+ * Checks method needs to transfer some  data in response.
+ * Apparently there is not much method that need to transfer data
+ *
+ * @param strm The stream that contains the method id to be checked
+ * @return 0 The method (therefore a strm) doesn't require the data
+ *           to be transferred in response
+ *         1 Otherwise (the data are required to be transferred)
+ */
+int rsp_strm_has_data(const strm_t * strm)
 {
     int n = strm->hdr.num_cuda_pkts;
     int method_id = strm->rpkts[n-1].method_id;
@@ -163,8 +179,19 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 
     // FIXME Use the provided function table instead of this large switch statement.
     switch (rpkt->method_id) {
+    case CUDA_MALLOC:
+    	nvbackCudaMalloc_srv(rpkt, pConn);
+    	break;
+
 	case CUDA_GET_DEVICE_COUNT:
-		nvbackGetDeviceCount_srv(rpkt, pConn);
+		nvbackCudaGetDeviceCount_srv(rpkt, pConn);
+		break;
+	case CUDA_GET_DEVICE_PROPERTIES:
+		nvbackCudaGetDeviceProperties_srv(rpkt, pConn);
+		break;
+
+	case CUDA_FREE:
+		nvbackCudaFree_srv(rpkt, pConn);
 		break;
 
 	case __CUDA_REGISTER_FAT_BINARY:
@@ -175,6 +202,7 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 		printd(DBG_ERROR, "%s: Error: Unknown method ID %d\n", __FUNCTION__, rpkt->method_id);
 		rpkt->flags = CUDA_error;
 	}
+
     if(rpkt->method_id != __CUDA_REGISTER_FAT_BINARY)
         if(0 != rpkt->ret_ex_val.err)
             printd(DBG_ERROR, "%s, Error: method returned an error\n", __FUNCTION__);

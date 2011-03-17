@@ -14,6 +14,7 @@
 # create the construction environment for building those
 import os
 					  
-nvccEnv = Environment(CC = '/opt/cuda/bin/nvcc')
+nvccEnv = Environment(CC = '/opt/cuda/bin/nvcc -g')
+#					  CCFLAGS = '-g')
 nvccEnv.Program('add', 'add.cu')
  

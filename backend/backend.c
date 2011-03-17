@@ -18,6 +18,7 @@
 #include "debug.h"
 #include "remote_packet.h"
 #include "remote_api_wrapper.h"
+#include <unistd.h>
 
 /**
  * Allocates memory for the connection
@@ -45,7 +46,7 @@ void * backend_thread(){
 	conn_t * pConnListen;
 	conn_t * pConn;
 
-	int retval = 0;
+	//int retval = 0;
 
 	// Network state
 	// FIXME cuda_bridge_request_t == cuda_packet_t == rpkt_t, this is rediculous
@@ -112,11 +113,16 @@ void * backend_thread(){
 				__FUNCTION__, __LINE__, rpkts[0].method_id, rpkts[0].args[0].argi);
 
 		// send the header about response
-		if( conn_sendCudaPktHdr(&*pConn, 1) == ERROR)
+		if( conn_sendCudaPktHdr(&*pConn, 1) == ERROR){
+			printd(DBG_INFO, "%s.%d: Error after : Sending the CUDA packet response header: Quitting ... \n",
+					__FUNCTION__, __LINE__);
 			break;
+		}
 
 		// send the response
 		if(1 != put(pConn, rpkts, hdr->num_cuda_pkts * hdr->data_size)){
+			printd(DBG_INFO, "%s.%d: Error after : Sending CUDA response packet: Quitting ... \n",
+								__FUNCTION__, __LINE__);
 			break;
 		}
 		printd(DBG_INFO, "%s.%d: Response sent.\n", __FUNCTION__, __LINE__);

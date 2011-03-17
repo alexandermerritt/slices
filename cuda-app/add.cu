@@ -24,9 +24,17 @@ int cuda_main(void) {
 	float *a_h, *a_d; // Pointer to host & device arrays
 	const int N = 10; // Number of elements in arrays
 	size_t size = N * sizeof(float);
-
+	int i;
 	int deviceCount;
+	cudaDeviceProp prop;
+
+
 	cudaGetDeviceCount(&deviceCount);
+
+	for(i = 0; i < deviceCount; i++){
+		cudaGetDeviceProperties(&prop, i);
+	}
+
 	printf("%s.%d: The number of cuda devices is %d\n", __FUNCTION__, __LINE__, deviceCount);
 
 	a_h = (float *) malloc(size); // Allocate array on host
