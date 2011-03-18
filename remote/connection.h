@@ -85,10 +85,12 @@ typedef struct connection
  * Sends the cuda packet header over the connection pConn
  * @param pConn The connection we use to send the packet
  * @param num_cuda_pkts say how many cuda packets you promise to send
+ * @param buf_size The size of the buffer (response or request)
  * @return OK if everything went ok
  *         ERROR there were problems with sending the packet of network
  */
-int conn_sendCudaPktHdr(conn_t * pConn, const uint32_t num_cuda_pkts);
+int conn_sendCudaPktHdr(conn_t * pConn, const uint32_t num_cuda_pkts, const int
+		buf_size);
 
 /**
  * Allocates the memory for the connection;

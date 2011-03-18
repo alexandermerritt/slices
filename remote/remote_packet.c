@@ -25,7 +25,12 @@ int strm_full(strm_t * strm)
 
 /**
  * indicates if some data somehow needs to be transferred from the execution
- * place (callee) to the calling (caller)
+ * place (callee) to the calling (caller); compare with
+ * rsp_strm_has_data; seems that they are doing very similar thing,
+ * although this asks about the in parameters as well,
+ * and rsp_strm_has_data tells that you should receive the
+ * extra buffer of response, not only a response
+ * via function arguments
  *
  * @return 1 means yes, some data need to be transferred via (rsp_buffer or via
  *          parameters)
@@ -165,7 +170,6 @@ int rsp_strm_has_data(const strm_t * strm)
 
     return 0;
 }
-
 
 
 

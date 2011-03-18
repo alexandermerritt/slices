@@ -22,15 +22,17 @@
  * Sends the cuda packet header over the connection pConn
  * @param pConn The connection we use to send the packet
  * @param num_cuda_pkts say how many cuda packets you promise to send
+ * @param sends the size of the buffer (response or request)
  * @return OK if everything went ok
  *         ERROR there were problems with sending the packet of network
  */
-int conn_sendCudaPktHdr(conn_t * pConn, const uint32_t num_cuda_pkts){
+int conn_sendCudaPktHdr(conn_t * pConn, const uint32_t num_cuda_pkts, const int
+		buf_size){
 	strm_hdr_t * pHdr = &pConn->strm.hdr;
 
 	// prepare data for the header
 	pHdr->num_cuda_pkts = num_cuda_pkts;
-	pHdr->data_size = sizeof(rpkt_t);
+	pHdr->data_size = buf_size;
 
 	// send request header (including data size) for the batch of remote packets
 	// 1 is the normal put exit
@@ -40,7 +42,8 @@ int conn_sendCudaPktHdr(conn_t * pConn, const uint32_t num_cuda_pkts){
 		return ERROR;
 	}
 
-	printd(DBG_DEBUG, "%s.%d: Request header sent.\n", __FUNCTION__, __LINE__);
+	printd(DBG_DEBUG, "%s.%d: Header sent: pkt_num %d, extra buffer size: %d.\n",
+			__FUNCTION__, __LINE__, pHdr->num_cuda_pkts, pHdr->data_size);
 
 	return OK;
 }

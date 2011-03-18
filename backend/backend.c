@@ -69,10 +69,17 @@ void * backend_thread(){
 	// Connection-related structures
 	hdr = &pConn->strm.hdr;
 	rpkts = pConn->strm.rpkts;   // an array of packets
+	// these are buffers for extra data transferred as
+	// a request or response (in addition to cuda_packet_t
+	// e.g. extra data are returned to cudaGetDeviceProperties
+	// i.e., the structure of the
 	reqbuf = pConn->request_data_buffer;  // an array of characters
 	rspbuf = pConn->response_data_buffer; // an array of characters
 
     while(1) {
+
+    	printd(DBG_INFO, "------------------New RPC--------------------\n");
+
 		memset(hdr, 0, sizeof(strm_hdr_t));
 		memset(rpkts, 0, MAX_REMOTE_BATCH_SIZE * sizeof(rpkt_t));
 		pConn->request_data_size = 0;
@@ -82,7 +89,7 @@ void * backend_thread(){
 		if (1 != get(pConn, hdr, sizeof(strm_hdr_t))) {
 			break;
 		}
-		printd(DBG_DEBUG, "%s.%d: received request header. Expecting  %d packets. Data size %d\n",
+		printd(DBG_DEBUG, "%s.%d: received request header. Expecting  %d packets. And extra request buffer of data size %d\n",
 						__FUNCTION__, __LINE__,  hdr->num_cuda_pkts, hdr->data_size);
 
 		if (hdr->num_cuda_pkts <= 0) {
@@ -92,13 +99,14 @@ void * backend_thread(){
 		}
 
         // Receive the entire batch.
+		// first the the packets, then the extra data (reqbuf)
 		//
 		// let's assume that we have enough space. otherwise we have a problem
 		// pConn allocates the buffers for incoming cuda packets
 		// so we should be fine
 		printd(DBG_INFO, "%s.%d: Expecting %d packets.\n", __FUNCTION__,
 				__LINE__, hdr->num_cuda_pkts);
-		if(1 != get(pConn, rpkts, hdr->num_cuda_pkts * hdr->data_size)) {
+		if(1 != get(pConn, rpkts, hdr->num_cuda_pkts * sizeof(rpkt_t))) {
 			break;
 		}
 
@@ -107,25 +115,43 @@ void * backend_thread(){
 		// execute the request
 		pkt_execute(&rpkts[0], pConn);
 
-		// @todo types are incompatible rpkts[0].args[0].argi is long
-		// whereas the argument to getDeviceCount is int
-		printd(DBG_INFO, "%s.%d: After execution method %d: %ld\n",
-				__FUNCTION__, __LINE__, rpkts[0].method_id, rpkts[0].args[0].argi);
 
-		// send the header about response
-		if( conn_sendCudaPktHdr(&*pConn, 1) == ERROR){
-			printd(DBG_INFO, "%s.%d: Error after : Sending the CUDA packet response header: Quitting ... \n",
-					__FUNCTION__, __LINE__);
-			break;
+		// we need to send the one response packet + response_buffer if any
+
+		// @todo you need to check if he method needs to send
+		// and extended response - you need to provide the right
+		// data_size
+
+		if( strm_expects_response(&pConn->strm) ){
+
+			// send the header about response
+			printd(DBG_DEBUG, "pConn->response_data_size %d\n", pConn->response_data_size);
+			if (conn_sendCudaPktHdr(&*pConn, 1, pConn->response_data_size) == ERROR) {
+				printd(DBG_INFO, "%s.%d: Error after : Sending the CUDA packet response header: Quitting ... \n",
+						__FUNCTION__, __LINE__);
+				break;
+			}
+
+			// send the response as a simple cuda packet
+			if (1 != put(pConn, rpkts, sizeof(rpkt_t))) {
+				printd(DBG_INFO, "%s.%d: Error after : Sending CUDA response packet: Quitting ... \n",
+						__FUNCTION__, __LINE__);
+				break;
+			}
+			printd(DBG_INFO, "%s.%d: Response Packet sent.\n", __FUNCTION__, __LINE__);
+
+			// send the data if have anything to send
+			if( pConn->response_data_size > 0 ){
+				if (1 != put(pConn, pConn->response_data_buffer, pConn->response_data_size)) {
+					printd(DBG_INFO, "%s.%d: Error after : Sending accompanying response data: Quitting ... \n",
+							__FUNCTION__, __LINE__);
+					break;
+				}
+				printd(DBG_INFO, "%s.%d: Response buffer sent (%d) bytes.\n",
+						__FUNCTION__, __LINE__, pConn->response_data_size);
+			}
 		}
 
-		// send the response
-		if(1 != put(pConn, rpkts, hdr->num_cuda_pkts * hdr->data_size)){
-			printd(DBG_INFO, "%s.%d: Error after : Sending CUDA response packet: Quitting ... \n",
-								__FUNCTION__, __LINE__);
-			break;
-		}
-		printd(DBG_INFO, "%s.%d: Response sent.\n", __FUNCTION__, __LINE__);
     }
 
 	conn_close(pConnListen);

@@ -27,12 +27,22 @@ int do_cuda_rpc( cuda_packet_t *packet,
 
 /**
  * executes the cuda call over the network
+ * This is the entire protocol of sending and receiving requests.
+ * Including data send as arguments, as well as extra responses
  * @param pPacket the packet that contains data to be send and executed over the
  * network
+ * @param reqbuf (in) from this buffer data are added to myconn
+ * @param reqbuf_size (in) size of the request buffer
+ * @param rspbuf (out) we copy here a response we got from the server
+ * @param rspbuf_size (out) the size of the response buffer
+ *
  * @return OK everything went OK,
  *         ERROR if something went wrong
  */
-int do_cuda_rpc1( cuda_packet_t *pPacket);
+int do_cuda_rpc1( cuda_packet_t *pPacket, void *reqbuf,
+        const int reqbuf_size,
+        void *rspbuf,
+        const int rspbuf_size);
 
 //////////////////////////
 // CLIENT SIDE FUNCTIONS

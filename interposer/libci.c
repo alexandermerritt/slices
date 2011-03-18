@@ -349,8 +349,17 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 	}
 
 	l_setMetThrReq(&pPacket, CUDA_GET_DEVICE_PROPERTIES);
-	// override the flags
-	pPacket->flags = CUDA_request | CUDA_Copytype;
+	// override the flags; just following the cudart.c
+	// guessing the CUDA_Copytype means that something needs to be copied
+	// over the network
+	pPacket->flags |= CUDA_Copytype;   // it now should be CUDA_request | CUDA_Copytype
+
+	// @todo (comment) now we are storing this into argp which is of type (void*)
+	// please not that in _rpc counterpart we will interpret this as argui
+	// which is of type uint64_t (unsigned long), actually I do not understand;
+	// I am guessing that maybe because of mixing 32bit and 64bit machines in
+	// original remote_gpu and we want to be sure that
+	// I am sticking to the original implementation
 	pPacket->args[0].argp = (void *) prop; // I do not understand why we do this
 	pPacket->args[1].argi = device;   // I understand this
 	pPacket->args[2].argi = sizeof(struct cudaDeviceProp); // for driver; I do not understand why we do this
