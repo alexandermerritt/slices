@@ -54,6 +54,8 @@ int nvbackCudaMalloc_rpc(cuda_packet_t * packet);
 int nvbackCudaFree_rpc(cuda_packet_t * packet);
 int nvbackCudaGetDeviceCount_rpc(cuda_packet_t *packet);
 int nvbackCudaGetDeviceProperties_rpc(cuda_packet_t *packet);
+int nvbackCudaSetupArgument_rpc(cuda_packet_t * packet);
+int nvbackCudaConfigureCall_rpc(cuda_packet_t *packet);
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet);
 
 /////////////////////////
@@ -63,6 +65,8 @@ int nvbackCudaMalloc_srv(cuda_packet_t * packet, conn_t * pConn);
 int nvbackCudaGetDeviceCount_srv(cuda_packet_t * packet, conn_t * pConn);
 int nvbackCudaGetDeviceProperties_srv(cuda_packet_t * packet, conn_t *pConn);
 int nvbackCudaFree_srv(cuda_packet_t * packet, conn_t * pConn);
+int nvbackCudaSetupArgument_srv(cuda_packet_t * packet, conn_t *pConn);
+int nvbackCudaConfigureCall_srv(cuda_packet_t *packet, conn_t *pConn);
 int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn);
 
 #endif

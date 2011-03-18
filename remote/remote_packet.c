@@ -198,6 +198,14 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 		nvbackCudaFree_srv(rpkt, pConn);
 		break;
 
+	case CUDA_SETUP_ARGUMENT:
+		nvbackCudaSetupArgument_srv(rpkt, pConn);
+		break;
+
+	case CUDA_CONFIGURE_CALL:
+		nvbackCudaConfigureCall_srv(rpkt, pConn);
+		break;
+
 	case __CUDA_REGISTER_FAT_BINARY:
 		__nvback_cudaRegisterFatBinary_srv(rpkt, pConn);
 		break;

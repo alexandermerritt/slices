@@ -301,7 +301,8 @@ int do_cuda_rpc1(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 			reqbuf, reqbuf_size, rspbuf, rspbuf_size);
 
 	// connect if not connected, otherwise reuse the connection
-	// if you close and open the connection, the program exits
+	// if you close and open the connection, the program exits; a kind of
+	// singleton
 	if( 0 == myconn.valid){
 		conn_connect(&myconn, REMOTE_HOSTNAME);
 		myconn.valid = 1;
@@ -314,6 +315,26 @@ int do_cuda_rpc1(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 	//pRpkts[0].ret_ex_val.data_unit = sizeof(rpkt_t);
 	pHdr->num_cuda_pkts = 1;
 
+	//if( req_strm_has_data(&myconn.strm) ){
+	if( reqbuf_size > 0) {
+		assert(reqbuf && reqbuf_size);
+		assert(reqbuf_size <= TOTAL_XFER_MAX);
+		memcpy(myconn.request_data_buffer, reqbuf, reqbuf_size);
+		printd(DBG_DEBUG, "pkts[0].ret_ex_val.data_unit = %u\n",
+				pRpkts[0].ret_ex_val.data_unit);
+		pHdr->data_size = reqbuf_size;
+
+		// @todo I changed the order in this section compared to the original
+		// version; actually I do not understand why it is done and
+		// I guess it indicates that the packet will come with extra request
+		// buffer
+		// store the size of the request buffer
+		pRpkts[0].ret_ex_val.data_unit = pHdr->data_size;
+	} else {
+		// i guess it means that we will not send an request buffer
+		pRpkts[0].ret_ex_val.data_unit = -1;
+	}
+
 	if ( conn_sendCudaPktHdr(&myconn, 1, reqbuf_size) == ERROR ){
 		return l_cleanUpConn(&myconn, ERROR);
 	}
@@ -322,14 +343,19 @@ int do_cuda_rpc1(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 	// start with  copying the packet into a contiguous space
 	memcpy(&pRpkts[0], packet, rpkt_size);
 
-	// @todo uncomment when we deal with request
-	// printd(DBG_DEBUG, "%s.%d: Send request packet %d bytes. \n", __FUNCTION__, __LINE__, pHdr->data_size);
-
 	// send the packet
 	if (1 != put(&myconn, (char *) pRpkts, pHdr->num_cuda_pkts * rpkt_size)) {
 		return l_cleanUpConn(&myconn, ERROR);
 	}
 
+	// now send the extra request buffer if any
+	if( pHdr->data_size > 0 ){
+		assert(reqbuf && reqbuf_size);
+		if(1 != put(&myconn, myconn.request_data_buffer, pHdr->data_size)) {
+			return l_cleanUpConn(&myconn, ERROR);
+		}
+		printd(DBG_DEBUG, "Request buffer sent (%d bytes).\n", pHdr->data_size);
+	}
 
 	// now check if we have some extra response data, i.e.
 	// check if the packet expects the response, i.e.,
@@ -374,7 +400,8 @@ int do_cuda_rpc1(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 	}
 
 	// check if we need to receive an extra buffer of response
-	if( rsp_strm_has_data(&myconn.strm) ){
+	//if( rsp_strm_has_data(&myconn.strm) ){
+	if( pHdr->data_size > 0 ){
 		assert(rspbuf && rspbuf_size);
 		// actually pHdr->data_size should be equal to rspbuf_size
 		assert((int) pHdr->data_size <= rspbuf_size );
@@ -453,6 +480,22 @@ int nvbackCudaMalloc_rpc(cuda_packet_t *packet){
     return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
 
+int nvbackCudaSetupArgument_rpc(cuda_packet_t *packet){
+	printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+	            packet->ret_ex_val.err, packet->method_id);
+
+	do_cuda_rpc1(packet, (void *)packet->args[0].argp, packet->args[1].argi, NULL, 0);
+
+	return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
+int nvbackCudaConfigureCall_rpc(cuda_packet_t *packet){
+    printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+            packet->ret_ex_val.err, packet->method_id);
+
+    do_cuda_rpc1(packet, NULL, 0, NULL, 0);
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
 
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet) {
 	// @todo currently not called
@@ -513,7 +556,26 @@ int nvbackCudaFree_srv(cuda_packet_t *packet, conn_t *pConn){
 	printd(DBG_DEBUG,"%s: devPtr is %p\n",__FUNCTION__,packet->args[0].argp);
     packet->ret_ex_val.err = cudaFree(packet->args[0].argp);
     printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
-    return OK;
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
+int nvbackCudaSetupArgument_srv(cuda_packet_t *packet, conn_t *pConn){
+	void *arg = (void*) ((char *)pConn->request_data_buffer + packet->ret_ex_val.data_unit);
+	packet->ret_ex_val.err = cudaSetupArgument( arg,
+	            packet->args[1].argi,
+	            packet->args[2].argi);
+    printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
+int nvbackCudaConfigureCall_srv(cuda_packet_t *packet, conn_t *pConn){
+	packet->ret_ex_val.err = cudaConfigureCall( packet->args[0].arg_dim,
+            packet->args[1].arg_dim,
+            packet->args[2].argi,
+            (cudaStream_t) packet->args[3].argi);
+
+    printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
 
 int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn){

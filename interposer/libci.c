@@ -665,7 +665,38 @@ cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start,
 // --------------------------------------------
 cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
-	typedef cudaError_t (* pFuncType)(dim3 gridDim, dim3 blockDim,
+
+	cuda_packet_t *pPacket;
+
+	l_printFuncSigImpl(__FUNCTION__);
+	// Now make a packet and send
+	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
+		return cuda_err;
+	}
+
+	l_setMetThrReq(&pPacket, CUDA_CONFIGURE_CALL);
+	pPacket->args[0].arg_dim = gridDim;
+	pPacket->args[1].arg_dim = blockDim;
+	pPacket->args[2].argi = sharedMem;
+	pPacket->args[3].arg_str = stream;
+
+	// send the packet
+	if (nvbackCudaConfigureCall_rpc(pPacket) != OK) {
+		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		// @todo some cleaning or setting cuda_err
+		cuda_err = cudaErrorUnknown;
+	} else {
+		// remember the count number what we get from the remote device
+		cuda_err = pPacket->ret_ex_val.err;
+	}
+
+	free(pPacket);
+
+	return cuda_err;
+
+
+
+/*	typedef cudaError_t (* pFuncType)(dim3 gridDim, dim3 blockDim,
 			size_t sharedMem, cudaStream_t stream);
 	static pFuncType pFunc = NULL;
 
@@ -678,13 +709,55 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 
 	l_printFuncSig(__FUNCTION__);
 
-	return (pFunc(gridDim, blockDim, sharedMem, stream));
+	return (pFunc(gridDim, blockDim, sharedMem, stream)); */
 }
 cudaError_t cudaSetupArgument(const void *arg, size_t size,
 		size_t offset) {
-	typedef cudaError_t (* pFuncType)(const void *arg, size_t size,
+	cuda_packet_t *pPacket;
+
+	l_printFuncSigImpl(__FUNCTION__);
+	// Now make a packet and send
+	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
+		return cuda_err;
+	}
+
+	l_setMetThrReq(&pPacket, CUDA_SETUP_ARGUMENT);
+	// override the flags; just following the cudart.c
+	// guessing the CUDA_Copytype means that something needs to be copied
+	// over the network
+	pPacket->flags |= CUDA_Copytype; // it now should be CUDA_request | CUDA_Copytype
+
+	// @todo (comment) now we are storing this into argp which is of type (void*)
+	// please not that in _rpc counterpart we will interpret this as argui
+	// which is of type uint64_t (unsigned long), actually I do not understand;
+	// I am guessing that maybe because of mixing 32bit and 64bit machines in
+	// original remote_gpu and we want to be sure that
+	// I am sticking to the original implementation
+
+	pPacket->args[0].argp = (void *)arg;  // argument to push for a kernel launch
+	pPacket->args[1].argi = size;
+	pPacket->args[2].argi = offset; // for driver; Offset in argument stack to push new arg
+
+	// send the packet
+	if (nvbackCudaSetupArgument_rpc(pPacket) != OK) {
+		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		// @todo some cleaning or setting cuda_err
+		cuda_err = cudaErrorUnknown;
+	} else {
+		// remember the count number what we get from the remote device
+		cuda_err = pPacket->ret_ex_val.err;
+	}
+
+	free(pPacket);
+
+	return cuda_err;
+
+
+/*	typedef cudaError_t (* pFuncType)(const void *arg, size_t size,
 			size_t offset);
 	static pFuncType pFunc = NULL;
+
+	l_printFuncSig(__FUNCTION__);
 
 	if (!pFunc) {
 		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaSetupArgument");
@@ -693,10 +766,9 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size,
 			return cudaErrorDL;
 	}
 
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(arg, size, offset));
+	return (pFunc(arg, size, offset)); */
 }
+
 cudaError_t cudaFuncSetCacheConfig(const char *func,
 		enum cudaFuncCache cacheConfig) {
 	typedef cudaError_t (* pFuncType)(const char *func,

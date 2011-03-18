@@ -52,8 +52,8 @@ void * backend_thread(){
 	// FIXME cuda_bridge_request_t == cuda_packet_t == rpkt_t, this is rediculous
 	strm_hdr_t *hdr         = NULL;
 	rpkt_t *rpkts           = NULL; // array of cuda packets
-	char *reqbuf            = NULL;
-	char *rspbuf            = NULL;
+//	char *reqbuf            = NULL;
+//	char *rspbuf            = NULL;
 
 
 	if( (pConnListen = conn_malloc(__FUNCTION__, NULL)) == NULL ) return NULL;
@@ -73,8 +73,8 @@ void * backend_thread(){
 	// a request or response (in addition to cuda_packet_t
 	// e.g. extra data are returned to cudaGetDeviceProperties
 	// i.e., the structure of the
-	reqbuf = pConn->request_data_buffer;  // an array of characters
-	rspbuf = pConn->response_data_buffer; // an array of characters
+//	reqbuf = pConn->request_data_buffer;  // an array of characters
+//	rspbuf = pConn->response_data_buffer; // an array of characters
 
     while(1) {
 
@@ -109,9 +109,21 @@ void * backend_thread(){
 		if(1 != get(pConn, rpkts, hdr->num_cuda_pkts * sizeof(rpkt_t))) {
 			break;
 		}
+		printd(DBG_INFO, "%s. %d: Received %d packets, each of size of(%lu)\n",
+				__FUNCTION__, __LINE__, hdr->num_cuda_pkts, sizeof(rpkt_t));
 
 		printd(DBG_INFO, "%s.%d: Received Method_id/Thr_id: %d, %lu.\n", __FUNCTION__,
 						__LINE__, rpkts[0].method_id, rpkts[0].thr_id);
+
+		// receiving the request buffer if any
+		if(hdr->data_size > 0){
+			if(1 != get(pConn, pConn->request_data_buffer, hdr->data_size)){
+				break;
+			}
+			printd(DBG_INFO, "%s. %d: Received request buffer (%d bytes)\n",
+					__FUNCTION__, __LINE__, hdr->data_size);
+		}
+
 		// execute the request
 		pkt_execute(&rpkts[0], pConn);
 
