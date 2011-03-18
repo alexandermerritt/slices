@@ -39,7 +39,7 @@ int do_cuda_rpc( cuda_packet_t *packet,
  * @return OK everything went OK,
  *         ERROR if something went wrong
  */
-int do_cuda_rpc1( cuda_packet_t *pPacket, void *reqbuf,
+int l_do_cuda_rpc( cuda_packet_t *pPacket, void *reqbuf,
         const int reqbuf_size,
         void *rspbuf,
         const int rspbuf_size);
