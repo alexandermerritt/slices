@@ -117,7 +117,31 @@ int l_setMetThrReq(cuda_packet_t ** const pPacket, const uint16_t methodId){
 	return OK;
 }
 
+/**
+ * sets the method_id, thr_id, flags in the packet structure to default values
+ * @param pPacket The packet to be changed
+ * @param methodId The method id you want to set
+ * @param pSignature The string describing the function signature
+ * @return OK everything is fine
+ *         ERROR there is a problem with memory and cuda error contains
+ *         the error; if calloc gave NULL
+ */
 
+int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
+		const uint16_t methodId, const char* pSignature){
+	printf(">>>>>>>>>> Implemented: %s\n", pSignature);
+
+	// Now make a packet and send
+	if ((*pPacket = callocCudaPacket(pSignature, &cuda_err)) == NULL) {
+		return ERROR;
+	}
+
+	(*pPacket)->method_id = methodId;
+	(*pPacket)->thr_id = pthread_self();
+	(*pPacket)->flags = CUDA_request;
+
+	return OK;
+}
 
 //! This appears in some values of arguments. I took this from /opt/cuda/include/cuda_runtime_api.h
 //! It looks as this comes from a default value (dv)
@@ -271,14 +295,9 @@ const char* cudaGetErrorString(cudaError_t error) {
 cudaError_t cudaGetDeviceCount(int *count) {
 	cuda_packet_t * pPacket;
 
-	l_printFuncSigImpl(__FUNCTION__);
-
-	// Now make a packet and send
-	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
+	if( l_remoteInitMetThrReq(&pPacket, CUDA_GET_DEVICE_COUNT, __FUNCTION__) == ERROR){
 		return cuda_err;
 	}
-
-	l_setMetThrReq(&pPacket, CUDA_GET_DEVICE_COUNT);
 
 	// send the packet
 	if(nvbackCudaGetDeviceCount_rpc(pPacket) != OK ){
@@ -342,13 +361,10 @@ int l_printCudaDeviceProp(const struct cudaDeviceProp * const pProp){
 cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 	cuda_packet_t *pPacket;
 
-	l_printFuncSigImpl(__FUNCTION__);
-	// Now make a packet and send
-	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
-		return cuda_err;
+	if( l_remoteInitMetThrReq(&pPacket, CUDA_GET_DEVICE_PROPERTIES, __FUNCTION__) == ERROR){
+			return cuda_err;
 	}
 
-	l_setMetThrReq(&pPacket, CUDA_GET_DEVICE_PROPERTIES);
 	// override the flags; just following the cudart.c
 	// guessing the CUDA_Copytype means that something needs to be copied
 	// over the network
@@ -668,13 +684,10 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 
 	cuda_packet_t *pPacket;
 
-	l_printFuncSigImpl(__FUNCTION__);
-	// Now make a packet and send
-	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
-		return cuda_err;
+	if( l_remoteInitMetThrReq(&pPacket, CUDA_CONFIGURE_CALL, __FUNCTION__) == ERROR){
+				return cuda_err;
 	}
 
-	l_setMetThrReq(&pPacket, CUDA_CONFIGURE_CALL);
 	pPacket->args[0].arg_dim = gridDim;
 	pPacket->args[1].arg_dim = blockDim;
 	pPacket->args[2].argi = sharedMem;
@@ -715,13 +728,10 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size,
 		size_t offset) {
 	cuda_packet_t *pPacket;
 
-	l_printFuncSigImpl(__FUNCTION__);
-	// Now make a packet and send
-	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
-		return cuda_err;
+	if( l_remoteInitMetThrReq(&pPacket, CUDA_SETUP_ARGUMENT, __FUNCTION__) == ERROR){
+				return cuda_err;
 	}
 
-	l_setMetThrReq(&pPacket, CUDA_SETUP_ARGUMENT);
 	// override the flags; just following the cudart.c
 	// guessing the CUDA_Copytype means that something needs to be copied
 	// over the network
@@ -852,14 +862,10 @@ cudaError_t cudaSetDoubleForHost(double *d) {
 cudaError_t cudaMalloc(void **devPtr, size_t size) {
 	cuda_packet_t * pPacket;
 
-	l_printFuncSigImpl(__FUNCTION__);
-
-	// Now make a packet and send
-	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
-		return cuda_err;
+	if( l_remoteInitMetThrReq(&pPacket, CUDA_MALLOC, __FUNCTION__) == ERROR){
+				return cuda_err;
 	}
 
-	l_setMetThrReq(&pPacket, CUDA_MALLOC);
 	pPacket->args[0].argdp = devPtr;
 	pPacket->args[1].argi = size;
 
@@ -954,15 +960,9 @@ cudaError_t cudaMallocArray(struct cudaArray **array,
 cudaError_t cudaFree(void * devPtr) {
 	cuda_packet_t *pPacket;
 
-	// print the function name and the parameters
-	l_printFuncSigImpl(__FUNCTION__);
-
-	// Now make a packet and send
-	if ((pPacket = callocCudaPacket(__FUNCTION__, &cuda_err)) == NULL) {
-		return cuda_err;
+	if( l_remoteInitMetThrReq(&pPacket, CUDA_FREE, __FUNCTION__) == ERROR){
+				return cuda_err;
 	}
-
-	l_setMetThrReq(&pPacket, CUDA_FREE);
 	pPacket->args[0].argp = devPtr;
 
 	// send the packet

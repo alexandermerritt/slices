@@ -249,11 +249,6 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 int nvbackCudaGetDeviceCount_rpc(cuda_packet_t *packet){
     printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
             packet->ret_ex_val.err, packet->method_id);
-    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    // originally it was called the below line, since I have trouble
-    // with running this I do this right now step by step
-    //do_cuda_rpc(packet, NULL, 0, NULL, 0);
-    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
 
     return (packet->ret_ex_val.err == 0)? OK : ERROR;
