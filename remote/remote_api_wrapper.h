@@ -19,11 +19,11 @@ extern void** __cudaRegisterFatBinary(void *fatCubin);
 ///////////////////
 // RPC CALL UTILS//
 ///////////////////
-int do_cuda_rpc( cuda_packet_t *packet,
-                 void *request_buf,
-                 int request_buf_size, 
-                 void *response_buf, 
-                 int response_buf_size);
+//int do_cuda_rpc( cuda_packet_t *packet,
+//                 void *request_buf,
+//                 int request_buf_size,
+//                 void *response_buf,
+//                 int response_buf_size);
 
 /**
  * executes the cuda call over the network
@@ -56,6 +56,8 @@ int nvbackCudaGetDeviceCount_rpc(cuda_packet_t *packet);
 int nvbackCudaGetDeviceProperties_rpc(cuda_packet_t *packet);
 int nvbackCudaSetupArgument_rpc(cuda_packet_t * packet);
 int nvbackCudaConfigureCall_rpc(cuda_packet_t *packet);
+int nvbackCudaLaunch_rpc(cuda_packet_t * packet);
+int nvbackCudaMemcpy_rpc(cuda_packet_t *packet);
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet);
 
 /////////////////////////
@@ -67,6 +69,8 @@ int nvbackCudaGetDeviceProperties_srv(cuda_packet_t * packet, conn_t *pConn);
 int nvbackCudaFree_srv(cuda_packet_t * packet, conn_t * pConn);
 int nvbackCudaSetupArgument_srv(cuda_packet_t * packet, conn_t *pConn);
 int nvbackCudaConfigureCall_srv(cuda_packet_t *packet, conn_t *pConn);
+int nvbackCudaLaunch_srv(cuda_packet_t * packet, conn_t * pConn);
+int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * pConn);
 int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn);
 
 #endif

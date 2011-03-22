@@ -206,6 +206,17 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 		nvbackCudaConfigureCall_srv(rpkt, pConn);
 		break;
 
+	case CUDA_LAUNCH:
+		nvbackCudaLaunch_srv(rpkt, pConn);
+		break;
+
+	case CUDA_MEMCPY_H2H:
+	case CUDA_MEMCPY_H2D:
+	case CUDA_MEMCPY_D2H:
+	case CUDA_MEMCPY_D2D:
+		nvbackCudaMemcpy_srv(rpkt, pConn);
+		break;
+
 	case __CUDA_REGISTER_FAT_BINARY:
 		__nvback_cudaRegisterFatBinary_srv(rpkt, pConn);
 		break;

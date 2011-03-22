@@ -31,7 +31,7 @@
 
 
 #include "local_api_wrapper.h"
-
+#include "fatcubininfo.h"   // for fatcubin_info_t
 
 //! Right now the host where we are connecting to (where clients, ie, *_rpc connects
 //! to
@@ -43,6 +43,8 @@
 //! connection the program stops to work, so you have to make it static
 static conn_t myconn;
 
+//! stores information about the fatcubin_info
+static fatcubin_info_t fatcubin_info;
 ///////////////////
 // RPC CALL UTILS//
 ///////////////////
@@ -300,7 +302,7 @@ int nvbackCudaSetupArgument_rpc(cuda_packet_t *packet){
 
 	l_do_cuda_rpc(packet, (void *)packet->args[0].argp, packet->args[1].argi, NULL, 0);
 
-	return (packet->ret_ex_val.err == 0)? OK : ERROR;
+	return (packet->ret_ex_val.err == 0) ? OK : ERROR;
 }
 
 int nvbackCudaConfigureCall_rpc(cuda_packet_t *packet){
@@ -308,7 +310,52 @@ int nvbackCudaConfigureCall_rpc(cuda_packet_t *packet){
             packet->ret_ex_val.err, packet->method_id);
 
     l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
-    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+    return (packet->ret_ex_val.err == 0) ? OK : ERROR;
+}
+
+int nvbackCudaLaunch_rpc(cuda_packet_t * packet){
+
+	printd(DBG_ERROR, "%s: FIXME!!!!!!!!!!!!! I am an ERRRRRRRRRRRRRRRRRRR%d\n",
+				__FUNCTION__, packet->method_id);
+
+	printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+	            packet->ret_ex_val.err, packet->method_id);
+
+	l_do_cuda_rpc(packet,  NULL, 0, NULL, 0);
+
+
+	return (packet->ret_ex_val.err == 0) ? OK : ERROR;
+}
+
+int nvbackCudaMemcpy_rpc(cuda_packet_t *packet){
+	// this is the kind of the original cudaMemcpy
+	int64_t kind = packet->args[3].argi;
+
+	switch(packet->args[3].argi){
+	case cudaMemcpyHostToDevice:
+		packet->method_id = CUDA_MEMCPY_H2D;
+		l_do_cuda_rpc(packet, (void *)packet->args[1].argui, packet->args[2].argi, NULL, 0);
+		break;
+	case cudaMemcpyDeviceToHost:
+		packet->method_id = CUDA_MEMCPY_D2H;
+		l_do_cuda_rpc(packet, NULL, 0, (void *)packet->args[0].argui, packet->args[2].argi);
+		break;
+	case cudaMemcpyDeviceToDevice:
+		packet->method_id = CUDA_MEMCPY_D2D;
+		packet->flags &= ~CUDA_Copytype;
+		packet->flags &= ~CUDA_Addrshared;
+		l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
+		break;
+	case cudaMemcpyHostToHost:
+		printd(DBG_ERROR, "Not implemented yet\n");
+		return ERROR;
+
+	default:
+		printd(DBG_ERROR, "Unknown memcpy value %ld\n", kind);
+		break;
+	}
+
+	return OK;
 }
 
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet) {
@@ -390,6 +437,68 @@ int nvbackCudaConfigureCall_srv(cuda_packet_t *packet, conn_t *pConn){
 
     printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
     return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
+int nvbackCudaLaunch_srv(cuda_packet_t * packet, conn_t * pConn){
+	int i;
+	const char *arg;
+
+	printd(DBG_ERROR, "%s: ***************** FIXME ***** ERROR! ********%d\n",
+			__FUNCTION__, packet->method_id);
+
+	// this is entry for the cudaLaunch
+	arg = (const char *)packet->args[0].argcp;
+
+	packet->ret_ex_val.err = cudaErrorLaunchFailure;
+
+	for(i = 0; i < fatcubin_info.num_reg_fns; ++i){
+	  if (fatcubin_info.reg_fns[i] != NULL && fatcubin_info.reg_fns[i]->hostFEaddr == arg){
+	      printd(DBG_DEBUG, "%s: function %p:%s\n", __FUNCTION__,
+	    		  fatcubin_info.reg_fns[i]->hostFEaddr,
+	    		  fatcubin_info.reg_fns[i]->hostFun);
+	      packet->ret_ex_val.err = cudaLaunch(fatcubin_info.reg_fns[i]->hostFun);
+	      break;
+	  }
+	}
+
+	printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+
+	return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
+int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
+	switch(packet->method_id){
+	//case cudaMemcpyHostToHost:
+	case CUDA_MEMCPY_H2H:
+		// TODO: Should remote GPU handle this? - good question
+		printd(DBG_WARNING, "Warning: CUDA_MEMCPY_H2H not supported\n");
+		return ERROR;
+	    //case cudaMemcpyHostToDevice:
+	case CUDA_MEMCPY_H2D:
+		printd(DBG_DEBUG, "request_data_size = %d, received count =%ld\n",
+				myconn->request_data_size, packet->args[2].argi);
+		assert(myconn->request_data_size == packet->args[2].argi);
+		packet->args[1].argui = (uint64_t)((char *)myconn->request_data_buffer + packet->ret_ex_val.data_unit);
+		break;
+		//case cudaMemcpyDeviceToHost:
+	case CUDA_MEMCPY_D2H:
+		packet->args[0].argui = (uint64_t)myconn->response_data_buffer;
+		myconn->response_data_size = packet->args[2].argi;
+		//memset(myconn->response_data_buffer, 0, TOTAL_XFER_MAX);
+		break;
+		//case cudaMemcpyDeviceToHost:
+	case CUDA_MEMCPY_D2D:
+		// both src and dst addresses on device. nothing to modify
+		break;
+	}
+
+	packet->ret_ex_val.err = cudaMemcpy( (void *)packet->args[0].argui,
+	            (void *)packet->args[1].argui,
+	            packet->args[2].argi,
+	            packet->args[3].argi);
+	printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+
+	return OK;
 }
 
 int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn){

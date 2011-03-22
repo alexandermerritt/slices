@@ -99,7 +99,7 @@ int l_printFuncSig(const char* pSignature) {
  * @return always true
  */
 int l_printFuncSigImpl(const char* pSignature) {
-	printf(">>>>>>>>>> Implemented: %s\n", pSignature);
+	printf(">>>>>>>>>> Implemented >>>>>>>>>>: %s\n", pSignature);
 	//std::cout << ">>>>>>>>>> " << pSignature << std::endl;
 	return OK;
 }
@@ -129,7 +129,7 @@ int l_setMetThrReq(cuda_packet_t ** const pPacket, const uint16_t methodId){
 
 int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
 		const uint16_t methodId, const char* pSignature){
-	printf(">>>>>>>>>> Implemented: %s\n", pSignature);
+	printf(">>>>>>>>>> Implemented >>>>>>>>>>: %s\n", pSignature);
 
 	// Now make a packet and send
 	if ((*pPacket = callocCudaPacket(pSignature, &cuda_err)) == NULL) {
@@ -387,7 +387,6 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 		cuda_err = cudaErrorUnknown;
 	} else {
 		l_printCudaDeviceProp(prop);
-		// remember the count number what we get from the remote device
 		cuda_err = pPacket->ret_ex_val.err;
 	}
 
@@ -699,7 +698,6 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
-		// remember the count number what we get from the remote device
 		cuda_err = pPacket->ret_ex_val.err;
 	}
 
@@ -754,7 +752,6 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size,
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
-		// remember the count number what we get from the remote device
 		cuda_err = pPacket->ret_ex_val.err;
 	}
 
@@ -797,7 +794,27 @@ cudaError_t cudaFuncSetCacheConfig(const char *func,
 	return (pFunc(func, cacheConfig));
 }
 cudaError_t cudaLaunch(const char *entry) {
-	typedef cudaError_t (* pFuncType)(const char *entry);
+	cuda_packet_t *pPacket;
+
+	if( l_remoteInitMetThrReq(&pPacket, CUDA_LAUNCH, __FUNCTION__) == ERROR){
+				return cuda_err;
+	}
+	pPacket->args[0].argcp = (char *)entry;
+	// send the packet
+	if (nvbackCudaLaunch_rpc(pPacket) != OK) {
+		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		// @todo some cleaning or setting cuda_err
+		cuda_err = cudaErrorUnknown;
+	} else {
+		cuda_err = pPacket->ret_ex_val.err;
+	}
+
+	free(pPacket);
+
+	return cuda_err;
+
+
+/*	typedef cudaError_t (* pFuncType)(const char *entry);
 	static pFuncType pFunc = NULL;
 
 	if (!pFunc) {
@@ -809,7 +826,7 @@ cudaError_t cudaLaunch(const char *entry) {
 
 	l_printFuncSig(__FUNCTION__);
 
-	return (pFunc(entry));
+	return (pFunc(entry)); */
 }
 cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr,
 		const char *func) {
@@ -1165,7 +1182,35 @@ cudaError_t cudaMemGetInfo(size_t *free, size_t *total) {
 
 cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 		enum cudaMemcpyKind kind) {
-	typedef cudaError_t (* pFuncType)(void *dst, const void *src, size_t count,
+	cuda_packet_t *pPacket;
+
+	// you need to setup a method id individually
+	if( l_remoteInitMetThrReq(&pPacket, ERROR, __FUNCTION__) == ERROR){
+		return cuda_err;
+	}
+
+	pPacket->args[0].argp = dst;
+	pPacket->args[1].argp = (void *)src;
+	pPacket->args[2].argi = count;
+	pPacket->args[3].argi = kind;
+	pPacket->flags |= CUDA_Copytype;
+
+	// send the packet
+	if(nvbackCudaMemcpy_rpc(pPacket) != OK ){
+		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		// @todo some cleaning or setting cuda_err
+		cuda_err = cudaErrorUnknown;
+	} else {
+		printd(DBG_INFO, "%s.%d: the number of devices is %ld. Got from the RPC call\n", __FUNCTION__, __LINE__,
+				pPacket->args[0].argi);
+		cuda_err = pPacket->ret_ex_val.err;
+	}
+
+	free(pPacket);
+
+	return cuda_err;
+
+	/* typedef cudaError_t (* pFuncType)(void *dst, const void *src, size_t count,
 			enum cudaMemcpyKind kind);
 	static pFuncType pFunc = NULL;
 
@@ -1177,7 +1222,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 	}
 	l_printFuncSig(__FUNCTION__);
 
-	return (pFunc(dst, src, count, kind));
+	return (pFunc(dst, src, count, kind)); */
 }
 
 cudaError_t cudaMemcpyToArray(struct cudaArray *dst, size_t wOffset,

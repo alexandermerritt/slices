@@ -19,24 +19,7 @@
 #include "remote_packet.h"
 #include "remote_api_wrapper.h"
 #include <unistd.h>
-
-/**
- * Allocates memory for the connection
- *
- * @param pFuncName h9olds the name of the function
- * @return the pointer to the connection, otherwise NULL
- */
-/*conn_t * mallocConn(const char * const pFuncName){
-	conn_t *pConn;
-
-	pConn = malloc(sizeof(conn_t));
-	if( mallocCheck(pConn, pFuncName, NULL) != 0){
-		pthread_exit(NULL);
-		pConn = NULL;
-	}
-
-	return pConn;
-}*/
+#include <assert.h>
 
 
 void * backend_thread(){
@@ -117,16 +100,17 @@ void * backend_thread(){
 
 		// receiving the request buffer if any
 		if(hdr->data_size > 0){
+			assert(hdr->data_size <= (unsigned int) pConn->request_data_size);
 			if(1 != get(pConn, pConn->request_data_buffer, hdr->data_size)){
 				break;
 			}
+			pConn->request_data_size = hdr->data_size;
 			printd(DBG_INFO, "%s. %d: Received request buffer (%d bytes)\n",
-					__FUNCTION__, __LINE__, hdr->data_size);
+					__FUNCTION__, __LINE__, pConn->request_data_size);
 		}
 
 		// execute the request
 		pkt_execute(&rpkts[0], pConn);
-
 
 		// we need to send the one response packet + response_buffer if any
 
@@ -163,7 +147,6 @@ void * backend_thread(){
 						__FUNCTION__, __LINE__, pConn->response_data_size);
 			}
 		}
-
     }
 
 	conn_close(pConnListen);
@@ -183,6 +166,6 @@ int main(){
 	pthread_create(&thread, NULL, &backend_thread, NULL);
 	pthread_join(thread, NULL);
 
-	printf("server thread says you bye!\n");
+	printf("server thread says you bye bye!\n");
 	return 0;
 }
