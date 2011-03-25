@@ -31,7 +31,7 @@ interposerEnv = Environment(LIBS = ['rt', 'dl'],
 					  '../include', 
 					  '../remote',
 					  '../backend'],					  
-					  CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra' ] )
+					  CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
 
 # create a regular library
 #cudaEnv.Library('libstaticciutils.a', ['libciutils.c'])
@@ -52,9 +52,13 @@ envTest = Environment(LIBS = ['cunit', 'ncurses', 'pthread'],
 					            '../include',
 					            '../remote',
 					            '../backend'],
-					  CCFLAGS = ['-Wall', '-Wextra', '-g'] )
+					  CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
 
 # libci and libciutils should be compiled earlier
 envTest.Program('testLibci', ['testLibci.c', 
+							  'libci.so' 
+							])
+							
+envTest.Program('testLibciutils', ['testLibciutils.c', 
 							  'libci.so' 
 							])

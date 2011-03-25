@@ -12,7 +12,10 @@
 #include <__cudaFatFormat.h>
 #include "packetheader.h"
 
-// Cache some useful information here
+/**
+ * For storing the number of records  for particular structures
+ * contained in the __cudaFatCubinBinaryRec
+ */
 typedef struct {
 	int nptxs;
 	int ncubs;
@@ -26,11 +29,18 @@ typedef struct {
 	int size;
 } array_int_t;
 
+/**
+ * To use it when marshaling and unmarshaling in the sent packet
+ * Should indicate the size of the following bytes
+ */
+typedef unsigned int size_pkt_field_t;
+
 int mallocCheck(const void * const p, const char * const pFuncName,
 		const char * pExtraMsg);
 
 
-int getFatRecSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t * pEntriesCache);
+int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t * pEntriesCache);
+int get_fat_rec_size(__cudaFatCudaBinary *fatCubin, cache_num_entries_t *num);
 
 __cudaFatCudaBinary * serializeFatBinary(__cudaFatCudaBinary * const pSrcFatC,
 		cache_num_entries_t * const pEntriesCache,

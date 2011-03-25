@@ -1201,8 +1201,6 @@ cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
-		printd(DBG_INFO, "%s.%d: the number of devices is %ld. Got from the RPC call\n", __FUNCTION__, __LINE__,
-				pPacket->args[0].argi);
 		cuda_err = pPacket->ret_ex_val.err;
 	}
 
@@ -2071,11 +2069,52 @@ cudaError_t cudaGetExportTable(const void **ppExportTable,
  *
  */
 void** __cudaRegisterFatBinary(void* fatC) {
+	cuda_packet_t * pPacket;
+	// here we will store the number of entries to spare counting again and again
+	// @todo might be unimportant
+	cache_num_entries_t entries_cached = {0, 0, 0, 0, 0};
+	cache_num_entries_t nent = {0, 0, 0, 0, 0};
+	// the size of the cubin
+	int fb_size;
+
+	// in fact we are allocating the contiguous area of memory that should
+	// be treated as a void*, but we want to make it look like the structure
+	// __cudaFatCudaBinary; that's why we put it as a __cudaFatCudaBinary
+	// and not *void; it will be the serialized version of fatC
+	__cudaFatCudaBinary * pSerFatC;    // a pointer to a serialized fatC
+	// the original cubin to get rid of casting to __cudaFatCudaBinary
+	__cudaFatCudaBinary * pSrcFatC = (__cudaFatCudaBinary *)fatC;
+
+	if (fatC == NULL) {
+		printd(DBG_ERROR, "%s, Null CUDA fat binary. Have to exit\n", __FUNCTION__);
+		exit(ERROR);
+	}
+
+	if( l_remoteInitMetThrReq(&pPacket, __CUDA_REGISTER_FAT_BINARY, __FUNCTION__) == ERROR){
+		exit(ERROR);
+	}
+	printd(DBG_DEBUG, "%s, FatCubin size: %d, old %d\n", __FUNCTION__,
+			getFatRecPktSize(pSrcFatC,&entries_cached ),
+			get_fat_rec_size(pSrcFatC, &nent)
+				);
+
+	/*fb_size = getFatRecPktSize(pSrcFatC, &entries_cached);
+	printd(DBG_DEBUG, "%s, FatCubin size: %d, old %d\n", __FUNCTION__, fb_size,
+			get_fat_rec_size(pSrcFatC,&nent ));
+	printd(DBG_DEBUG, "%s, entries (new,old), (%d, %d), (%d, %d), (%d,%d), (%d, %d), (%d, %d)\n",
+			__FUNCTION__, entries_cached.ncubs, nent.ncubs, entries_cached.ndebs, nent.ndebs,
+			entries_cached.nelves, nent.nelves, entries_cached.nptxs, nent.nptxs,
+			entries_cached.nrecs, nent.nrecs);
+
+	// now update the packets information
+	pPacket->flags |= CUDA_Copytype;
+	pPacket->args[0].argp = pSerFatC;
+	pPacket->args[1].argi = fb_size; */
 
 /*
 //	pPacket->thr_id = pthread_self();
 //	pPacket->args[0].argp = fatC;
-//	pPacket->args[1].argi = getFatRecSize(fatC, &entries_cached);
+//	pPacket->args[1].argi = getFatRecPktSize(fatC, &entries_cached);
 //	pPacket->flags = CUDA_request | CUDA_Copytype;
 //	pPacket->method_id = __CUDA_REGISTER_FAT_BINARY;
 
@@ -2114,7 +2153,7 @@ void** __cudaRegisterFatBinary(void* fatC) {
 
 	// @todo this should be hidden from this implementation
 	// it should go to the copyFatBinary
-	size = getFatRecSize(pSrcFatC, &nentries);
+	size = getFatRecPktSize(pSrcFatC, &nentries);
 
 	// Make it a multiple of page size
 	printd(DBG_INFO, "%s: Size is %d\n", __FUNCTION__, size);
