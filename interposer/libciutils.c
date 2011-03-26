@@ -33,31 +33,14 @@ int mallocCheck(const void * const p, const char * const pFuncName,
 	return OK;
 }
 
-
-
-
-/**
- * packs the fat cubin to the packe
- *
- * @param pFatCubin (in) the fat cubin binary to be copied; we assume that the
- *        packet
- * @param pPacket (out) the packet that will be packed in order to send it
- * 		  over
- * @return status of the operation: OK if everything went well, ERROR if something
- *        went wrong
- *
- */
-//int packFatCubin(const __cudaFatCudaBinary * pFatCubin, cuda_packet_t * pPacket){
-//	pPacket -> args[0].argp = nFatCubin;
-//
-//	nFatCubin->magic = fatCubin->magic;
-//		nFatCubin->version = fatCubin->version;
-//		nFatCubin->gpuInfoVersion = fatCubin->gpuInfoVersion ;
-//}
-
 /**
  * returns the size of the packet for the string
  * |string_length|string|NULL|
+ *
+ * Specific situations:
+ * |0|NULL|NULL|  indicates string==NULL
+ * |0|''|NULL|    indicates string=""
+ * |2|"12"|NULL|  indicates string="12"
  *
  * @param string
  * @return size of the packet for the string
@@ -82,7 +65,7 @@ inline int l_getStringPktSize(const char const * string){
  * @oaram pEntriesCache (out) the cache for storing entries about FatEntries structures
  * @return the size of the entry (including the size of the pointer to the structure)
  */
-int l_getSize__cudaFatPtxEntry(const __cudaFatPtxEntry * pEntry, cache_num_entries_t * pEntriesCache){
+int l_getSize__cudaFatPtxEntry(const __cudaFatPtxEntry * pEntry, int * pCounter){
 	// the __cudaFatPtxEntry is an array and is terminated with entries
 	// that have NULL elements
 	int size = 0;
@@ -98,7 +81,7 @@ int l_getSize__cudaFatPtxEntry(const __cudaFatPtxEntry * pEntry, cache_num_entri
 			size += l_getStringPktSize(pEntry[i].ptx);
 			i++;
 		}
-		pEntriesCache->nptxs = i;
+		*pCounter = i;
 	}
 
 	return size;
@@ -111,7 +94,7 @@ int l_getSize__cudaFatPtxEntry(const __cudaFatPtxEntry * pEntry, cache_num_entri
  * @oaram pEntriesCache (out) the cache for storing entries about FatEntries structures
  * @return the size of the entry (including the size of the pointer to the structure)
  */
-int l_getSize__cudaFatCubinEntry(const __cudaFatCubinEntry * pEntry, cache_num_entries_t * pEntriesCache){
+int l_getSize__cudaFatCubinEntry(const __cudaFatCubinEntry * pEntry, int * pCounter){
 	// the __cudaFatCubinEntry is an array and is terminated with entries
 	// that have NULL elements
 	int size = 0;
@@ -128,11 +111,10 @@ int l_getSize__cudaFatCubinEntry(const __cudaFatCubinEntry * pEntry, cache_num_e
 			i++;
 		}
 	}
-	pEntriesCache->ncubs = i;
+	*pCounter = i;
 
 	return size;
 }
-
 
 /**
  * gets the size of the packet of __cudaFatCudaBinary -> __cudaFatDebugEntry
@@ -150,7 +132,7 @@ int l_getSize__cudaFatCubinEntry(const __cudaFatCubinEntry * pEntry, cache_num_e
  * @oaram pEntriesCache (out) the cache for storing entries about FatEntries structures
  * @return the size packet entry
  */
-int l_getSize__cudaFatDebugEntry(const __cudaFatDebugEntry * pEntry, cache_num_entries_t * pEntriesCache){
+int l_getSize__cudaFatDebugEntry(__cudaFatDebugEntry * pEntry, int * pCounter){
 
 	// apparently the __cudaFatDebugEntry might be an array
 	// that's why we want to iterate through all this elements
@@ -167,7 +149,7 @@ int l_getSize__cudaFatDebugEntry(const __cudaFatDebugEntry * pEntry, cache_num_e
 		size += l_getStringPktSize(p->debug);
 		size += sizeof(p->size);
 
-		pEntriesCache->ndebs++;
+		(*pCounter) ++;
 
 		p = p->next;
 	}
@@ -176,63 +158,36 @@ int l_getSize__cudaFatDebugEntry(const __cudaFatDebugEntry * pEntry, cache_num_e
 }
 
 /**
- * gets the size of the __cudaFatCudaBinary -> __cudaFatSymbol exported; includes the
- * size of the pointer to the structure
+ * gets the size of the packet of the __cudaFatCudaBinary -> __cudaFatSymbol
+ * exported/imported;
  *
- * empirical observations suggest that exported is NULL and the original
- * implementation doesn't include that. There is some CORRECTWAY that
- * says something but if tempExp is NULL the '#else' part doesn't add any
- * extra size even for a pointer. So this implementation do something
- * similar that has been done in l_getSize__cudaFatDebugEntry, etc, i.e.
- * adds the size of the pointer and then if the pointer is not null adds
- * additional fields
+ * Again let's assume this is an array that ends with NULL symbol name
  *
- * @param pEntry (in) the entry we want to count the size of
- * @return the size of the entry (including the size of the pointer to the structure)
- */
-int l_getSize__cudaFatEntryExported(__cudaFatSymbol * pEntry){
-
-	int size = 0;
-	__cudaFatSymbol *p = pEntry;
-
-	size += sizeof( pEntry );
-
-	// @todo does this p->name != NULL condition is important?
-	// @todo in the loop we store twice the head pointer, that's my impression
-	//       but right now better store more info than less, so we leave it
-	while (p != NULL && p->name != NULL) {
-		size += sizeof(__cudaFatSymbol *);  // space to store addr
-		size += sizeof(__cudaFatSymbol);  // space to store elems at the addr
-		size += strlen(p->name) + 1;  // size of elements
-		p++;
-	}
-
-	return size;
-}
-
-/**
- * gets the size of the __cudaFatCudaBinary -> __cudaFatSymbol imported; includes the
- * size of the pointer to the structure
- *
- * @see comment to l_getSize__cudaFatEntryExported(__cudaFatSymbol*)
+ * |0|0|NULL|'1'| might indicate pEntry==NULL
+ * |1|0|NULL|NULL| might indicate pEntry!=NULL && pEntry->name == NULL
+ * |1|0|''|NULL| might indicate pEntry!=NULL && pEntry->name == ""
+ * ....
  *
  * @param pEntry (in) the entry we want to count the size of
+ * @param counter (out) a counter to count the entry symbols
  * @return the size of the entry (including the size of the pointer to the structure)
  */
-int l_getSize__cudaFatEntryImported(__cudaFatSymbol * pEntry){
-
+int l_getSize__cudaFatSymbolEntry(const __cudaFatSymbol * pEntry, int * pCounter){
 	int size = 0;
-	__cudaFatSymbol *p = pEntry;
 
-	size += sizeof( pEntry );
-	// @todo is p->name != NULL important?
-	// @todo in the loop we store twice the head pointer, that's my impression
-	//       but right now better store more info than less, so we leave it
-	while (p != NULL && p->name != NULL) {
-		size += sizeof(__cudaFatSymbol *);  // space to store addr
-		size += sizeof(__cudaFatSymbol);  // space to store elems at the addr
-		size += strlen(p -> name) + 1;  // size of elements
-		p++;
+	// to store the number of entries
+	size += sizeof(size_pkt_field_t);     // counter
+
+	if( pEntry == NULL || pEntry->name == NULL){
+		size += l_getStringPktSize(NULL);
+	} else {
+		// let's assume this is an array of symbol names ended with NULL
+		// and it is allowable that a name is NULL; but I may be wrong
+		while( pEntry->name != NULL ){
+			size += l_getStringPktSize(pEntry->name);
+			(*pCounter)++;
+			pEntry++;
+		}
 	}
 
 	return size;
@@ -246,28 +201,23 @@ int l_getSize__cudaFatEntryImported(__cudaFatSymbol * pEntry){
  * @see comment to l_getSize__cudaFatEntryExported(__cudaFatSymbol*)
  *
  * @param pEntry (in) the entry we want to count the size of
- * @oaram pEntriesCache (out) the cache for storing entries about FatEntries structures
+ * @oaram pCounter (out) the counter for the number of dependants
  * @return the size of the entry (including the size of the pointer to the structure)
  */
 int l_getSize__cudaFatBinaryEntry(__cudaFatCudaBinary * pEntry, cache_num_entries_t * pEntriesCache){
 
-	// apparently the __cudaFatDebugEntry might be an array
-	// that's why we want to iterate through all this elements
+	// do not understand this implementation, and I am following the
+	// original implementation
+	int size = sizeof(size_pkt_field_t);   // for the counter
 	int i = 0;
-	int size = 0;
 
-	size += sizeof(pEntry); // space to store addr
-
-	i = 0;
-	if (pEntry != NULL) {
+	if( pEntry != NULL ){
 		while (pEntry[i].ident != NULL) {
-			cache_num_entries_t nent = { 0, 0, 0, 0, 0 };
-			size += sizeof(__cudaFatCudaBinary );
+			cache_num_entries_t nent = { 0, 0, 0, 0, 0, 0, 0 };
 			size += getFatRecPktSize(&pEntry[i], &nent); // space to store elems at the addr
-			pEntriesCache->nrecs++;
+			pEntriesCache->ndeps++;
 			i++;
 		}
-		pEntriesCache->nrecs++;
 	}
 
 	return size;
@@ -278,46 +228,32 @@ int l_getSize__cudaFatBinaryEntry(__cudaFatCudaBinary * pEntry, cache_num_entrie
  * size of the pointer to the structure
  *
  * @todo new stuff added in comparison to cuda 1.1
+ * This is almost identical to @see l_getSize__cudaFatDebugEntry()
  *
  * @param pEntry (in) the entry we want to count the size of
  * @oaram pEntriesCache (out) the cache for storing entries about FatEntries structures
  * @return the size of the entry (including the size of the pointer to the structure)
  */
-int l_getSize__cudaFatElfEntry(const __cudaFatElfEntry * pEntry, cache_num_entries_t * pEntriesCache){
+int l_getSize__cudaFatElfEntry(__cudaFatElfEntry * pEntry, int * pCounter){
 
 	// apparently the __cudaFatElfEntry might be an array
 	// that's why we want to iterate through all this elements
-	int i = 0;
 	int size = 0;
 	__cudaFatElfEntry * p = pEntry;
 
-	size += sizeof( __cudaFatElfEntry *);  // space to store the pointer
+	// to store the number of entries
+	size += sizeof(size_pkt_field_t);
 
-	if (pEntry != NULL) {
-		// @todo it could be done recursively
+	// @todo Question: is this an array or a list (pEntry->next)? Let's assume
+	// it is a list; we might be wrong;
+	while (p != NULL) {
+		size += l_getStringPktSize(p->gpuProfileName);
+		size += l_getStringPktSize(p->elf);
+		size += sizeof(p->size);
 
-		while( p->gpuProfileName != NULL && p->elf != NULL && p->next){
-			// space to store the structure
-			size += sizeof(__cudaFatElfEntry); // space to store elements of this structure
-			// and particular elements
-			size += (strlen(p->gpuProfileName) + 1) * sizeof(char); // size of elements
-			size += (strlen(p->elf) + 1) * sizeof(char);
-			p = p->next;
-			pEntriesCache->nelves++;
-		}
-/*		while (!(pEntry[i].gpuProfileName == NULL && pEntry[i].elf == NULL)) {
-			size += sizeof(pEntry ); // space to store elems at the addr
-			//size += (strlen(pEntry[i].gpuProfileName) + 1) * sizeof(char); // size of elements
-			//size += (strlen(pEntry[i].elf) + 1) * sizeof(char);
-			// added stuff
-			//size += sizeof(pEntry);
-			//size += sizeof(pEntry->size); // sizeof(pEntry[i].size) causes seg fault; why ??????
-			pEntriesCache -> nelves++;
-			i++;
-		} */
+		(*pCounter)++;
 
-		size += sizeof( __cudaFatElfEntry);
-		pEntriesCache -> nelves++;
+		p = p->next;
 	}
 
 	return size;
@@ -342,8 +278,6 @@ int l_getSize__cudaFatElfEntry(const __cudaFatElfEntry * pEntry, cache_num_entri
  * num_of_ptx|ptx_entry1|ptx_entry2|...|ptx_entry_n|
  * num_of_cubin|cubin_entry1|cubin_entry2|cubin_entry_n|
  * ....
- *
- *
  *
  * @todo update accordingly if you change cuda version you work with
  *
@@ -380,9 +314,9 @@ int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t *
 	// we will store those characters as the size as returned by strlen
 	// then the string terminated plus NULL included (it will make simpler
 	// deserializing by strcpy
-	size += sizeof(size_pkt_field_t) + (strlen(pFatCubin->key) + 1) * sizeof(char);
-	size += sizeof(size_pkt_field_t) + (strlen(pFatCubin->ident) + 1) * sizeof(char);
-	size += sizeof(size_pkt_field_t) + (strlen(pFatCubin->usageMode) + 1) * sizeof(char);
+	size += l_getStringPktSize(pFatCubin->key);
+	size += l_getStringPktSize(pFatCubin->ident);
+	size += l_getStringPktSize(pFatCubin->usageMode);
 
 	// this probably means the information where the debug information
 	// can be found (eg. the name of the file with debug, or something)
@@ -392,49 +326,27 @@ int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t *
 	size += sizeof(pFatCubin->debugInfo);
 
 	// ptx is an array
-	size += l_getSize__cudaFatPtxEntry(pFatCubin->ptx, pEntriesCache);
+	size += l_getSize__cudaFatPtxEntry(pFatCubin->ptx, &pEntriesCache->nptxs);
 
 	// cubin is an array, actually we will treat it the same as ptx entry
-	size += l_getSize__cudaFatCubinEntry(pFatCubin->cubin, pEntriesCache);
+	size += l_getSize__cudaFatCubinEntry(pFatCubin->cubin, &pEntriesCache->ncubs);
 
+	// it looks as it can be a list, but in the past version it was an array
+	// a new fields were added in the comparison to the previous versions
+	size += l_getSize__cudaFatDebugEntry(pFatCubin->debug, &pEntriesCache->ndebs);
 
-	size += l_getSize__cudaFatDebugEntry(pFatCubin->debug, pEntriesCache);
+	// it looks as it is a list, but it was added (it was absent in the past v.)
+	// it is very similar to the debug.
+	size += l_getSize__cudaFatElfEntry(pFatCubin->elf, &pEntriesCache->nelves);
 
 	// symbol descriptor exported/imported, needed for __cudaFat binary linking
-/*	size += sizeof(pFatCubin->exported);
-	size += sizeof(pFatCubin->imported);
-	size += sizeof(pFatCubin->dependends);
-
-	size += sizeof(pFatCubin->elf);
-*/
-
-/*	size += sizeof(pFatCubin->magic);
-	size += sizeof(pFatCubin->version);
-	size += sizeof(pFatCubin->gpuInfoVersion);
-
-	// The char * are supposed to be null terminated; strlen() doesn't include null
-	size += (strlen(pFatCubin->key) + 1) * sizeof(char);  // always 1 extra for the null char
-	size += (strlen(pFatCubin->ident) + 1) * sizeof(char);
-	size += (strlen(pFatCubin->usageMode) + 1) * sizeof(char);
-
-	size += l_getSize__cudaFatPtxEntry(pFatCubin->ptx, pEntriesCache);
-	size += l_getSize__cudaFatCubinEntry(pFatCubin->cubin, pEntriesCache);
-	size += l_getSize__cudaFatDebugEntry(pFatCubin->debug, pEntriesCache);
-
-	size += sizeof(pFatCubin->debugInfo);
-	size += sizeof(pFatCubin->flags);
-
-	size += l_getSize__cudaFatEntryExported(pFatCubin->exported);
-	size += l_getSize__cudaFatEntryImported(pFatCubin->imported);
+	size += l_getSize__cudaFatSymbolEntry(pFatCubin->exported, &pEntriesCache->nexps);
+	size += l_getSize__cudaFatSymbolEntry(pFatCubin->imported, &pEntriesCache->nimps);
 
 	size += l_getSize__cudaFatBinaryEntry(pFatCubin->dependends, pEntriesCache);
-	size += sizeof(pFatCubin->characteristic);
 
-	size += l_getSize__cudaFatElfEntry(pFatCubin -> elf, pEntriesCache); */
 	return size;
 }
-
-
 
 int get_fat_rec_size(__cudaFatCudaBinary *fatCubin, cache_num_entries_t *num)
 {
@@ -442,7 +354,7 @@ int get_fat_rec_size(__cudaFatCudaBinary *fatCubin, cache_num_entries_t *num)
 	__cudaFatPtxEntry *tempPtx;
 	__cudaFatCubinEntry *tempCub;
 	__cudaFatDebugEntry *tempDeb;
-	__cudaFatElfEntry * tempElf;
+//	__cudaFatElfEntry * tempElf;
 	__cudaFatSymbol *tempExp, *tempImp;
 	__cudaFatCudaBinary *tempRec;
 
@@ -540,11 +452,11 @@ int get_fat_rec_size(__cudaFatCudaBinary *fatCubin, cache_num_entries_t *num)
 			cache_num_entries_t nent = {0};
 			size += sizeof(__cudaFatCudaBinary);
 			size += get_fat_rec_size(&tempRec[i], &nent);  // space to store elems at the addr
-			num->nrecs++;
+			num->ndeps++;
 			i++;
 		}
 		size += sizeof(__cudaFatCudaBinary);
-		num->nrecs++;
+		num->ndeps++;
 	}
 #endif
 
@@ -585,7 +497,6 @@ cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCuda
 	return packet;
 }
 
-// serialization functions
 
 // counts the new_marker; changes curr_marker and new_marker
 #define GET_LOCAL_POINTER(curr_marker, size, new_marker, dtype) { \
@@ -703,7 +614,45 @@ cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCuda
  *
  * @todo put those things into separate functions to make that function shorter
  */
-__cudaFatCudaBinary * serializeFatBinary(__cudaFatCudaBinary * const pSrcFatC,
+/**
+ * pack the fat cubin into a packet that can be transmitted
+ * over the network
+ */
+int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
+		cache_num_entries_t * const pEntriesCache){
+
+	memcpy(pFatPack, (unsigned long*)&pSrcFatC->magic, sizeof(pSrcFatC->magic));
+	pFatPack += sizeof(pSrcFatC->magic);
+	memcpy(pFatPack, (unsigned long*)&pSrcFatC->version, sizeof(pSrcFatC->version));
+	pFatPack += sizeof(pSrcFatC->version);
+	memcpy(pFatPack, (unsigned long*)&pSrcFatC->gpuInfoVersion, sizeof(pSrcFatC->gpuInfoVersion));
+	pFatPack += sizeof(pSrcFatC->gpuInfoVersion);
+	memcpy(pFatPack, (unsigned int*)&pSrcFatC->flags, sizeof(pSrcFatC->flags));
+	pFatPack += sizeof(pSrcFatC->flags);
+	memcpy(pFatPack, (unsigned int*)&pSrcFatC->characteristic, sizeof(pSrcFatC->characteristic));
+	pFatPack += sizeof(pSrcFatC->characteristic);
+
+	return OK;
+}
+
+int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack){
+
+	memcpy(&pFatC->magic, (unsigned long*)pFatPack, sizeof(pFatC->magic));
+	pFatPack += sizeof(pFatC->magic);
+	memcpy(&pFatC->version, (unsigned long*) pFatPack, sizeof(pFatC->version));
+	pFatPack += sizeof(pFatC->version);
+	memcpy(&pFatC->gpuInfoVersion, (unsigned long*) pFatPack, sizeof(pFatC->gpuInfoVersion));
+	pFatPack += sizeof(pFatC->gpuInfoVersion);
+	memcpy(&pFatC->flags, (unsigned int *) pFatPack, sizeof(pFatC->flags));
+	pFatPack += sizeof(pFatC->flags);
+	memcpy(&pFatC->characteristic, (unsigned int*) pFatPack, sizeof(pFatC->characteristic));
+	pFatPack += sizeof(pFatC->characteristic);
+
+	return OK;
+}
+
+
+__cudaFatCudaBinary * serializeFatBinary1(__cudaFatCudaBinary * const pSrcFatC,
 		cache_num_entries_t * const pEntriesCache,
 		__cudaFatCudaBinary * const pDestFatC){
 
@@ -836,13 +785,13 @@ __cudaFatCudaBinary * serializeFatBinary(__cudaFatCudaBinary * const pSrcFatC,
 	strcpy(pDestFatC->imported->name, pSrcFatC->imported->name);
 
 	GET_LOCAL_POINTER(pCurrent, len, pDestFatC->dependends, (__cudaFatCudaBinary *));
-	len = pEntriesCache->nrecs * sizeof(__cudaFatCudaBinary);
+	len = pEntriesCache->ndeps * sizeof(__cudaFatCudaBinary);
 	tempRec = pSrcFatC->dependends;
 	nTempRec = pDestFatC->dependends;
 	cache_num_entries_t nent = {0};
 	if (tempRec != NULL) {
 		// \todo This part definitely needs testing.
-		for (i = 0; i < pEntriesCache->nrecs; ++i) {
+		for (i = 0; i < pEntriesCache->ndeps; ++i) {
 			// \todo Right now, this is completely wrong. Every new
 			// element will end up overwriting the previous one bec
 			// copyFatBinary in this case does  not know where to

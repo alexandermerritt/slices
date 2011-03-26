@@ -2072,9 +2072,9 @@ void** __cudaRegisterFatBinary(void* fatC) {
 	cuda_packet_t * pPacket;
 	// here we will store the number of entries to spare counting again and again
 	// @todo might be unimportant
-	cache_num_entries_t entries_cached = {0, 0, 0, 0, 0};
-	cache_num_entries_t nent = {0, 0, 0, 0, 0};
-	// the size of the cubin
+	cache_num_entries_t entries_cached = {0, 0, 0, 0, 0, 0, 0};
+	cache_num_entries_t nent = {0, 0, 0, 0, 0, 0, 0};
+	// the size of the packet for cubin
 	int fb_size;
 
 	// in fact we are allocating the contiguous area of memory that should
@@ -2084,32 +2084,49 @@ void** __cudaRegisterFatBinary(void* fatC) {
 	__cudaFatCudaBinary * pSerFatC;    // a pointer to a serialized fatC
 	// the original cubin to get rid of casting to __cudaFatCudaBinary
 	__cudaFatCudaBinary * pSrcFatC = (__cudaFatCudaBinary *)fatC;
+	// the place where the packed fat binary will be stored
+	char * pPackedFat = NULL;
 
 	if (fatC == NULL) {
 		printd(DBG_ERROR, "%s, Null CUDA fat binary. Have to exit\n", __FUNCTION__);
 		exit(ERROR);
 	}
 
+	// allocate and initialize a packet
 	if( l_remoteInitMetThrReq(&pPacket, __CUDA_REGISTER_FAT_BINARY, __FUNCTION__) == ERROR){
 		exit(ERROR);
 	}
-	printd(DBG_DEBUG, "%s, FatCubin size: %d, old %d\n", __FUNCTION__,
-			getFatRecPktSize(pSrcFatC,&entries_cached ),
-			get_fat_rec_size(pSrcFatC, &nent)
-				);
 
-	/*fb_size = getFatRecPktSize(pSrcFatC, &entries_cached);
-	printd(DBG_DEBUG, "%s, FatCubin size: %d, old %d\n", __FUNCTION__, fb_size,
-			get_fat_rec_size(pSrcFatC,&nent ));
-	printd(DBG_DEBUG, "%s, entries (new,old), (%d, %d), (%d, %d), (%d,%d), (%d, %d), (%d, %d)\n",
-			__FUNCTION__, entries_cached.ncubs, nent.ncubs, entries_cached.ndebs, nent.ndebs,
-			entries_cached.nelves, nent.nelves, entries_cached.nptxs, nent.nptxs,
-			entries_cached.nrecs, nent.nrecs);
+	fb_size = getFatRecPktSize(pSrcFatC, &entries_cached);
+	printd(DBG_DEBUG, "%s, FatCubin size: %d\n", __FUNCTION__,
+			getFatRecPktSize(pSrcFatC,&entries_cached ));
+
+	pPackedFat = (char*) malloc(fb_size);
+	if( mallocCheck(pPackedFat, __FUNCTION__, NULL) == ERROR ){
+		exit(ERROR);
+	}
+
+	if( packFatBinary(pPackedFat, pSrcFatC, &entries_cached) == ERROR ){
+		exit(ERROR);
+	}
 
 	// now update the packets information
 	pPacket->flags |= CUDA_Copytype;
-	pPacket->args[0].argp = pSerFatC;
-	pPacket->args[1].argi = fb_size; */
+	pPacket->args[0].argp = pPackedFat;			// start of the request buffer
+	pPacket->args[1].argi = fb_size;			// the size of the request buffer
+
+	// send the packet
+	if (__nvback_cudaRegisterFatBinary(pPacket) != OK) {
+		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		// @todo some cleaning or setting cuda_err
+		cuda_err = cudaErrorUnknown;
+	} else {
+		cuda_err = pPacket->ret_ex_val.err;
+	}
+
+	free(pPacket);
+
+
 
 /*
 //	pPacket->thr_id = pthread_self();
@@ -2472,7 +2489,7 @@ void __cudaRegisterShared(void** fatCubinHandle, void** devicePtr) {
  int nptxs;
  int ncubs;
  int ndebs;
- int nrecs;
+ int ndeps;
  } cache_num_entries_t;
 
 
@@ -2575,11 +2592,11 @@ void __cudaRegisterShared(void** fatCubinHandle, void** devicePtr) {
  cache_num_entries_t nent = {0};
  size += sizeof(__cudaFatCudaBinary);
  size += get_fat_rec_size(&tempRec[i], &nent);  // space to store elems at the addr
- num->nrecs++;
+ num->ndeps++;
  i++;
  }
  size += sizeof(__cudaFatCudaBinary);
- num->nrecs++;
+ num->ndeps++;
  }
 
  size += sizeof(fatCubin->characteristic);
@@ -2717,13 +2734,13 @@ void __cudaRegisterShared(void** fatCubinHandle, void** devicePtr) {
  strcpy(nFatCubin->imported->name, fatCubin->imported->name);
  #endif
  GET_LOCAL_POINTER(curr, len, nFatCubin->dependends, (__cudaFatCudaBinary *));
- len = nentries->nrecs * sizeof(__cudaFatCudaBinary);
+ len = nentries->ndeps * sizeof(__cudaFatCudaBinary);
  tempRec = fatCubin->dependends;
  nTempRec = nFatCubin->dependends;
  cache_num_entries_t nent = {0};
  if (tempRec != NULL) {
  // \todo This part definitely needs testing.
- for (i = 0; i < nentries->nrecs; ++i) {
+ for (i = 0; i < nentries->ndeps; ++i) {
  // \todo Right now, this is completely wrong. Every new
  // element will end up overwriting the previous one bec
  // copyFatBinary in this case does  not know where to

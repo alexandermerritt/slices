@@ -20,8 +20,10 @@ typedef struct {
 	int nptxs;
 	int ncubs;
 	int ndebs;
-	int nrecs;
+	int ndeps;		// number of dependends
 	int nelves;
+	int nexps;		// number of exported
+	int nimps;		// number of imported
 } cache_num_entries_t;
 
 typedef struct {
@@ -42,9 +44,8 @@ int mallocCheck(const void * const p, const char * const pFuncName,
 int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t * pEntriesCache);
 int get_fat_rec_size(__cudaFatCudaBinary *fatCubin, cache_num_entries_t *num);
 
-__cudaFatCudaBinary * serializeFatBinary(__cudaFatCudaBinary * const pSrcFatC,
-		cache_num_entries_t * const pEntriesCache,
-		__cudaFatCudaBinary * const pDestFatC);
+int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
+		cache_num_entries_t * const pEntriesCache);
 
 cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCudaError);
 

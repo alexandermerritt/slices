@@ -355,21 +355,18 @@ int nvbackCudaMemcpy_rpc(cuda_packet_t *packet){
 		break;
 	}
 
-	return OK;
+	return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
 
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet) {
-	// @todo currently not called
 	printd(DBG_DEBUG, "%s: CUDA_ERROR=%d before RPC on method %d\n", __FUNCTION__,
 			packet->ret_ex_val.err, packet->method_id);
 
-//	do_cuda_rpc(packet, (void *) packet->args[0].argui, packet->args[1].argi,
-//			NULL, 0);
+	l_do_cuda_rpc(packet, (void *) packet->args[0].argui, packet->args[1].argi,
+			NULL, 0);
 
-	return CUDA_SUCCESS;
+	return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
-
-
 
 /////////////////////////
 // SERVER SIDE CODE
