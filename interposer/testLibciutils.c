@@ -25,8 +25,7 @@ extern int l_getSize__cudaFatCubinEntry(const __cudaFatCubinEntry * pEntry, int 
 extern int l_getSize__cudaFatDebugEntry(__cudaFatDebugEntry * pEntry, int * pCounter);
 extern int l_getSize__cudaFatElfEntry(__cudaFatElfEntry * pEntry, int * pCounter);
 extern int l_getSize__cudaFatSymbolEntry(const __cudaFatSymbol * pEntry, int * pCounter);
-// @todo check this big l_getSize__cudaFatBinary
-//extern int l_getSize__cudaFatBinaryEntry(__cudaFatCudaBinary * pEntry, cache_num_entries_t * pEntriesCache);
+extern int l_getSize__cudaFatBinaryEntry(__cudaFatCudaBinary * pEntry, cache_num_entries_t * pEntriesCache);
 
 extern int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 		cache_num_entries_t * const pEntriesCache);
@@ -49,6 +48,8 @@ extern __cudaFatElfEntry * l_unpackElf(char * pSrc, int * pOffset);
 extern int l_packSymbol(char * pDst, const __cudaFatSymbol * pEntry, int n);
 extern __cudaFatSymbol * l_unpackSymbol(char * pSrc, int * pOffset);
 
+extern int l_packDep(char * pDst, __cudaFatCudaBinary * pEntry, int n);
+extern __cudaFatCudaBinary * l_unpackDep(char * pSrc, int * pOffset);
 
 /* The suite initialization function.
  * Opens the temporary file used by the tests.
@@ -89,18 +90,18 @@ void test_l_getStringPktSize(void){
 
 	// 0. null string NULL + NULL
 	s = NULL;
-	size = sizeof(size_pkt_field_t) + (1+1) * sizeof(char);
-	CU_ASSERT( l_getStringPktSize(s) == size );
+	size = sizeof(size_pkt_field_t);
+	CU_ASSERT_EQUAL( l_getStringPktSize(s), size );
 
 	// 1. zero length string
 	s = "";
 	// "" + NULL
-	size = sizeof(size_pkt_field_t) + (1+1) *sizeof(char);
+	size = sizeof(size_pkt_field_t);
 	CU_ASSERT( l_getStringPktSize(s) == size );
 
 	// 2. regular string
 	s = "1323";
-	size = sizeof(size_pkt_field_t) + (4 + 1) * sizeof(char);
+	size = sizeof(size_pkt_field_t) + 4 * sizeof(char);
 	CU_ASSERT( l_getStringPktSize(s) == size );
 }
 
@@ -128,15 +129,15 @@ void test_l_getSize__cudaFatPtxEntry(void){
 	__cudaFatPtxEntry e2[] = { {"", ""}, {NULL, NULL}};
 	cache = 0;
 	size = sizeof(size_pkt_field_t)
-			+ sizeof(size_pkt_field_t) + 1 + 1
-			+ sizeof(size_pkt_field_t) + 1 + 1;
+			+ sizeof(size_pkt_field_t)
+			+ sizeof(size_pkt_field_t);
 	CU_ASSERT( l_getSize__cudaFatPtxEntry(e2, &cache) ==  size);
 	CU_ASSERT( 1 == cache);
 
 	// 2. put some not empty things
 	__cudaFatPtxEntry e3[] = { {"1", "12"}, {"3", "7"}, {NULL, NULL} };
 	cache = 0;
-	size = sizeof(size_pkt_field_t) + 4*sizeof(size_pkt_field_t) + (4+ 5) * sizeof(char);
+	size = sizeof(size_pkt_field_t) + 4*sizeof(size_pkt_field_t) + 5 * sizeof(char);
 	CU_ASSERT( l_getSize__cudaFatPtxEntry(e3, &cache) ==  size);
 	CU_ASSERT( 2 == cache);
 }
@@ -166,8 +167,8 @@ void test_l_getSize__cudaFatCubinEntry(void){
 	__cudaFatCubinEntry e2[] = { {"", ""}, {NULL, NULL}};
 	cache = 0;
 	size = sizeof(size_pkt_field_t)
-			+ sizeof(size_pkt_field_t) + 1 + 1
-			+ sizeof(size_pkt_field_t) + 1 + 1;
+			+ sizeof(size_pkt_field_t)
+			+ sizeof(size_pkt_field_t);
 	CU_ASSERT( l_getSize__cudaFatCubinEntry(e2, &cache) ==  size);
 	CU_ASSERT( 1 == cache);
 
@@ -176,9 +177,9 @@ void test_l_getSize__cudaFatCubinEntry(void){
 	__cudaFatCubinEntry e3[] = { {"1", "12"}, {"3", "7"}, {NULL, NULL} };
 	// 5 chars
 	cache = 0;
-	size = sizeof(size_pkt_field_t)
-			+ 4*(sizeof(size_pkt_field_t) + sizeof(char))
-			+ 5 * sizeof(char);
+	size = sizeof(size_pkt_field_t)  		// helding size
+			+ 4 * sizeof(size_pkt_field_t)  // sizes for particular strings
+			+ 5 * sizeof(char);             // total string length
 	CU_ASSERT( l_getSize__cudaFatCubinEntry(e3, &cache) ==  size);
 	CU_ASSERT( cache == 2);
 }
@@ -199,8 +200,8 @@ void test_l_getSize__cudaFatDebugEntry(void){
 	// 1a. next null, the strings null
 	cache = 0;
 	size = sizeof(size_pkt_field_t)
-		+ sizeof(size_pkt_field_t) + 1 + 1
-		+ sizeof(size_pkt_field_t) + 1 + 1 + sizeof(e[0].size);
+		+ sizeof(size_pkt_field_t)
+		+ sizeof(size_pkt_field_t) + sizeof(e[0].size);
 	CU_ASSERT( l_getSize__cudaFatDebugEntry(e, &cache) == size);
 	CU_ASSERT( 1 == cache);
 
@@ -210,8 +211,8 @@ void test_l_getSize__cudaFatDebugEntry(void){
 	e[0].next = NULL;
 	cache = 0;
 	size = sizeof(size_pkt_field_t)
-			+ sizeof(size_pkt_field_t) + 1 + 1
-			+ sizeof(size_pkt_field_t) + 1 + 1
+			+ sizeof(size_pkt_field_t)
+			+ sizeof(size_pkt_field_t)
 			+ sizeof(e[0].size);
 	CU_ASSERT( l_getSize__cudaFatDebugEntry(e, &cache) == size);
 	CU_ASSERT( 1 == cache);
@@ -222,8 +223,8 @@ void test_l_getSize__cudaFatDebugEntry(void){
 	e[0].next = NULL;
 	cache = 0;
 	size = sizeof(size_pkt_field_t) +
-		   sizeof(size_pkt_field_t) + 5 + 1 +
-		   sizeof(size_pkt_field_t) + 4 + 1 +
+		   sizeof(size_pkt_field_t) + 5  +
+		   sizeof(size_pkt_field_t) + 4  +
 		   sizeof(e[0].size);
 	CU_ASSERT( l_getSize__cudaFatDebugEntry(e, &cache) == size);
 	CU_ASSERT( 1 == cache);
@@ -232,11 +233,11 @@ void test_l_getSize__cudaFatDebugEntry(void){
 	__cudaFatDebugEntry e1[] = { {"profile", "debug", &e[0], 0}};
 
 	size =  sizeof(size_pkt_field_t) +
-			sizeof(size_pkt_field_t) + 7 + 1 +
-			sizeof(size_pkt_field_t) + 5 + 1 +
+			sizeof(size_pkt_field_t) + 7 +
+			sizeof(size_pkt_field_t) + 5 +
 			sizeof(e[1].size) +
-			sizeof(size_pkt_field_t) + 5 + 1 +
-			sizeof(size_pkt_field_t) + 4 + 1 +
+			sizeof(size_pkt_field_t) + 5 +
+			sizeof(size_pkt_field_t) + 4 +
 			sizeof(e[0].size);
 	cache = 0;
 	CU_ASSERT( l_getSize__cudaFatDebugEntry(e1, &cache) == size);
@@ -259,8 +260,8 @@ void test_l_getSize__cudaFatElfEntry(void){
 	// 1a. next null, the strings null
 	cache = 0;
 	size = sizeof(size_pkt_field_t)
-		+ sizeof(size_pkt_field_t) + 1 + 1
-		+ sizeof(size_pkt_field_t) + 1 + 1 + sizeof(e[0].size);
+		+ sizeof(size_pkt_field_t)
+		+ sizeof(size_pkt_field_t)  + sizeof(e[0].size);
 	CU_ASSERT( l_getSize__cudaFatElfEntry(e, &cache) == size);
 	CU_ASSERT( 1 == cache);
 
@@ -270,8 +271,8 @@ void test_l_getSize__cudaFatElfEntry(void){
 	e[0].next = NULL;
 	cache = 0;
 	size = sizeof(size_pkt_field_t)
-			+ sizeof(size_pkt_field_t) + 1 + 1
-			+ sizeof(size_pkt_field_t) + 1 + 1
+			+ sizeof(size_pkt_field_t)
+			+ sizeof(size_pkt_field_t)
 			+ sizeof(e[0].size);
 	CU_ASSERT( l_getSize__cudaFatElfEntry(e, &cache) == size);
 	CU_ASSERT( 1 == cache);
@@ -282,8 +283,8 @@ void test_l_getSize__cudaFatElfEntry(void){
 	e[0].next = NULL;
 	cache = 0;
 	size = sizeof(size_pkt_field_t) +
-		   sizeof(size_pkt_field_t) + 5 + 1 +
-		   sizeof(size_pkt_field_t) + 4 + 1 +
+		   sizeof(size_pkt_field_t) + 5 +
+		   sizeof(size_pkt_field_t) + 4 +
 		   sizeof(e[0].size);
 	CU_ASSERT( l_getSize__cudaFatElfEntry(e, &cache) == size);
 	CU_ASSERT( 1 == cache);
@@ -292,11 +293,11 @@ void test_l_getSize__cudaFatElfEntry(void){
 	__cudaFatElfEntry e1[] = { {"profile", "debug", &e[0], 0}};
 
 	size =  sizeof(size_pkt_field_t) +
-			sizeof(size_pkt_field_t) + 7 + 1 +
-			sizeof(size_pkt_field_t) + 5 + 1 +
+			sizeof(size_pkt_field_t) + 7  +
+			sizeof(size_pkt_field_t) + 5  +
 			sizeof(e[1].size) +
-			sizeof(size_pkt_field_t) + 5 + 1 +
-			sizeof(size_pkt_field_t) + 4 + 1 +
+			sizeof(size_pkt_field_t) + 5  +
+			sizeof(size_pkt_field_t) + 4  +
 			sizeof(e[0].size);
 	cache = 0;
 	CU_ASSERT( l_getSize__cudaFatElfEntry(e1, &cache) == size);
@@ -310,7 +311,7 @@ void test_l_getSize__cudaFatSymbolEntry(void){
 	// 0. start with NULL
 	counter = 0;
 	size =  sizeof(size_pkt_field_t)
-			+ sizeof(size_pkt_field_t)+1+1;
+			+ sizeof(size_pkt_field_t);
 	CU_ASSERT(l_getSize__cudaFatSymbolEntry(NULL, &counter) == size);
 	CU_ASSERT(0 == counter);
 
@@ -323,7 +324,7 @@ void test_l_getSize__cudaFatSymbolEntry(void){
 
 	counter = 0;
 	size = sizeof(size_pkt_field_t)   // counter
-			+ sizeof(size_pkt_field_t) + 1 + 1; // length, NULL, NULL
+			+ sizeof(size_pkt_field_t) ; // length
 	CU_ASSERT(l_getSize__cudaFatSymbolEntry(arr, &counter) == size);
 	CU_ASSERT(0 == counter);
 
@@ -332,7 +333,7 @@ void test_l_getSize__cudaFatSymbolEntry(void){
 	arr[1].name = NULL;
 	counter = 0;
 	size = sizeof(size_pkt_field_t)
-			+ sizeof(size_pkt_field_t) + 1 + 1;
+			+ sizeof(size_pkt_field_t) ;
 
 	CU_ASSERT(l_getSize__cudaFatSymbolEntry(arr, &counter) == size);
 	CU_ASSERT(1 == counter);
@@ -345,14 +346,97 @@ void test_l_getSize__cudaFatSymbolEntry(void){
 
 	counter = 0;
 	size = sizeof(size_pkt_field_t)
-			+ sizeof(size_pkt_field_t) + 1 + 1
-			+ sizeof(size_pkt_field_t) + 3 + 1
-			+ sizeof(size_pkt_field_t) + 1 + 1;
+			+ sizeof(size_pkt_field_t) + 1
+			+ sizeof(size_pkt_field_t) + 3
+			+ sizeof(size_pkt_field_t) + 1 ;
 	CU_ASSERT(l_getSize__cudaFatSymbolEntry(arr, &counter) == size);
 	CU_ASSERT(3 == counter);
 
 	free(arr);
 }
+
+void test_l_getSize__cudaFatBinaryEntry(void){
+	cache_num_entries_t cache = {0, 0, 0, 0, 0, 0, 0};
+		int size;
+	__cudaFatCudaBinary b[2];
+
+	__cudaFatPtxEntry ptx1[] = { { "1", "p" }, { NULL, NULL } }; // 1s + 2s + 2
+	__cudaFatCubinEntry cubin1[] = { { "p", "c" }, { NULL, NULL } }; // 1s + 2s + 2
+	__cudaFatDebugEntry debug1[] = { { "p", "d", NULL, 1 } }; // 1s + 2s + 2 + int
+	__cudaFatElfEntry elf1[] = { { "p", "e", NULL, 1 } }; // 1s + 2s + 2 + int
+	__cudaFatSymbol sym1[] = { { "s" }, { NULL } }; // 1s + 1s + 1
+
+	__cudaFatPtxEntry ptx2[] = { { "2", "2" }, { NULL, NULL } };
+	__cudaFatCubinEntry cubin2[] = { { "2", "2" }, { NULL, NULL } };
+	__cudaFatDebugEntry debug2[] = { { "2", "2", NULL, 1 } };
+	__cudaFatElfEntry elf2[] = { { "2", "2", NULL, 1 } };
+	__cudaFatSymbol sym2[] = { { "s" }, { NULL } };
+
+	// 0
+	b[0].magic = 1;
+	b[0].version = 2;
+	b[0].gpuInfoVersion = 3;
+	b[0].flags = 1;
+	b[0].characteristic = 2;
+	b[0].key = "key";
+	b[0].ident = "ident";
+	b[0].usageMode = "usageMode";
+	b[0].debugInfo = &cache;
+	b[0].ptx = ptx1;
+	b[0].cubin = cubin1;
+	b[0].debug = debug1;
+	b[0].elf = elf1;
+	b[0].exported = sym1;
+	b[0].imported = sym1;
+	b[0].dependends = &b[1];
+
+	// 1
+	b[1].magic = 1;
+	b[1].version = 2;
+	b[1].gpuInfoVersion = 3;
+	b[1].flags = 1;
+	b[1].characteristic = 2;
+	b[1].key = "key";
+	b[1].ident = "ident";
+	b[1].usageMode = "usageMode";
+	b[1].debugInfo = &cache;
+	b[1].ptx = ptx2;
+	b[1].cubin = cubin2;
+	b[1].debug = debug2;
+	b[1].elf = elf2;
+	b[1].exported = sym2;
+	b[1].imported = sym2;
+	b[1].dependends = NULL;
+
+	size = l_getSize__cudaFatBinaryEntry(&b[0], &cache);
+
+	int expected = 3 * sizeof(unsigned long) +  // magic, version, gpuversion
+			2 * sizeof(unsigned int) + // flags, characteristic
+			3 * sizeof(size_pkt_field_t) + 17 + // key, indent, usageMode
+			sizeof(void*) + // debugInfo
+			sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2 // ptx
+			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2 // cubin
+			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2  + sizeof(unsigned int) // debug
+			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2  + sizeof(unsigned int) // elf
+			+ sizeof(size_pkt_field_t) + sizeof(size_pkt_field_t) + 1 // exported
+			+ sizeof(size_pkt_field_t) + sizeof(size_pkt_field_t) + 1 // imported
+
+			+ sizeof(size_pkt_field_t)  // how many dependends
+			+ 3 * sizeof(unsigned long)   // magic, version, gpuversion
+			+ 2 * sizeof(unsigned int)  // flags, characteristic
+			+ 3 * sizeof(size_pkt_field_t) + 17  // key, indent, usageMode
+			+ sizeof(void*)  // debugInfo
+			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2 // ptx
+			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2 // cubin
+			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2  + sizeof(unsigned int) // debug
+			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2  + sizeof(unsigned int) // elf
+			+ sizeof(size_pkt_field_t) + sizeof(size_pkt_field_t) + 1 // exported
+			+ sizeof(size_pkt_field_t) + sizeof(size_pkt_field_t) + 1 // imported
+			;
+
+	CU_ASSERT_EQUAL(size, expected);
+}
+
 
 void test_l_packUnpackStr(void){
 	char arr[20];
@@ -592,9 +676,174 @@ void test_l_packUnpackSymbol(void){
 	free(unpack);
 }
 
+void test_l_packUnpackDeb(){
+	cache_num_entries_t cache = {0, 0, 0, 0, 0, 0, 0};
+	int size;
+	__cudaFatCudaBinary b[2];
+	__cudaFatCudaBinary u;
+
+	__cudaFatPtxEntry ptx1[] = { {"p1", "ptx1"},{NULL, NULL}};
+	__cudaFatCubinEntry cubin1[] = { {"p1", "cubin1"}, {NULL, NULL}};
+	__cudaFatDebugEntry debug1[] = { {"p1", "debug1", NULL, 1} };
+	__cudaFatElfEntry elf1[] = { {"p1", "elf1", NULL, 1}};
+	__cudaFatSymbol sym1[] = {{"s1"}, {"sym1"}, {NULL}};
+
+/*	__cudaFatPtxEntry ptx2[] = { {"p2", "ptx2"},{NULL, NULL}};
+	__cudaFatCubinEntry cubin2[] = { {"p2", "cubin2"}, {NULL, NULL}};
+	__cudaFatDebugEntry debug2[] = { {"p2", "debug2", NULL, 1} };
+	__cudaFatElfEntry elf2[] = { {"p2", "elf2", NULL, 1}};
+	__cudaFatSymbol sym2[] = {{"s2"}, {"sym2"}, {NULL}};
+*/
+	// 0
+	b[0].magic = 1;
+	b[0].version = 2;
+	b[0].gpuInfoVersion = 3;
+	b[0].flags =1;
+	b[0].characteristic = 2;
+	b[0].key = "key";
+	b[0].ident = "ident";
+	b[0].usageMode = "usageMode";
+
+	b[0].debugInfo = &cache;
+
+	b[0].ptx = ptx1;
+	b[0].cubin = cubin1;
+	b[0].debug = debug1;
+	b[0].elf = elf1;
+	b[0].exported = sym1;
+	b[0].imported = sym1;
+	b[0].dependends = &b[1];
+
+	// @todo right now only NULL dependends supported
+	b[0].dependends = NULL;
+
+/* @todo uncomment when dependends will be supported
+	// 1
+	b[1].magic = 1;
+	b[1].version = 2;
+	b[1].gpuInfoVersion = 3;
+	b[1].flags =1;
+	b[1].characteristic = 2;
+	b[1].key = "key";
+	b[1].ident = "ident";
+	b[1].usageMode = "usageMode";
+
+	b[1].debugInfo = &cache;
+
+	b[1].ptx = ptx2;
+	b[1].cubin = cubin2;
+	b[1].debug = debug2;
+	b[1].elf = elf2;
+	b[1].exported = sym2;
+	b[1].imported = sym2;
+	b[1].dependends = NULL;
+*/
+	// reserve the right amount of memory
+	size = getFatRecPktSize(&b[0], &cache);
+	char * pPacket = malloc(size);
+
+	CU_ASSERT_NOT_EQUAL(packFatBinary(pPacket, &b[0], &cache), ERROR);
+
+	CU_ASSERT_NOT_EQUAL(unpackFatBinary(&u,pPacket), ERROR );
+
+	CU_ASSERT_EQUAL(u.magic, b[0].magic);
+	CU_ASSERT_EQUAL(u.version, b[0].version);
+	CU_ASSERT_EQUAL(u.gpuInfoVersion, b[0].gpuInfoVersion);
+	CU_ASSERT_EQUAL(u.flags,  b[0].flags);
+	CU_ASSERT_EQUAL(u.characteristic, b[0].characteristic);
+	CU_ASSERT_NSTRING_EQUAL(u.key, "key", 3);
+	CU_ASSERT_NSTRING_EQUAL(u.ident, "ident", 5);
+	CU_ASSERT_NSTRING_EQUAL(u.usageMode, "usageMode", 9);
+
+	// ptx
+	CU_ASSERT_NSTRING_EQUAL(u.ptx->gpuProfileName, "p1", 2);
+	CU_ASSERT_NSTRING_EQUAL(u.ptx->ptx, "ptx1", 4);
+	CU_ASSERT( u.ptx[1].gpuProfileName == NULL);
+	CU_ASSERT( u.ptx[1].ptx == NULL);
+
+	// cubin
+	CU_ASSERT_NSTRING_EQUAL(u.cubin->gpuProfileName, "p1", 2);
+	CU_ASSERT_NSTRING_EQUAL(u.cubin->cubin, "cubin1", 6);
+	CU_ASSERT( u.cubin[1].gpuProfileName == NULL);
+	CU_ASSERT( u.cubin[1].cubin == NULL);
+
+	// debug
+	CU_ASSERT_NSTRING_EQUAL(u.debug->gpuProfileName, "p1", 2);
+	CU_ASSERT_NSTRING_EQUAL(u.debug->debug, "debug1", 6);
+	CU_ASSERT_EQUAL(u.debug->size, 1);
+	CU_ASSERT_PTR_EQUAL(u.debug->next, NULL);
+
+	// elf
+	CU_ASSERT_NSTRING_EQUAL(u.elf->gpuProfileName, "p1", 2);
+	CU_ASSERT_NSTRING_EQUAL(u.elf->elf, "elf1", 4);
+	CU_ASSERT_EQUAL(u.elf->size, 1);
+	CU_ASSERT_PTR_EQUAL(u.elf->next, NULL);
+
+	// exported
+	CU_ASSERT_NSTRING_EQUAL(u.exported->name, "s1", 2);
+	CU_ASSERT_NSTRING_EQUAL(u.exported[1].name, "sym1", 4);
+	CU_ASSERT( u.exported[2].name == NULL);
+
+	// imported
+	CU_ASSERT_NSTRING_EQUAL(u.imported->name, "s1", 7);
+	CU_ASSERT_NSTRING_EQUAL(u.imported[1].name, "sym1", 4);
+	CU_ASSERT( u.imported[2].name == NULL);
+
+	CU_ASSERT_PTR_EQUAL(u.dependends, NULL);
+/* @todo uncomment when dependent implemented
+ 	// now the second dependent
+	CU_ASSERT_PTR_NOT_EQUAL(u.dependends, NULL);
+
+	CU_ASSERT_EQUAL(u.dependends->magic, b[1].magic);
+	CU_ASSERT_EQUAL(u.dependends->version, b[1].version);
+	CU_ASSERT_EQUAL(u.dependends->gpuInfoVersion, b[1].gpuInfoVersion);
+	CU_ASSERT_EQUAL(u.dependends->flags, b[1].flags);
+	CU_ASSERT_EQUAL(u.dependends->characteristic, b[1].characteristic);
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->key, "key", 3);
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->ident, "ident", 5);
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->usageMode, "usageMode", 9);
+
+	// ptx
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->ptx->gpuProfileName, "p2", 2);
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->ptx->ptx, "ptx2", 4);
+	CU_ASSERT( u.dependends->ptx[1].gpuProfileName == NULL);
+	CU_ASSERT( u.dependends->ptx[1].ptx == NULL);
+
+	// cubin
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->cubin->gpuProfileName, "p2", 2);
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->cubin->cubin, "cubin2", 6);
+	CU_ASSERT( u.dependends->cubin[1].gpuProfileName == NULL);
+	CU_ASSERT( u.dependends->cubin[1].cubin == NULL);
+
+	// debug
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->debug->gpuProfileName, "p2", 2);
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->debug->debug, "debug2", 6);
+	CU_ASSERT_EQUAL(u.dependends->debug->size, 1);
+	CU_ASSERT_PTR_EQUAL(u.dependends->debug->next, NULL);
+
+	// elf
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->elf->gpuProfileName, "p2", 2);
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->elf->elf, "elf2", 4);
+	CU_ASSERT_EQUAL(u.dependends->elf->size, 1);
+	CU_ASSERT_PTR_EQUAL(u.dependends->elf->next, NULL);
+
+	// exported
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->exported->name, "s2", 2);
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->exported[1].name, "sym2", 4);
+	CU_ASSERT( u.dependends->exported[2].name == NULL);
+
+	// imported
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->imported->name, "s2", 7);
+	CU_ASSERT_NSTRING_EQUAL(u.dependends->imported[1].name, "sym2", 4);
+	CU_ASSERT( u.dependends->imported[2].name == NULL);
+
+	CU_ASSERT_PTR_EQUAL(u.dependends->dependends, NULL); */
+}
+
 void test_packunpack(void){
 	__cudaFatCudaBinary b, u;
-	cache_num_entries_t cache;
+	cache_num_entries_t cache = {0, 0, 0, 0, 0, 0, 0};
+	int size = 0;
 
 	__cudaFatPtxEntry ptx[] = { {"gpuProf", "ptx"},{NULL, NULL}};
 	__cudaFatCubinEntry cubin[] = { {"profiler", "cubin"}, {NULL, NULL}};
@@ -621,16 +870,19 @@ void test_packunpack(void){
 	b.imported = sym;
 	b.dependends = NULL;
 
-	// this should be counted by getFatBinarySize()
-	cache.nptxs = 1;
-	cache.ncubs = 1;
-	cache.ndebs = 1;
-	cache.nexps = 2;
-	cache.nimps = 2;
-	cache.ndeps = 0;
-	cache.nelves = 1;
+	// reserve the right amount of memory
+	size = getFatRecPktSize(&b, &cache);
+	char * pPacket = malloc(size);
 
-	char * pPacket = malloc(sizeof(__cudaFatCudaBinary));
+	CU_ASSERT_EQUAL(cache.nptxs, 1);
+	CU_ASSERT_EQUAL(cache.ncubs, 1);
+	CU_ASSERT_EQUAL(cache.ndebs, 1);
+	CU_ASSERT_EQUAL(cache.nexps, 2);
+	CU_ASSERT_EQUAL(cache.nimps, 2);
+	CU_ASSERT_EQUAL(cache.ndeps, 0);
+	CU_ASSERT_EQUAL(cache.nelves, 1);
+
+
 	CU_ASSERT_NOT_EQUAL(packFatBinary(pPacket, &b, &cache), ERROR);
 
 	CU_ASSERT_NOT_EQUAL(unpackFatBinary(&u,pPacket), ERROR );
@@ -681,8 +933,10 @@ void test_packunpack(void){
 	CU_ASSERT_NSTRING_EQUAL(u.imported[1].name, "sym2", 4);
 	CU_ASSERT( u.imported[2].name == NULL);
 
+	// dependends
+	CU_ASSERT(NULL == u.dependends);
 
-	free(u.key);
+/*	free(u.key);
 	free(u.ident);
 	free(u.usageMode);
 
@@ -706,7 +960,7 @@ void test_packunpack(void){
 	free(u.exported[1].name);
 
 	free(u.imported->name);
-	free(u.imported[1].name);
+	free(u.imported[1].name); */
 
 	free(pPacket);
 }
@@ -737,7 +991,8 @@ int main()
         (NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatCubinEntry", test_l_getSize__cudaFatCubinEntry)) ||
         (NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatDebugEntry", test_l_getSize__cudaFatDebugEntry)) ||
         (NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatElfEntry", test_l_getSize__cudaFatElfEntry)) ||
-        (NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatSymbolEntry", test_l_getSize__cudaFatSymbolEntry)) ){
+        (NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatSymbolEntry", test_l_getSize__cudaFatSymbolEntry)) ||
+        (NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatBinaryEntry", test_l_getSize__cudaFatBinaryEntry)) ){
       CU_cleanup_registry();
       return CU_get_error();
    }
@@ -754,6 +1009,7 @@ int main()
 		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackDebug", test_l_packUnpackDebug)) ||
 		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackElf", test_l_packUnpackElf)) ||
 		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackSymbol", test_l_packUnpackSymbol)) ||
+		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackDeb", test_l_packUnpackDeb)) ||
 		(NULL == CU_add_test(pSuitePack, "test of test_packunpack", test_packunpack))
 		)
    {

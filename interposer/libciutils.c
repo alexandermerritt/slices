@@ -36,12 +36,12 @@ int mallocCheck(const void * const p, const char * const pFuncName,
 
 /**
  * returns the size of the packet for the string
- * |string_length|string|NULL|
+ * |string_length|string|
  *
  * Specific situations:
- * |0|NULL|NULL|  indicates string==NULL
- * |0|''|NULL|    indicates string=""
- * |2|"12"|NULL|  indicates string="12"
+ * |0|NULL|  indicates string==NULL
+ * |0|''|    indicates string=""
+ * |2|"12"|  indicates string="12"
  *
  * @param string
  * @return size of the packet for the string
@@ -49,10 +49,8 @@ int mallocCheck(const void * const p, const char * const pFuncName,
 inline int l_getStringPktSize(const char const * string){
 	int size = sizeof(size_pkt_field_t);
 
-	size += sizeof(char); // for NULL termination
-
 	if( string == NULL || strlen(string) == 0)
-		size += sizeof(char);
+		return size;
 	else
 		size += strlen(string) * sizeof(char);
 
@@ -194,6 +192,8 @@ int l_getSize__cudaFatSymbolEntry(const __cudaFatSymbol * pEntry, int * pCounter
 	return size;
 }
 
+int l_getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t * pEntriesCache);
+
 /**
  * gets the size of the __cudaFatCudaBinary -> __cudaFatCubinEntry; includes the
  * size of the pointer to the structure
@@ -210,15 +210,13 @@ int l_getSize__cudaFatBinaryEntry(__cudaFatCudaBinary * pEntry, cache_num_entrie
 	// do not understand this implementation, and I am following the
 	// original implementation
 	int size = sizeof(size_pkt_field_t);   // for the counter
-	int i = 0;
+	__cudaFatCudaBinary * p = pEntry;
 
-	if( pEntry != NULL ){
-		while (pEntry[i].ident != NULL) {
-			cache_num_entries_t nent = { 0, 0, 0, 0, 0, 0, 0 };
-			size += getFatRecPktSize(&pEntry[i], &nent); // space to store elems at the addr
-			pEntriesCache->ndeps++;
-			i++;
-		}
+	while( p != NULL ){
+		cache_num_entries_t nent = { 0, 0, 0, 0, 0, 0, 0 };
+		size += l_getFatRecPktSize(p, &nent);
+		pEntriesCache->ndeps++;
+		p = p->dependends;
 	}
 
 	return size;
@@ -273,12 +271,13 @@ int l_getSize__cudaFatElfEntry(__cudaFatElfEntry * pEntry, int * pCounter){
  * in particular fields they stored the offsets in the packet that is
  * sent over somewhere. My approach is different:
  * |magic|version|gpuInfoVersion|flags|characteristics|
- * size_of_key|key ....|NULL|size_of_indent|indent ...|NULL|
- * size_of_usageMode|usageMode ....|NULL|
+ * size_of_key|key ....|size_of_indent|indent ...|
+ * size_of_usageMode|usageMode ....|
  * debugInfo|
  * num_of_ptx|ptx_entry1|ptx_entry2|...|ptx_entry_n|
  * num_of_cubin|cubin_entry1|cubin_entry2|cubin_entry_n|
  * ....
+ * num_of_deps|dep_entry1|dep_entry2|... |dep_entry_n|
  *
  * @todo update accordingly if you change cuda version you work with
  *
@@ -287,7 +286,7 @@ int l_getSize__cudaFatElfEntry(__cudaFatElfEntry * pEntry, int * pCounter){
  * @return the size of the fatcubin
  *
  */
-int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t * pEntriesCache){
+int l_getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t * pEntriesCache){
 
 	int size = 0;
 
@@ -344,6 +343,13 @@ int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t *
 	size += l_getSize__cudaFatSymbolEntry(pFatCubin->exported, &pEntriesCache->nexps);
 	size += l_getSize__cudaFatSymbolEntry(pFatCubin->imported, &pEntriesCache->nimps);
 
+	return size;
+}
+
+int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t * pEntriesCache){
+	int size = 0;
+
+	size = l_getFatRecPktSize(pFatCubin, pEntriesCache);
 	size += l_getSize__cudaFatBinaryEntry(pFatCubin->dependends, pEntriesCache);
 
 	return size;
@@ -1096,6 +1102,9 @@ __cudaFatSymbol * l_unpackSymbol(char * pSrc, int * pOffset){
 	return pEntry;
 }
 
+int l_packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
+		cache_num_entries_t * const pEntriesCache);
+
 /**
  * writes the entry to the pDst address and returns the
  * number of bytes written.
@@ -1109,7 +1118,8 @@ __cudaFatSymbol * l_unpackSymbol(char * pSrc, int * pOffset){
  * @return number of char (bytes) written so, you can
  *         update the pDst pointer
  *         ERROR if pDst is NULL
- *
+ * @todo Right now we do not support the dependends - dependends should
+ * be NULL.
  */
 int l_packDep(char * pDst, __cudaFatCudaBinary * pEntry, int n){
 	// to remember the offset
@@ -1122,19 +1132,27 @@ int l_packDep(char * pDst, __cudaFatCudaBinary * pEntry, int n){
 	if( NULL == pDst )
 		return ERROR;
 
-	// write the number of ptx entries
+	// write the number of deb entries
 	memcpy(pDst, &n, sizeof(size_pkt_field_t) );
 	pDst += sizeof(size_pkt_field_t);
 
 	if( 0 == n || NULL == pEntry ){
 		return pDst - pDstOrig;
+	} else {
+		// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		// @todo should be addressed appropriately
+		// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		return ERROR;
 	}
 
 	// now write the entries
 	p = pEntry;
 	while( p ){
+		// @todo actually you have to have an array of caches for
+		// each dependend otherwise you need to do it differently here
+		// so let's assume that there is no dependendants right now
 		cache_num_entries_t cache = { 0, 0, 0, 0, 0, 0, 0 };
-		offset = packFatBinary(pDst,  p, &cache);
+		offset = l_packFatBinary(pDst,  p, &cache);
 		if( ERROR == offset )
 			return ERROR;
 		pDst += offset;
@@ -1200,6 +1218,7 @@ __cudaFatCudaBinary * l_unpackDep(char * pSrc, int * pOffset){
 	return pEntry;
 }
 
+
 /**
  * pack the fat cubin into a packet that can be transmitted
  * over the network
@@ -1211,6 +1230,23 @@ __cudaFatCudaBinary * l_unpackDep(char * pSrc, int * pOffset){
  *         ERROR if there was an error
  */
 int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
+		cache_num_entries_t * const pEntriesCache){
+	// to enabling counting the offset
+	char * pFatPackOrig = pFatPack;
+	int offset = 0;
+
+	// pack everything apart from dependends
+	offset = l_packFatBinary(pFatPack, pSrcFatC, pEntriesCache);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	// pack dependends
+	offset = l_packDep(pFatPack, pSrcFatC->dependends, pEntriesCache->ndeps);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	return pFatPack - pFatPackOrig;
+}
+
+int l_packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 		cache_num_entries_t * const pEntriesCache){
 
 	// to enabling counting the offset
@@ -1263,10 +1299,6 @@ int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
 
 	offset = l_packSymbol(pFatPack, pSrcFatC->imported, pEntriesCache->nimps);
-	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
-
-	// pack dependends
-	offset = l_packDep(pFatPack, pSrcFatC->dependends, pEntriesCache->ndeps);
 	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
 
 	return pFatPack - pFatPackOrig;
@@ -1336,7 +1368,6 @@ int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack){
 
 	return pFatPack - pFatPackOrig;
 }
-
 
 
 __cudaFatCudaBinary * serializeFatBinary1(__cudaFatCudaBinary * const pSrcFatC,
