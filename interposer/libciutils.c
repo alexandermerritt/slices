@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "debug.h"
+#include <assert.h>
 
 
 /**
@@ -516,110 +517,705 @@ cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCuda
 
 
 /**
- * serializes __cudaFatPtxEntry
+ * writes the string with the information about its
+ * size to the pDst address
  *
- * @param pCurrent (inout) current position where we can serialize; should be
- *                 updated
- * @param pSrcFatC (in) the source from where can get the entry
- * @param pDestFatC (in) the destination where we serialize the entry
- * @param nEntries (in) the number of ptx records to be serialized
+ * |size_pkt_field_t|char*|
+ * |string_length|pSrc|
  *
- * @return OK
- * @todo this is how I want to have this done this big serialize
+ * @param pDst (out) where the information
+ * @param pSrc (in) what string we will write
+ * @return number of char (bytes) written so, you can
+ *         update the pDst pointer
+ *         ERROR if pDst is NULL
  */
-/*int _serializeElfEntry(char ** pCurrent, __cudaFatCudaBinary * const pSrcFatC,
-		__cudaFatCudaBinary * const pDestFatC,
-		const int nEntries) {
+inline int l_packStr(char * pDst, const char *pSrc){
+	int offset;
+	int length;
 
-	__cudaFatPtxEntry *pSrcEntry, *pDestEntry;
-	int len, i;
+	if( pDst == NULL )
+		return ERROR;
 
-	len = nEntries * sizeof(__cudaFatPtxEntry );
-	pSrcEntry = pSrcFatC->ptx;
-	pDestEntry = pDestFatC->ptx;
-	if (pSrcEntry != NULL) {
-		for (i = 0; i < nEntries; ++i) {
-			if (pSrcEntry[i].gpuProfileName != NULL) {
-				GET_LOCAL_POINTER(pCurrent, len, pDestEntry[i].gpuProfileName, (char *));
-				COPY_STRINGS((&pDestEntry[i]),(&pSrcEntry[i]),gpuProfileName,pCurrent,len);
-				OFFSET_PTR_MEMB((&pDestEntry[i]),gpuProfileName,pDestFatC,(char *));
-			} else
-				pDestEntry[i].gpuProfileName = 0;
-			if (pSrcEntry[i].ptx != NULL) {
-				GET_LOCAL_POINTER(pCurrent, len, pDestEntry[i].ptx, (char *));
-				COPY_STRINGS((&pDestEntry[i]),(&pSrcEntry[i]),ptx,pCurrent,len);
-				OFFSET_PTR_MEMB((&pDestEntry[i]),ptx,pDestFatC,(char *));
-			} else
-				pDestEntry[i].ptx = 0;
-		}
-		OFFSET_PTR_MEMB(pDestFatC,ptx,pDestFatC,(__cudaFatPtxEntry *));
-	} else
-		pDestFatC->ptx = NULL;
+	// first determine the size of the string
+	if( pSrc == NULL || strlen(pSrc) == 0){
+		length = 0;		// we will send nothing
+	} else {
+		length = strlen(pSrc);
+	}
 
-	return OK;
+	// write the size
+	memcpy(pDst,&length, sizeof(size_pkt_field_t) );
+	pDst += sizeof(size_pkt_field_t);
+	offset = sizeof(size_pkt_field_t);
 
+	// now copy the string
+	if( length > 0){
+		memcpy(pDst, pSrc, length);
+		offset += length;
+	}
 
+	return offset;
+}
 
+/**
+ * unpacks what was packed with l_packStr;
+ * allocates the memory
+ *
+ * @param pSrc (in) from where the string will be read
+ * @param pOffset (out) indicates how many bytes we unpacked
+ *        starting from pSrc
+ *
+ * @return NULL if problem with memory allocation or
+ *         pSrc is NULL
+ *         the pointer to the allocated string
+ */
+inline char * l_unpackStr(const char *pSrc, int * pOffset){
+	size_pkt_field_t length;
+	char * pDst;
 
-	GET_LOCAL_POINTER(*pCurrent, len, pDestFatC->debug, (__cudaFatDebugEntry *));
-			len = pEntriesCache->ndebs * sizeof(__cudaFatDebugEntry);
-			tempDeb = pSrcFatC->debug;
-			nTempDeb = pDestFatC->debug;
-			if (tempDeb != NULL) {
-				for (i = 0; i < pEntriesCache->ndebs; ++i) {
-					if (tempDeb[i].gpuProfileName != NULL) {
-						GET_LOCAL_POINTER(pCurrent, len, nTempDeb[i].gpuProfileName, (char *));
-						COPY_STRINGS((&nTempDeb[i]),(&tempDeb[i]),gpuProfileName,pCurrent,len);
-						OFFSET_PTR_MEMB((&nTempDeb[i]),gpuProfileName,pDestFatC,(char *));
-					}
-					else
-						nTempDeb[i].gpuProfileName = 0;
-					if (tempDeb[i].debug != NULL) {
-						GET_LOCAL_POINTER(pCurrent, len, nTempDeb[i].debug, (char *));
-						COPY_STRINGS((&nTempDeb[i]),(&tempDeb[i]),debug,pCurrent,len);
-						OFFSET_PTR_MEMB((&nTempDeb[i]),debug,pDestFatC,(char *));
-					}
-					else
-						nTempDeb[i].debug = 0;
-				}
-				OFFSET_PTR_MEMB(pDestFatC,debug,pDestFatC,(__cudaFatDebugEntry *));
-			}
-			else
-				pDestFatC->debug = NULL;
+	if( pSrc == NULL )
+		return NULL;
 
+	// read the length
+	memcpy(&length, pSrc, sizeof(size_pkt_field_t));
+	pSrc += sizeof(size_pkt_field_t);
+	*pOffset = sizeof(size_pkt_field_t);
 
-} */
+	// now allocate enough memory for the string and the NULL
+	// terminator
+	pDst = malloc(length + 1);
+	if( mallocCheck(pDst, __FUNCTION__, NULL) == ERROR )
+		return NULL;
 
+	if( length > 0){
+		memcpy(pDst, pSrc, length);
+		*pOffset += length;
+	}
+
+	// add NULL
+	*(pDst + length) = '\0';
+
+	return pDst;
+}
+
+/**
+ * writes the entry to the pDst address and returns the
+ * number of bytes written.
+ *
+ * |size_pkt_field_t|char*|
+ * |string_length|pSrc|
+ *
+ * @param pDst (out) where the information
+ * @param pEntry (in) the entry we want to serialize
+ * @param n how many entries
+ * @return number of char (bytes) written so, you can
+ *         update the pDst pointer
+ *         ERROR if pDst is NULL
+ *
+ */
+int l_packPtx(char * pDst, const __cudaFatPtxEntry * pEntry, int n){
+	int offset;
+	int tmp;
+	int i;
+
+	if( NULL == pDst )
+		return ERROR;
+
+	// write the number of ptx entries
+	memcpy(pDst,&n, sizeof(size_pkt_field_t) );
+	pDst += sizeof(size_pkt_field_t);
+	offset = sizeof(size_pkt_field_t);
+
+	if( 0 == n || NULL == pEntry ){
+		return offset;
+	}
+
+	// now write the entries
+	for( i = 0; i < n; i++){
+		tmp = l_packStr(pDst, pEntry[i].gpuProfileName);
+		pDst += tmp;
+		offset += tmp;
+		tmp = l_packStr(pDst, pEntry[i].ptx);
+		pDst +=tmp;
+		offset += tmp;
+	}
+
+	return offset;
+}
+
+/**
+ * unpacks the ptx entry
+ * @param pSrc from what we unpack the entry
+ * @param pOffset how many bytes we have read, from
+ *        the begining of pSrc
+ * @return the ptx entry or NULL if pDst is NULL
+ */
+__cudaFatPtxEntry * l_unpackPtx(char * pSrc, int * pOffset){
+	size_pkt_field_t n; 		// the number of entries
+	__cudaFatPtxEntry * pEntry;
+	unsigned int i;
+	int offset;
+	// to remember the start position to allow to say
+	// how many bytes we have read
+	char * pSrcOrig = pSrc;
+
+	if( NULL == pSrc )
+		return NULL;
+
+	// find out how many ptx entries do we have
+	memcpy(&n, pSrc, sizeof(size_pkt_field_t) );
+	pSrc += sizeof(size_pkt_field_t);
+
+	// make place for the terminating NULL entry
+	pEntry = (__cudaFatPtxEntry *) malloc(n * sizeof(__cudaFatPtxEntry ) + sizeof(__cudaFatPtxEntry));
+
+	for(i = 0; i < n; i++){
+		pEntry[i].gpuProfileName =  l_unpackStr(pSrc, &offset);
+		pSrc += offset;
+
+		pEntry[i].ptx =  l_unpackStr(pSrc, &offset);
+		pSrc += offset;
+	}
+
+	// add null terminators
+	assert(i == n);
+
+	pEntry[i].gpuProfileName = NULL;
+	pEntry[i].ptx = NULL;
+
+	// count the offset
+	*pOffset = pSrc - pSrcOrig;
+
+	return pEntry;
+}
+
+/**
+ * writes the entry to the pDst address and returns the
+ * number of bytes written.
+ *
+ * @todo This function is identical to ptx
+ * so maybe it should be without this redundancy
+ *
+ * |size_pkt_field_t|char*|
+ * |string_length|pSrc|
+ *
+ * @param pDst (out) where the information
+ * @param pEntry (in) the entry we want to serialize
+ * @param n how many entries
+ * @return number of char (bytes) written so, you can
+ *         update the pDst pointer
+ *         ERROR if pDst is NULL
+ *
+ */
+int l_packCubin(char * pDst, const __cudaFatCubinEntry * pEntry, int n){
+	int offset;
+	int tmp;
+	int i;
+
+	if( NULL == pDst )
+		return ERROR;
+
+	// write the number of ptx entries
+	memcpy(pDst,&n, sizeof(size_pkt_field_t) );
+	pDst += sizeof(size_pkt_field_t);
+	offset = sizeof(size_pkt_field_t);
+
+	if( 0 == n || NULL == pEntry ){
+		return offset;
+	}
+
+	// now write the entries
+	for( i = 0; i < n; i++){
+		tmp = l_packStr(pDst, pEntry[i].gpuProfileName);
+		pDst += tmp;
+		offset += tmp;
+		tmp = l_packStr(pDst, pEntry[i].cubin);
+		pDst +=tmp;
+		offset += tmp;
+	}
+
+	return offset;
+}
 
 
 /**
- * @brief Serializes the code and puts the whole fat binary  to a contiguous space
- * pointed by a pointer
+ * unpacks the cubin entry
  *
- * serializes the code and puts the whole fat binary structure under the address
- * the function previously has been named copyFatBinary but actually
- * there are two copyFatBinary functions (in local_api_wrapper.c you can
- * find a second one). Previously it was called cudart.c::copyFatBinary()
+ * See a note to @see l_packCubin()
  *
- * First we reserve the copy the all fields of the structure __cudaFatCudaBinary,
- * then we copy strings, and all pointers etc. We end strings with 0.
- *
- * @param pSrcFatC (in) the pointer to the fat cubin
- * @param pEntriesCache (in) cached some numerical entries that have been counted by
- *        e.g. getFatSize
- * @param pDestFatC (in) where we have the assigned contiguous space we
- *        can copy to; we assume that the size has been appropriately allocated
- *        so there is space for areas pointed by pointers
- * @return the pointer to a serialized fat cubin
- *
- * @todo put those things into separate functions to make that function shorter
+ * @param pSrc from what we unpack the entry
+ * @param pOffset how many bytes we have read, from
+ *        the begining of pSrc
+ * @return the cubin entry or NULL if pDst is NULL
  */
+__cudaFatCubinEntry * l_unpackCubin(char * pSrc, int * pOffset){
+	size_pkt_field_t n; 		// the number of entries
+	__cudaFatCubinEntry * pEntry;
+	unsigned int i;
+	int offset;
+	// to remember the start position to allow to say
+	// how many bytes we have read
+	char * pSrcOrig = pSrc;
+
+	if( NULL == pSrc )
+		return NULL;
+
+	// find out how many ptx entries do we have
+	memcpy(&n, pSrc, sizeof(size_pkt_field_t) );
+	pSrc += sizeof(size_pkt_field_t);
+
+	// make place for the terminating NULL entry
+	pEntry = (__cudaFatCubinEntry *) malloc( (n + 1) * sizeof(__cudaFatCubinEntry ));
+
+	for(i = 0; i < n; i++){
+		pEntry[i].gpuProfileName =  l_unpackStr(pSrc, &offset);
+		pSrc += offset;
+
+		pEntry[i].cubin =  l_unpackStr(pSrc, &offset);
+		pSrc += offset;
+	}
+
+	// add null terminators
+	assert(i == n);
+
+	pEntry[i].gpuProfileName = NULL;
+	pEntry[i].cubin = NULL;
+
+	// count the offset
+	*pOffset = pSrc - pSrcOrig;
+
+	return pEntry;
+}
+
+/**
+ * writes the entry to the pDst address and returns the
+ * number of bytes written.
+ *
+ * |size_pkt_field_t|size_pkt_field_t|char*|size_pkt_field_t|char*|unsigned int|
+ * |how_many_records|string_length|gpuProfileName|string_len|debug|size|
+ *                  |string_length|gpuProfileName|string_len|debug|size| ....
+ *
+ * @param pDst (out) where the information
+ * @param pEntry (in) the entry we want to serialize
+ * @param n how many entries
+ * @return number of char (bytes) written so, you can
+ *         update the pDst pointer
+ *         ERROR if pDst is NULL
+ *
+ */
+int l_packDebug(char * pDst, __cudaFatDebugEntry * pEntry, int n){
+	int tmp;
+	int i = 0;
+	char * pDstOrig = pDst;
+	__cudaFatDebugEntry *p = pEntry;
+
+	if( NULL == pDst )
+		return ERROR;
+
+	// write the number of debug entries
+	memcpy(pDst,&n, sizeof(size_pkt_field_t) );
+	pDst += sizeof(size_pkt_field_t);
+
+	if( 0 == n || NULL == pEntry){
+		return pDst - pDstOrig;
+	}
+
+	// now write the entries
+	while(p != NULL ){
+		tmp = l_packStr(pDst, p->gpuProfileName);
+		pDst += tmp;
+		tmp = l_packStr(pDst, p->debug);
+		pDst += tmp;
+		// copy the size
+		memcpy(pDst, &p->size, sizeof(unsigned int));
+		pDst += sizeof(unsigned int);
+
+		p = p->next;
+		i++;
+	}
+
+	assert( i == n );
+
+	return pDst - pDstOrig ;
+}
+
+/**
+ * unpacks the entry
+ *
+ * @param pSrc from what we unpack the entry
+ * @param pOffset how many bytes we have read, from
+ *        the begining of pSrc
+ * @return the debug entry or NULL if pDst is NULL or the size is NULL
+ *         @todo should be done something with that
+ */
+__cudaFatDebugEntry * l_unpackDebug(char * pSrc, int * pOffset){
+	size_pkt_field_t n; 		// the number of entries
+	__cudaFatDebugEntry * pEntry;
+	unsigned int i;
+	int offset;
+	// to remember the start position to allow to say
+	// how many bytes we have read
+	char * pSrcOrig = pSrc;
+
+	if( NULL == pSrc )
+		return NULL;
+
+	// find out how many debug entries do we have
+	memcpy(&n, pSrc, sizeof(size_pkt_field_t) );
+	pSrc += sizeof(size_pkt_field_t);
+
+	if( 0 == n ){
+		*pOffset = sizeof(size_pkt_field_t);
+		return NULL;
+	}
+
+	pEntry = (__cudaFatDebugEntry *) malloc(n * sizeof(__cudaFatDebugEntry ));
+
+	for(i = 0; i < n; i++){
+		pEntry[i].gpuProfileName =  l_unpackStr(pSrc, &offset);
+		pSrc += offset;
+
+		pEntry[i].debug =  l_unpackStr(pSrc, &offset);
+		pSrc += offset;
+
+		memcpy(&pEntry[i].size, pSrc, sizeof(unsigned int));
+		pSrc += sizeof(unsigned int);
+
+		// update the pointer to the next
+		pEntry[i].next = &pEntry[i+1];
+	}
+
+	// add null terminators
+	assert(n >= 1);
+
+	// I think only this part is important
+	pEntry[n-1].next = NULL;
+
+	// count the offset
+	*pOffset = pSrc - pSrcOrig;
+
+	return pEntry;
+}
+
+/**
+ * writes the entry to the pDst address and returns the
+ * number of bytes written.
+ *
+ * |size_pkt_field_t|size_pkt_field_t|char*|size_pkt_field_t|char*|unsigned int|
+ * |how_many_records|string_length|gpuProfileName|string_len|debug|size|
+ *                  |string_length|gpuProfileName|string_len|debug|size| ....
+ *
+ * @param pDst (out) where the information
+ * @param pEntry (in) the entry we want to serialize
+ * @param n how many entries
+ * @return number of char (bytes) written so, you can
+ *         update the pDst pointer
+ *         ERROR if pDst is NULL
+ *
+ *  You should always check if the return thing is an error or not
+ *
+ */
+int l_packElf(char * pDst, __cudaFatElfEntry * pEntry, int n){
+
+	int tmp;
+	int i = 0;
+	char * pDstOrig = pDst;
+	__cudaFatElfEntry *p = pEntry;
+
+	if (NULL == pDst)
+		return ERROR;
+
+	// write the number of debug entries
+	memcpy(pDst, &n, sizeof(size_pkt_field_t));
+	pDst += sizeof(size_pkt_field_t);
+
+	if (0 == n || NULL == pEntry) {
+		return pDst - pDstOrig;
+	}
+
+	// now write the entries
+	while (p != NULL) {
+		tmp = l_packStr(pDst, p->gpuProfileName);
+		pDst += tmp;
+		tmp = l_packStr(pDst, p->elf);
+		pDst += tmp;
+		// copy the size
+		memcpy(pDst, &p->size, sizeof(unsigned int));
+		pDst += sizeof(unsigned int);
+
+		p = p->next;
+		i++;
+	}
+
+	assert( i == n );
+
+	return pDst - pDstOrig;
+}
+
+/**
+ * unpacks the entry
+ *
+ * @param pSrc from what we unpack the entry
+ * @param pOffset how many bytes we have read, from
+ *        the begining of pSrc
+ * @return the debug entry or NULL if pDst is NULL or the size is NULL
+ *         @todo should be done something with that
+ */
+__cudaFatElfEntry * l_unpackElf(char * pSrc, int * pOffset){
+	size_pkt_field_t n; 		// the number of entries
+	__cudaFatElfEntry * pEntry;
+	unsigned int i;
+	int offset;
+	// to remember the start position to allow to say
+	// how many bytes we have read
+	char * pSrcOrig = pSrc;
+
+	if( NULL == pSrc )
+		return NULL;
+
+	// find out how many debug entries do we have
+	memcpy(&n, pSrc, sizeof(size_pkt_field_t) );
+	pSrc += sizeof(size_pkt_field_t);
+
+	if( 0 == n ){
+		*pOffset = pSrc - pSrcOrig;
+		return NULL;
+	}
+
+	pEntry = (__cudaFatElfEntry *) malloc(n * sizeof(__cudaFatElfEntry ));
+
+	for(i = 0; i < n; i++){
+		pEntry[i].gpuProfileName =  l_unpackStr(pSrc, &offset);
+		pSrc += offset;
+
+		pEntry[i].elf =  l_unpackStr(pSrc, &offset);
+		pSrc += offset;
+
+		memcpy(&pEntry[i].size, pSrc, sizeof(unsigned int));
+		pSrc += sizeof(unsigned int);
+
+		// update the pointer to the next
+		pEntry[i].next = &pEntry[i+1];
+	}
+
+	// add null terminators
+	assert(n >= 1);
+
+	// I think only this part is important
+	pEntry[n-1].next = NULL;
+
+	// count the offset
+	*pOffset = pSrc - pSrcOrig;
+
+	return pEntry;
+}
+
+/**
+ * writes the entry to the pDst address and returns the
+ * number of bytes written.
+ *
+ * |size_pkt_field_t|char*|
+ * |string_length|pSrc|
+ *
+ * @param pDst (out) where the information
+ * @param pEntry (in) the entry we want to serialize
+ * @param n how many entries
+ * @return number of char (bytes) written so, you can
+ *         update the pDst pointer
+ *         ERROR if pDst is NULL
+ *
+ */
+int l_packSymbol(char * pDst, const __cudaFatSymbol * pEntry, int n){
+	int offset;
+	int tmp;
+	int i;
+
+	if( NULL == pDst )
+		return ERROR;
+
+	// write the number of ptx entries
+	memcpy(pDst,&n, sizeof(size_pkt_field_t) );
+	pDst += sizeof(size_pkt_field_t);
+	offset = sizeof(size_pkt_field_t);
+
+	if( 0 == n || NULL == pEntry ){
+		return offset;
+	}
+
+	// now write the entries
+	for( i = 0; i < n; i++){
+		tmp = l_packStr(pDst, pEntry[i].name);
+		pDst += tmp;
+		offset += tmp;
+	}
+
+	return offset;
+}
+
+/**
+ * unpacks the symbol entry
+ *
+ *
+ * @param pSrc from what we unpack the entry
+ * @param pOffset how many bytes we have read, from
+ *        the begining of pSrc
+ * @return the cubin entry or NULL if pDst is NULL
+ */
+__cudaFatSymbol * l_unpackSymbol(char * pSrc, int * pOffset){
+	size_pkt_field_t n; 		// the number of entries
+	__cudaFatSymbol * pEntry;
+	unsigned int i;
+	int offset;
+	// to remember the start position to allow to say
+	// how many bytes we have read
+	char * pSrcOrig = pSrc;
+
+	if( NULL == pSrc )
+		return NULL;
+
+	// find out how many entries do we have
+	memcpy(&n, pSrc, sizeof(size_pkt_field_t) );
+	pSrc += sizeof(size_pkt_field_t);
+
+	// make place for the terminating NULL entry
+	pEntry = (__cudaFatSymbol *) malloc( (n + 1) * sizeof(__cudaFatSymbol ));
+
+	for(i = 0; i < n; i++){
+		pEntry[i].name =  l_unpackStr(pSrc, &offset);
+		pSrc += offset;
+	}
+
+	// add null terminators
+	assert(i == n);
+
+	pEntry[i].name = NULL;
+
+	// count the offset
+	*pOffset = pSrc - pSrcOrig;
+
+	return pEntry;
+}
+
+/**
+ * writes the entry to the pDst address and returns the
+ * number of bytes written.
+ *
+ * |size_pkt_field_t|char*|
+ * |string_length|pSrc|
+ *
+ * @param pDst (out) where the information
+ * @param pEntry (in) the entry we want to serialize
+ * @param n how many entries
+ * @return number of char (bytes) written so, you can
+ *         update the pDst pointer
+ *         ERROR if pDst is NULL
+ *
+ */
+int l_packDep(char * pDst, __cudaFatCudaBinary * pEntry, int n){
+	// to remember the offset
+	char * pDstOrig = pDst;
+	// for iterations
+	__cudaFatCudaBinary * p;
+	int offset;
+	int i = 0;
+
+	if( NULL == pDst )
+		return ERROR;
+
+	// write the number of ptx entries
+	memcpy(pDst, &n, sizeof(size_pkt_field_t) );
+	pDst += sizeof(size_pkt_field_t);
+
+	if( 0 == n || NULL == pEntry ){
+		return pDst - pDstOrig;
+	}
+
+	// now write the entries
+	p = pEntry;
+	while( p ){
+		cache_num_entries_t cache = { 0, 0, 0, 0, 0, 0, 0 };
+		offset = packFatBinary(pDst,  p, &cache);
+		if( ERROR == offset )
+			return ERROR;
+		pDst += offset;
+		p = p->dependends;
+		i++;
+	}
+
+	assert( i == n );
+
+	return pDst - pDstOrig;
+}
+
+// forward declaration
+int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack);
+
+/**
+ * Unpacks dependends
+ * @param pSrc
+ * @param pOffset
+ *
+ * @return the offset
+ */
+__cudaFatCudaBinary * l_unpackDep(char * pSrc, int * pOffset){
+	size_pkt_field_t n; 		// the number of entries
+	__cudaFatCudaBinary * pEntry;
+	unsigned int i;
+	int offset;
+	// to remember the start position to allow to say
+	// how many bytes we have read
+	char * pSrcOrig = pSrc;
+
+	if( NULL == pSrc )
+		return NULL;
+
+	// find out how many entries do we have
+	memcpy(&n, pSrc, sizeof(size_pkt_field_t) );
+	pSrc += sizeof(size_pkt_field_t);
+
+	if( 0 == n )
+		return NULL;
+
+	// make place for the terminating NULL entry
+	pEntry = (__cudaFatCudaBinary *) malloc( n  * sizeof(__cudaFatCudaBinary ));
+
+	for(i = 0; i < n; i++){
+		offset = unpackFatBinary(pEntry[i].dependends, pSrc);
+		if(ERROR == offset){
+			*pOffset = ERROR;
+			return NULL;
+		}
+		pSrc += offset;
+		pEntry[i].dependends = &pEntry[i+1];
+	}
+
+	// add null terminators
+	assert(n >= 1);
+
+	pEntry[n-1].dependends = NULL;
+
+	// count the offset
+	*pOffset = pSrc - pSrcOrig;
+
+	return pEntry;
+}
+
 /**
  * pack the fat cubin into a packet that can be transmitted
  * over the network
+ *
+ * @param pFatPack where to pack
+ * @param pSrcFatC from what we will be packing
+ * @param pEntriesCache the remembered numbers of elements
+ * @return OK if everything went smoothly
+ *         ERROR if there was an error
  */
 int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 		cache_num_entries_t * const pEntriesCache){
+
+	// to enabling counting the offset
+	char * pFatPackOrig = pFatPack;
+	int offset = 0;
 
 	memcpy(pFatPack, (unsigned long*)&pSrcFatC->magic, sizeof(pSrcFatC->magic));
 	pFatPack += sizeof(pSrcFatC->magic);
@@ -631,11 +1227,64 @@ int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 	pFatPack += sizeof(pSrcFatC->flags);
 	memcpy(pFatPack, (unsigned int*)&pSrcFatC->characteristic, sizeof(pSrcFatC->characteristic));
 	pFatPack += sizeof(pSrcFatC->characteristic);
+	// now strings
+	offset = l_packStr(pFatPack, pSrcFatC->key);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
 
-	return OK;
+	offset = l_packStr(pFatPack, pSrcFatC->ident);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	offset = l_packStr(pFatPack, pSrcFatC->usageMode);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	// copy a pointer (as originally pFatPack->debugInfo = pSrcFatC->debugInfo)
+	// don't know to what points debugInfo
+	memcpy(pFatPack, &pSrcFatC->debugInfo, sizeof(pSrcFatC->debugInfo));
+	pFatPack += sizeof(pSrcFatC->debugInfo);
+
+	// pack ptx
+	offset = l_packPtx(pFatPack, pSrcFatC->ptx, pEntriesCache->nptxs);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	// pack cubin
+	offset = l_packCubin(pFatPack, pSrcFatC->cubin, pEntriesCache->ncubs);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	// pack debug
+	offset = l_packDebug(pFatPack, pSrcFatC->debug, pEntriesCache->ndebs);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	// pack elf
+	offset = l_packElf(pFatPack, pSrcFatC->elf, pEntriesCache->nelves);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	// exported / imported
+	offset = l_packSymbol(pFatPack, pSrcFatC->exported, pEntriesCache->nexps);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	offset = l_packSymbol(pFatPack, pSrcFatC->imported, pEntriesCache->nimps);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	// pack dependends
+	offset = l_packDep(pFatPack, pSrcFatC->dependends, pEntriesCache->ndeps);
+	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	return pFatPack - pFatPackOrig;
 }
 
+/**
+ * Unpacks the binary
+ * @param pFatC the destination
+ * @param pFatPack our source
+ *
+ * @return OK everything went smoothly
+ *         ERROR there were some errors
+ */
 int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack){
+	// to remember how many bytes we have read
+	char * pFatPackOrig = pFatPack;
+	// how many bytes we have read
+	int offset;
 
 	memcpy(&pFatC->magic, (unsigned long*)pFatPack, sizeof(pFatC->magic));
 	pFatPack += sizeof(pFatC->magic);
@@ -648,8 +1297,46 @@ int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack){
 	memcpy(&pFatC->characteristic, (unsigned int*) pFatPack, sizeof(pFatC->characteristic));
 	pFatPack += sizeof(pFatC->characteristic);
 
-	return OK;
+	// now unpack strings
+	pFatC->key = l_unpackStr(pFatPack, &offset);
+	if( ERROR == offset ) return ERROR; else pFatPack += offset;
+	pFatC->ident = l_unpackStr(pFatPack, &offset);
+	if( ERROR == offset ) return ERROR; else pFatPack += offset;
+	pFatC->usageMode = l_unpackStr(pFatPack, &offset);
+	if( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	// unpack debugInfo
+	memcpy(&pFatC->debugInfo, pFatPack, sizeof(pFatC->debugInfo) );
+	pFatPack += sizeof(pFatC->debugInfo);
+
+	// unpack ptx
+	pFatC->ptx = l_unpackPtx(pFatPack, &offset);
+	if( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	// unpack cubin
+	pFatC->cubin = l_unpackCubin(pFatPack, &offset);
+	if( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	// unpack debug
+	pFatC->debug = l_unpackDebug(pFatPack, &offset);
+	if( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	// unpack elf
+	pFatC->elf = l_unpackElf(pFatPack, &offset);
+	if( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	pFatC->exported = l_unpackSymbol(pFatPack, &offset);
+	if( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	pFatC->imported = l_unpackSymbol(pFatPack, &offset);
+	if( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	pFatC->dependends = l_unpackDep(pFatPack, &offset);
+	if( ERROR == offset ) return ERROR; else pFatPack += offset;
+
+	return pFatPack - pFatPackOrig;
 }
+
 
 
 __cudaFatCudaBinary * serializeFatBinary1(__cudaFatCudaBinary * const pSrcFatC,
