@@ -1018,7 +1018,6 @@ int l_packElf(char * pDst, __cudaFatElfEntry * pEntry, int n){
 		i++;
 	}
 
-	printd(DBG_INFO, "%d, %d\n", i, n);
 	assert( i == n );
 
 	return pDst - pDstOrig ;

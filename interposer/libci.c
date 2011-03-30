@@ -2062,40 +2062,104 @@ cudaError_t cudaGetExportTable(const void **ppExportTable,
 
 void** pFatBinaryHandle = NULL;
 
-void l_printDebugE(__cudaFatDebugEntry * pEntry){
-	__cudaFatDebugEntry *p = pEntry;
+void l_printPtxE(__cudaFatPtxEntry * p){
 	int i = 0;
-	printd(DBG_INFO, " ~~~~~~~~ __cudaFatDebugEntry: %p ~~~~~~~~~~\n", pEntry);
-	if( p != NULL ){
-		while( p ){
-			printd(DBG_INFO, "pEntry[%d] (gpuProfileName, debug, next, size): %s, %s, %p, %d\n",
-					i, p->gpuProfileName, p->debug, p->next, p->size);
-			p = p->next;
-			i++;
-		}
+	printd(DBG_INFO, "__cudaFatPtxEntry: %p\n", p);
+
+	while(1){
+		printd(DBG_INFO, "p[%d] (gpuProfileName, ptx): %s, %s\n",
+						i, p[i].gpuProfileName, p[i].ptx);
+
+		if( !(p+i) || !p[i].gpuProfileName || !p[i].ptx )
+			break;
+
+		i++;
 	}
 }
 
-void l_printElfE(__cudaFatElfEntry * pEntry){
-	__cudaFatElfEntry *p = pEntry;
+void l_printCubinE(__cudaFatCubinEntry * p){
 	int i = 0;
-	printd(DBG_INFO, " ~~~~~~~~ __cudaFatElfEntry: %p ~~~~~~~~~~\n", pEntry);
-	if( p != NULL ){
-		while( p ){
-			printd(DBG_INFO, "pEntry[%d] (gpuProfileName, elf, next, size): %s, %s, %p, %d\n",
-					i, p->gpuProfileName, p->elf, p->next, p->size);
-			p = p->next;
-			i++;
-		}
+	printd(DBG_INFO, "__cudaFatCubinEntry: %p\n", p);
+
+	while(1){
+		printd(DBG_INFO, "p[%d] (gpuProfileName, cubin): %s, %s\n",
+				i, p[i].gpuProfileName, p[i].cubin);
+
+		if( !(p+i) || !p[i].gpuProfileName || !p[i].cubin )
+			break;
+
+		i++;
 	}
 }
 
+void l_printSymbolE(__cudaFatSymbol * p, char * name){
+	int i = 0;
+	printd(DBG_INFO, "__cudaFatSymbol: %s,  %p\n", name, p);
+
+	while(p && p->name ){
+		printd(DBG_INFO, "p[%d] (name): %s\n",
+				i, p[i].name);
+		i++;
+	}
+}
+
+void l_printDebugE(__cudaFatDebugEntry * p){
+	int i = 0;
+	printd(DBG_INFO, "__cudaFatDebugEntry: %p\n", p);
+	while( p ){
+		printd(DBG_INFO, "p[%d] (gpuProfileName, debug, next, size): %s, %s, %p, %d\n",
+				i, p->gpuProfileName, p->debug, p->next, p->size);
+		p = p->next;
+		i++;
+	}
+}
+
+void l_printDepE(__cudaFatCudaBinary * p){
+	int i = 0;
+
+	printd(DBG_INFO, "__cudaFatCudaBinary: %p\n", p);
+
+	while( p && p->ident){
+
+		printd(DBG_INFO, "p[%i]\n", i);
+		i++;
+		p = p->dependends;
+	}
+
+}
+
+void l_printElfE(__cudaFatElfEntry * p){
+
+	int i = 0;
+	printd(DBG_INFO, "__cudaFatElfEntry: %p\n", p);
+
+	while( p ){
+		printd(DBG_INFO, "p[%d] (gpuProfileName, elf, next, size): %s, %p, %p, %d\n",
+				i, p->gpuProfileName,  p->elf, p->next, p->size);
+		p = p->next;
+		i++;
+	}
+
+}
 
 void l_printFatBinary(__cudaFatCudaBinary * pFatBin){
 	if( pFatBin == NULL ){
-		printd(DBG_INFO, "FatBinary  = %p\n", pFatBin);
+		printd(DBG_INFO, "~~~~~~~~ FatBinary  = %p\n", pFatBin);
 	} else {
+		printd(DBG_DEBUG, "\tmagic: %ld, version: %ld , gpuInfoVersion: %ld\n",
+				pFatBin->magic, pFatBin->version, pFatBin->gpuInfoVersion);
+		printd(DBG_DEBUG, "\tkey: %s, ident: %s, usageMode: %s\n",
+				pFatBin->key, pFatBin->ident, pFatBin->usageMode);
+		l_printPtxE(pFatBin->ptx);
+		l_printCubinE(pFatBin->cubin);
 		l_printDebugE(pFatBin->debug);
+
+		printd(DBG_DEBUG, "\tdebugInfo (pointer, char*): %p, %s\n", pFatBin->debugInfo, (char*) pFatBin->debugInfo);
+		printd(DBG_DEBUG, "\tflags: %u\n", pFatBin->flags);
+		l_printSymbolE(pFatBin->exported, "exported");
+		l_printSymbolE(pFatBin->imported, "imported");
+		l_printDepE(pFatBin->dependends);
+		printd(DBG_DEBUG, "\tcharacteristics: %u\n", pFatBin->characteristic);
 		l_printElfE(pFatBin->elf);
 	}
 }
@@ -2141,6 +2205,7 @@ void** __cudaRegisterFatBinary(void* fatC) {
 	l_printFatBinary(pSrcFatC);
 
 	pPackedFat = (char*) malloc(fb_size);
+
 	if( mallocCheck(pPackedFat, __FUNCTION__, NULL) == ERROR ){
 		exit(ERROR);
 	}
@@ -2149,11 +2214,13 @@ void** __cudaRegisterFatBinary(void* fatC) {
 		exit(ERROR);
 	}
 
+
 	// now update the packets information
 	pPacket->flags |= CUDA_Copytype;
 	pPacket->args[0].argp = pPackedFat;			// start of the request buffer
 	pPacket->args[1].argi = fb_size;			// the size of the request buffer
 
+	printd(DBG_DEBUG, "13HEEEEEEEEEEEEEY!!!!!!!!!!!!\n");
 	// send the packet
 	if (__nvback_cudaRegisterFatBinary(pPacket) != OK) {
 		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
