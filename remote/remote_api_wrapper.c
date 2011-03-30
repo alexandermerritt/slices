@@ -503,6 +503,7 @@ int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn){
 	__cudaFatCudaBinary * pFatC;
 	void ** pFatCHandle;
 
+
     pFatC = copyFatBinary((__cudaFatCudaBinary *)((char *)myconn->request_data_buffer + packet->ret_ex_val.data_unit));
 
 	// call __cudaRegisterFatBinary; otherwise the compiler complaints that

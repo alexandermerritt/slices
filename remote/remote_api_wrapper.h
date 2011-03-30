@@ -14,7 +14,7 @@
 #include "packetheader.h"
 #include "connection.h"
 
-extern void** __cudaRegisterFatBinary(void *fatCubin);
+//extern void** __cudaRegisterFatBinary(void *fatCubin);
 
 ///////////////////
 // RPC CALL UTILS//

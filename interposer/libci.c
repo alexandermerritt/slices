@@ -2060,7 +2060,28 @@ cudaError_t cudaGetExportTable(const void **ppExportTable,
 //! Unlisted CUDA calls for state registration
 // ----------------------------------------
 
+void** pFatBinaryHandle = NULL;
 
+void l_printDebugE(__cudaFatDebugEntry * pEntry){
+	__cudaFatDebugEntry *p = pEntry;
+	int i = 0;
+	printd(DBG_INFO, " ~~~~~~~~ __cudaFatDebugEntry: %p ~~~~~~~~~~\n", pEntry);
+	if( p != NULL ){
+		while( p ){
+			printd(DBG_INFO, "pEntry[%d] (gpuProfileName, debug, size): %s, %s, %d\n",
+					p->gpuProfileName, p->debug, p->size);
+			p = p->next;
+		}
+	}
+}
+
+void l_printFatBinary(__cudaFatCudaBinary * pFatBin){
+	if( pFatBin == NULL ){
+		printd(DBG_INFO, "FatBinary  = %p\n", pFatBin);
+	} else {
+		l_printDebugE(pFatBin->debug);
+	}
+}
 /**
  * The implementation is taken from __nvback_cudaRegisterFatBinary_rpc from
  * remote_api_wrapper and from cudart.c __cudaRegisterFatBinary
@@ -2100,6 +2121,7 @@ void** __cudaRegisterFatBinary(void* fatC) {
 	fb_size = getFatRecPktSize(pSrcFatC, &entries_cached);
 	printd(DBG_DEBUG, "%s, FatCubin size: %d\n", __FUNCTION__,
 			getFatRecPktSize(pSrcFatC,&entries_cached ));
+	l_printFatBinary(pSrcFatC);
 
 	pPackedFat = (char*) malloc(fb_size);
 	if( mallocCheck(pPackedFat, __FUNCTION__, NULL) == ERROR ){
@@ -2121,97 +2143,13 @@ void** __cudaRegisterFatBinary(void* fatC) {
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
-		cuda_err = pPacket->ret_ex_val.err;
+		pFatBinaryHandle = (void**) pPacket->ret_ex_val.err;
 	}
 
 	free(pPacket);
-
-
 
 /*
-//	pPacket->thr_id = pthread_self();
-//	pPacket->args[0].argp = fatC;
-//	pPacket->args[1].argi = getFatRecPktSize(fatC, &entries_cached);
-//	pPacket->flags = CUDA_request | CUDA_Copytype;
-//	pPacket->method_id = __CUDA_REGISTER_FAT_BINARY;
-
-	// send the packet
-//	__nvback_cudaRegisterFatBinary_rpc(pPacket);
-
-	// now you can
-//	free(pPacket);
-//	return NULL;
-
-
-	// -----------------------
-	cache_num_entries_t nentries = {0, 0, 0, 0, 0};
-	int size;
-	// let's look like it will be __cudaFatCudaBinary
-	// in fact we are allocating the contiguous area of memory that should
-	// be treated as a void*, but we want to make it look like the structure
-	// __cudaFatCudaBinary; that's why we put it as a __cudaFatCudaBinary
-	// and not *void
-	__cudaFatCudaBinary * pDestFatC;
-	__cudaFatCudaBinary *pSrcFatC = (__cudaFatCudaBinary *)fatC;
-	cuda_packet_t *pPacket;
-
-
-	if (fatC == NULL) {
-		printd(DBG_ERROR, "%s, Null CUDA fat binary. Have to exit\n", __FUNCTION__);
-		exit(ERROR);
-	}
-
-
-	// Now make a packet and send
-	pPacket = callocCudaPacket(__FUNCTION__, &cuda_err);
-	if( pPacket == NULL ){
-		exit(ERROR);
-	}
-
-	// @todo this should be hidden from this implementation
-	// it should go to the copyFatBinary
-	size = getFatRecPktSize(pSrcFatC, &nentries);
-
-	// Make it a multiple of page size
-	printd(DBG_INFO, "%s: Size is %d\n", __FUNCTION__, size);
-
-	// @todo it should be problably done in serializeFatBinary function
-	// allocate the memory for the
-	pDestFatC = (__cudaFatCudaBinary *) malloc(size);
-	if( mallocCheck( pDestFatC, __FUNCTION__, "During copy of CUDA FAT BINARY" ) != OK){
-		cuda_err = cudaErrorMemoryAllocation;
-		exit(ERROR);
-	}
-
-	pDestFatC = serializeFatBinary(pSrcFatC,&nentries, pDestFatC);
-
-	// Now make a packet and send
-	pPacket = (cuda_packet_t *)calloc(1, sizeof(cuda_packet_t));
-	if (pPacket == NULL) {
-		cuda_err = cudaErrorMemoryAllocation;
-		exit(-1);
-	}
-	pPacket->thr_id = pthread_self();
-	pPacket->args[0].argp = pDestFatC;
-	pPacket->args[1].argi = size;
-
-	pPacket->flags = CUDA_request | CUDA_Copytype;
-	pPacket->method_id = __CUDA_REGISTER_FAT_BINARY;
-
-	if( __nvback_cudaRegisterFatBinary_rpc(pPacket) != CUDA_SUCCESS ){
-		printd(DBG_DEBUG, "%s: Problems with rpc\n", __FUNCTION__);
-	}
-
-	free(pPacket);
-	// Now we can free the original address since the backend must have
-	// copied all the data into new buffer
-	free(pDestFatC);
-
-	// @todo this Vishakha told me that should be invoked otherwise the program
-	// doesn't work. So let's see. This doesn't harm if you call unregister
-	// so we will call it, otherwise we need to return something
-	// we get from the packet.
-*/
+// -------------
 	static void** (*func)(void* fatC) = NULL;
 	char *error;
 
@@ -2223,9 +2161,10 @@ void** __cudaRegisterFatBinary(void* fatC) {
 	}
 
 	l_printFuncSig(__FUNCTION__);
+	func(fatC)
+*/
 
-	return (func(fatC));
-
+	return pFatBinaryHandle;
 }
 
 void __cudaUnregisterFatBinary(void** fatCubinHandle) {

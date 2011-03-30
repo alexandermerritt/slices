@@ -141,9 +141,10 @@ int l_getSize__cudaFatDebugEntry(__cudaFatDebugEntry * pEntry, int * pCounter){
 	// to store the number of entries
 	size += sizeof(size_pkt_field_t);
 
-	// @todo Question: is this an array or a list (pEntry->next)? Let's assume
-	// it is a list; we might be wrong;
-	while( p != NULL ){
+	// Empirical experiments show that the
+	// end shows gpuProfileName and debug are NULL
+	// and it likely is an array not a list
+	while( p && p->gpuProfileName && p->debug ){
 		size += l_getStringPktSize(p->gpuProfileName);
 		size += l_getStringPktSize(p->debug);
 		size += sizeof(p->size);
@@ -827,7 +828,9 @@ int l_packDebug(char * pDst, __cudaFatDebugEntry * pEntry, int n){
 	}
 
 	// now write the entries
-	while(p != NULL ){
+	// those p->gpuProfile and p->debug are NULL are
+	// empirically determined
+	while(p && p->gpuProfileName && p->debug ){
 		tmp = l_packStr(pDst, p->gpuProfileName);
 		pDst += tmp;
 		tmp = l_packStr(pDst, p->debug);
@@ -872,10 +875,9 @@ __cudaFatDebugEntry * l_unpackDebug(char * pSrc, int * pOffset){
 
 	if( 0 == n ){
 		*pOffset = sizeof(size_pkt_field_t);
-		return NULL;
 	}
 
-	pEntry = (__cudaFatDebugEntry *) malloc(n * sizeof(__cudaFatDebugEntry ));
+	pEntry = (__cudaFatDebugEntry *) malloc((n+1) * sizeof(__cudaFatDebugEntry ));
 
 	for(i = 0; i < n; i++){
 		pEntry[i].gpuProfileName =  l_unpackStr(pSrc, &offset);
@@ -892,10 +894,15 @@ __cudaFatDebugEntry * l_unpackDebug(char * pSrc, int * pOffset){
 	}
 
 	// add null terminators
-	assert(n >= 1);
-
-	// I think only this part is important
-	pEntry[n-1].next = NULL;
+	if( n == 0 ){
+		i = 1;
+	} else {
+		assert( n == i );
+	}
+	pEntry[i].next = NULL;
+	pEntry[i].gpuProfileName = NULL;
+	pEntry[i].debug = NULL;
+	pEntry[i].size = 0;
 
 	// count the offset
 	*pOffset = pSrc - pSrcOrig;
