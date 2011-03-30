@@ -244,11 +244,13 @@ int l_getSize__cudaFatElfEntry(__cudaFatElfEntry * pEntry, int * pCounter){
 	// to store the number of entries
 	size += sizeof(size_pkt_field_t);
 
-	// @todo Question: is this an array or a list (pEntry->next)? Let's assume
-	// it is a list; we might be wrong;
-	while (p != NULL) {
+	// it looks that this is an array, with a terminator
+	// with fields NULL (that is from empirical experiments
+	while (p && p->gpuProfileName && p->elf && p->size) {
 		size += l_getStringPktSize(p->gpuProfileName);
-		size += l_getStringPktSize(p->elf);
+		assert(p->size != 0 );
+		size += p->size;        // for the elf file
+		// apparently this indicates the size of the elf file
 		size += sizeof(p->size);
 
 		(*pCounter)++;
@@ -564,6 +566,7 @@ inline int l_packStr(char * pDst, const char *pSrc){
 	return offset;
 }
 
+
 /**
  * unpacks what was packed with l_packStr;
  * allocates the memory
@@ -601,6 +604,31 @@ inline char * l_unpackStr(const char *pSrc, int * pOffset){
 
 	// add NULL
 	*(pDst + length) = '\0';
+
+	return pDst;
+}
+
+/**
+ * unpacks the given size of characters
+ * @param pSrc (in) from where we will copy the characters
+ * @param size (in) the number of characters (bytes) we need to copy
+ * @return the pointer to the allocated memory to hold what
+ *         was copied from pSrc
+ *         NULL if (1) pSrc is NULL or (2) problems with memory
+ *              or (3) size == 0;
+ */
+inline char * l_unpackChars(char * pSrc, int size){
+	char * pDst;
+
+	if ( NULL == pSrc || 0 == size )
+		return NULL;
+
+	pDst = malloc(size);
+	if( mallocCheck(pDst, __FUNCTION__, NULL ) == ERROR )
+		return NULL;
+
+	assert( pDst != NULL );
+	memcpy(pDst, pSrc, size);
 
 	return pDst;
 }
@@ -935,26 +963,34 @@ int l_packElf(char * pDst, __cudaFatElfEntry * pEntry, int n){
 	char * pDstOrig = pDst;
 	__cudaFatElfEntry *p = pEntry;
 
-	if (NULL == pDst)
+	if( NULL == pDst )
 		return ERROR;
 
 	// write the number of debug entries
-	memcpy(pDst, &n, sizeof(size_pkt_field_t));
+	memcpy(pDst,&n, sizeof(size_pkt_field_t) );
 	pDst += sizeof(size_pkt_field_t);
 
-	if (0 == n || NULL == pEntry) {
+	if( 0 == n || NULL == pEntry){
 		return pDst - pDstOrig;
 	}
 
 	// now write the entries
-	while (p != NULL) {
+	// those p->gpuProfile and p->elf are NULL are
+	// empirically determined
+	while(p && p->gpuProfileName && p->elf ){
 		tmp = l_packStr(pDst, p->gpuProfileName);
-		pDst += tmp;
-		tmp = l_packStr(pDst, p->elf);
 		pDst += tmp;
 		// copy the size
 		memcpy(pDst, &p->size, sizeof(unsigned int));
 		pDst += sizeof(unsigned int);
+		// it looks that the size is the size of the elf code
+		// pointed by the p->elf (I guess the same is with
+		// the debugEntry), not the string
+		if( p->size > 0 ){
+			assert(p->elf != NULL);
+			memcpy(pDst, p->elf, p->size);
+			pDst += p->size;
+		}
 
 		p = p->next;
 		i++;
@@ -962,7 +998,7 @@ int l_packElf(char * pDst, __cudaFatElfEntry * pEntry, int n){
 
 	assert( i == n );
 
-	return pDst - pDstOrig;
+	return pDst - pDstOrig ;
 }
 
 /**
@@ -991,31 +1027,43 @@ __cudaFatElfEntry * l_unpackElf(char * pSrc, int * pOffset){
 	pSrc += sizeof(size_pkt_field_t);
 
 	if( 0 == n ){
-		*pOffset = pSrc - pSrcOrig;
-		return NULL;
+		*pOffset = sizeof(size_pkt_field_t);
 	}
 
-	pEntry = (__cudaFatElfEntry *) malloc(n * sizeof(__cudaFatElfEntry ));
+	pEntry = (__cudaFatElfEntry *) malloc((n+1) * sizeof(__cudaFatElfEntry ));
 
 	for(i = 0; i < n; i++){
 		pEntry[i].gpuProfileName =  l_unpackStr(pSrc, &offset);
 		pSrc += offset;
 
-		pEntry[i].elf =  l_unpackStr(pSrc, &offset);
-		pSrc += offset;
-
 		memcpy(&pEntry[i].size, pSrc, sizeof(unsigned int));
 		pSrc += sizeof(unsigned int);
+
+		// unpack the elf binary
+		if( 0 == pEntry[i].size)
+			pEntry[i].elf = NULL;
+		else{
+			assert( pEntry[i].size > 0);
+			pEntry[i].elf = l_unpackChars(pSrc, pEntry[i].size);
+			if( pEntry[i].elf == NULL )
+				exit(ERROR);
+			pSrc += pEntry[i].size;
+		}
 
 		// update the pointer to the next
 		pEntry[i].next = &pEntry[i+1];
 	}
 
 	// add null terminators
-	assert(n >= 1);
-
-	// I think only this part is important
-	pEntry[n-1].next = NULL;
+	if( n == 0 ){
+		i = 1;
+	} else {
+		assert( n == i );
+	}
+	pEntry[i].next = NULL;
+	pEntry[i].gpuProfileName = NULL;
+	pEntry[i].elf = NULL;
+	pEntry[i].size = 0;
 
 	// count the offset
 	*pOffset = pSrc - pSrcOrig;

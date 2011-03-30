@@ -233,56 +233,44 @@ void test_l_getSize__cudaFatDebugEntry(void){
  *
  */
 void test_l_getSize__cudaFatElfEntry(void){
+	// this is the terminator for the elf entry
+	// as empirically observed
+	__cudaFatElfEntry TERM = {NULL, NULL, NULL, 0};
+
 	__cudaFatElfEntry e[] = { {NULL, NULL, NULL, 0} };
 	int cache = 0;
 	int size;
 
-	// 0. null entry
+	// 1. null entry
 	size = sizeof(size_pkt_field_t);
 	CU_ASSERT( l_getSize__cudaFatElfEntry(NULL, &cache) == size);
 	CU_ASSERT( 0 == cache);
 
-	// 1a. next null, the strings null
-	cache = 0;
-	size = sizeof(size_pkt_field_t)
-		+ sizeof(size_pkt_field_t)
-		+ sizeof(size_pkt_field_t)  + sizeof(e[0].size);
-	CU_ASSERT( l_getSize__cudaFatElfEntry(e, &cache) == size);
-	CU_ASSERT( 1 == cache);
-
-	// 1b. next is null, the strings are empty
-	e[0].elf = "";
-	e[0].gpuProfileName = "";
-	e[0].next = NULL;
-	cache = 0;
-	size = sizeof(size_pkt_field_t)
-			+ sizeof(size_pkt_field_t)
-			+ sizeof(size_pkt_field_t)
-			+ sizeof(e[0].size);
-	CU_ASSERT( l_getSize__cudaFatElfEntry(e, &cache) == size);
-	CU_ASSERT( 1 == cache);
-
-	// 2. next is null, the rest is not
+	// 2. one element
 	e[0].elf = "file1";
+	// the size corresponds to the number of characters
+	// in the elf field
+	e[0].size = 5;
 	e[0].gpuProfileName = "name";
-	e[0].next = NULL;
+	e[0].next = &TERM;
 	cache = 0;
-	size = sizeof(size_pkt_field_t) +
-		   sizeof(size_pkt_field_t) + 5 +
-		   sizeof(size_pkt_field_t) + 4 +
-		   sizeof(e[0].size);
+	size = sizeof(size_pkt_field_t)
+		+ sizeof(size_pkt_field_t) + 4  // gpuProfileName
+		+ sizeof(e[0].size) // size
+		+ e[0].size ; // elf length in bytes (provided by size)
+
 	CU_ASSERT( l_getSize__cudaFatElfEntry(e, &cache) == size);
 	CU_ASSERT( 1 == cache);
 
-	// 3. now normal situation
-	__cudaFatElfEntry e1[] = { {"profile", "debug", &e[0], 0}};
+	// 3. two another normal situation
+	__cudaFatElfEntry e1[] = { {"profile", "elffil", &e[0], 6}};
 
 	size =  sizeof(size_pkt_field_t) +
 			sizeof(size_pkt_field_t) + 7  +
-			sizeof(size_pkt_field_t) + 5  +
+			6 +
 			sizeof(e[1].size) +
-			sizeof(size_pkt_field_t) + 5  +
 			sizeof(size_pkt_field_t) + 4  +
+			5 +
 			sizeof(e[0].size);
 	cache = 0;
 	CU_ASSERT( l_getSize__cudaFatElfEntry(e1, &cache) == size);
@@ -345,16 +333,19 @@ void test_l_getSize__cudaFatBinaryEntry(void){
 		int size;
 	__cudaFatCudaBinary b[2];
 
+	__cudaFatDebugEntry DEB_TERM = {NULL, NULL, NULL, 0};
+	__cudaFatElfEntry ELF_TERM = {NULL, NULL, NULL, 0};
+
 	__cudaFatPtxEntry ptx1[] = { { "1", "p" }, { NULL, NULL } }; // 1s + 2s + 2
 	__cudaFatCubinEntry cubin1[] = { { "p", "c" }, { NULL, NULL } }; // 1s + 2s + 2
-	__cudaFatDebugEntry debug1[] = { { "p", "d", NULL, 1 } }; // 1s + 2s + 2 + int
-	__cudaFatElfEntry elf1[] = { { "p", "e", NULL, 1 } }; // 1s + 2s + 2 + int
+	__cudaFatDebugEntry debug1[] = { { "p", "d", &DEB_TERM, 1 } }; // 1s + 2s + 2 + int
+	__cudaFatElfEntry elf1[] = { { "p", "ef", &ELF_TERM, 2 } }; // 1s + (1s + 1) + 2 + int
 	__cudaFatSymbol sym1[] = { { "s" }, { NULL } }; // 1s + 1s + 1
 
 	__cudaFatPtxEntry ptx2[] = { { "2", "2" }, { NULL, NULL } };
 	__cudaFatCubinEntry cubin2[] = { { "2", "2" }, { NULL, NULL } };
-	__cudaFatDebugEntry debug2[] = { { "2", "2", NULL, 1 } };
-	__cudaFatElfEntry elf2[] = { { "2", "2", NULL, 1 } };
+	__cudaFatDebugEntry debug2[] = { { "2", "2", &DEB_TERM, 1 } };
+	__cudaFatElfEntry elf2[] = { { "2", "2", &ELF_TERM, 1 } };
 	__cudaFatSymbol sym2[] = { { "s" }, { NULL } };
 
 	// 0
@@ -402,7 +393,7 @@ void test_l_getSize__cudaFatBinaryEntry(void){
 			sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2 // ptx
 			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2 // cubin
 			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2  + sizeof(unsigned int) // debug
-			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2  + sizeof(unsigned int) // elf
+			+ sizeof(size_pkt_field_t) + (sizeof(size_pkt_field_t) +1) + 2  + sizeof(unsigned int) // elf
 			+ sizeof(size_pkt_field_t) + sizeof(size_pkt_field_t) + 1 // exported
 			+ sizeof(size_pkt_field_t) + sizeof(size_pkt_field_t) + 1 // imported
 
@@ -414,7 +405,7 @@ void test_l_getSize__cudaFatBinaryEntry(void){
 			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2 // ptx
 			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2 // cubin
 			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2  + sizeof(unsigned int) // debug
-			+ sizeof(size_pkt_field_t) + 2 * sizeof(size_pkt_field_t) + 2  + sizeof(unsigned int) // elf
+			+ sizeof(size_pkt_field_t) + (sizeof(size_pkt_field_t) + 1) + 1 + sizeof(unsigned int) // elf
 			+ sizeof(size_pkt_field_t) + sizeof(size_pkt_field_t) + 1 // exported
 			+ sizeof(size_pkt_field_t) + sizeof(size_pkt_field_t) + 1 // imported
 			;
@@ -586,8 +577,10 @@ void test_l_packUnpackDebug(void){
 }
 
 void test_l_packUnpackElf(void){
-	__cudaFatElfEntry entry1 = { "prof1", "elf1", NULL, 3 };
-	__cudaFatElfEntry entry2 = { "prof2", "elf2", NULL, 13 };
+	__cudaFatElfEntry TERM = {NULL, NULL, NULL, 0};
+
+	__cudaFatElfEntry entry1 = { "prof1", "elf1", &TERM, 4 };
+	__cudaFatElfEntry entry2 = { "prof2", "elf24", &TERM, 5 };
 
 	entry1.next = &entry2;
 
@@ -606,10 +599,10 @@ void test_l_packUnpackElf(void){
 	// 3. regular thing
 	offset = sizeof(size_pkt_field_t)
 			+ sizeof(size_pkt_field_t) + strlen(entry1.gpuProfileName) +
-			+ sizeof(size_pkt_field_t) + strlen(entry1.elf) +
+			+ strlen(entry1.elf) +
 			+ sizeof(unsigned int)
 			+ sizeof(size_pkt_field_t) + strlen(entry2.gpuProfileName) +
-			+ sizeof(size_pkt_field_t) + strlen(entry2.elf) +
+			+ strlen(entry2.elf) +
 			+ sizeof(unsigned int);
 	CU_ASSERT_EQUAL(l_packElf(arr, &entry1, 2), offset);
 
@@ -618,13 +611,19 @@ void test_l_packUnpackElf(void){
 	CU_ASSERT_EQUAL(unpack_offset, offset);
 	CU_ASSERT_NSTRING_EQUAL(unpack[0].gpuProfileName, "prof1", 5);
 	CU_ASSERT_NSTRING_EQUAL(unpack[0].elf, "elf1", 4);
-	CU_ASSERT_EQUAL(unpack[0].size, 3);
+	CU_ASSERT_EQUAL(unpack[0].size, 4);
 	CU_ASSERT_PTR_EQUAL(unpack[0].next, &unpack[1]);
 
 	CU_ASSERT_NSTRING_EQUAL(unpack[1].gpuProfileName, "prof2", 5);
-	CU_ASSERT_NSTRING_EQUAL(unpack[1].elf, "elf2", 4);
-	CU_ASSERT_EQUAL(unpack[1].size, 13);
-	CU_ASSERT_EQUAL(unpack[1].next, NULL);
+	CU_ASSERT_NSTRING_EQUAL(unpack[1].elf, "elf24", 5);
+	CU_ASSERT_EQUAL(unpack[1].size, 5);
+	CU_ASSERT_PTR_NOT_NULL(unpack[1].next);
+
+	CU_ASSERT_PTR_NULL(unpack[1].next->elf);
+	CU_ASSERT_PTR_NULL(unpack[1].next->gpuProfileName);
+	CU_ASSERT_PTR_NULL(unpack[1].next->next);
+	CU_ASSERT_EQUAL(unpack[1].next->size, 0);
+
 
 	free(unpack[0].gpuProfileName);
 	free(unpack[0].elf);
@@ -666,18 +665,19 @@ void test_l_packUnpackSymbol(void){
 	free(unpack);
 }
 
-void test_l_packUnpackDeb(){
+void test_l_packUnpackDep(){
 	cache_num_entries_t cache = {0, 0, 0, 0, 0, 0, 0};
 	int size;
 	__cudaFatCudaBinary b[2];
 	__cudaFatCudaBinary u;
 
 	__cudaFatDebugEntry DEB_TERM = { NULL, NULL, NULL, 0};
+	__cudaFatElfEntry ELF_TERM = { NULL, NULL, NULL, 0};
 
 	__cudaFatPtxEntry ptx1[] = { {"p1", "ptx1"},{NULL, NULL}};
 	__cudaFatCubinEntry cubin1[] = { {"p1", "cubin1"}, {NULL, NULL}};
 	__cudaFatDebugEntry debug1[] = { {"p1", "debug1", &DEB_TERM, 1} };
-	__cudaFatElfEntry elf1[] = { {"p1", "elf1", NULL, 1}};
+	__cudaFatElfEntry elf1[] = { {"p1", "elf1", &ELF_TERM, 4}};
 	__cudaFatSymbol sym1[] = {{"s1"}, {"sym1"}, {NULL}};
 
 /*	__cudaFatPtxEntry ptx2[] = { {"p2", "ptx2"},{NULL, NULL}};
@@ -768,14 +768,19 @@ void test_l_packUnpackDeb(){
 	CU_ASSERT_PTR_NULL(u.debug->next->gpuProfileName);
 	CU_ASSERT_PTR_NULL(u.debug->next->debug);
 	CU_ASSERT_PTR_NULL(u.debug->next->next);
-
-
+	CU_ASSERT_EQUAL(u.debug->next->size, 0);
 
 	// elf
 	CU_ASSERT_NSTRING_EQUAL(u.elf->gpuProfileName, "p1", 2);
 	CU_ASSERT_NSTRING_EQUAL(u.elf->elf, "elf1", 4);
-	CU_ASSERT_EQUAL(u.elf->size, 1);
-	CU_ASSERT_PTR_EQUAL(u.elf->next, NULL);
+	CU_ASSERT_EQUAL(u.elf->size, 4);
+	CU_ASSERT_PTR_NOT_NULL(u.elf->next);
+	// elf terminator
+	CU_ASSERT_PTR_NULL(u.elf->next->gpuProfileName);
+	CU_ASSERT_PTR_NULL(u.elf->next->elf);
+	CU_ASSERT_PTR_NULL(u.elf->next->next);
+	CU_ASSERT_EQUAL(u.elf->next->size, 0);
+
 
 	// exported
 	CU_ASSERT_NSTRING_EQUAL(u.exported->name, "s1", 2);
@@ -844,11 +849,12 @@ void test_packunpack(void){
 	int size = 0;
 
 	__cudaFatDebugEntry deb_term = {NULL, NULL, NULL, 0};
+	__cudaFatElfEntry ELF_TERM = { NULL, NULL, NULL, 0};
 
 	__cudaFatPtxEntry ptx[] = { {"gpuProf", "ptx"},{NULL, NULL}};
 	__cudaFatCubinEntry cubin[] = { {"profiler", "cubin"}, {NULL, NULL}};
 	__cudaFatDebugEntry debug[] = { {"prof", "debug", &deb_term, 1} };
-	__cudaFatElfEntry elf[] = { {"prof", "elf", NULL, 1}};
+	__cudaFatElfEntry elf[] = { {"prof", "elf", &ELF_TERM, 3}};
 	__cudaFatSymbol sym[] = {{"symbol1"}, {"sym2"}, {NULL}};
 
 	b.magic = 10;
@@ -920,13 +926,19 @@ void test_packunpack(void){
 	CU_ASSERT_PTR_NULL(u.debug->next->gpuProfileName);
 	CU_ASSERT_PTR_NULL(u.debug->next->debug);
 	CU_ASSERT_PTR_NULL(u.debug->next->next);
-
+	CU_ASSERT_EQUAL(u.debug->next->size, 0);
 
 	// elf
 	CU_ASSERT_NSTRING_EQUAL(u.elf->gpuProfileName, "prof", 4);
 	CU_ASSERT_NSTRING_EQUAL(u.elf->elf, "elf", 3);
-	CU_ASSERT_EQUAL(u.elf->size, 1);
-	CU_ASSERT_PTR_EQUAL(u.elf->next, NULL);
+	CU_ASSERT_EQUAL(u.elf->size, 3);
+	CU_ASSERT_PTR_NOT_NULL(u.elf->next);
+	// elf terminator
+	CU_ASSERT_PTR_NULL(u.elf->next->gpuProfileName);
+	CU_ASSERT_PTR_NULL(u.elf->next->elf);
+	CU_ASSERT_PTR_NULL(u.elf->next->next);
+	CU_ASSERT_EQUAL(u.elf->next->size, 0);
+
 
 	// exported
 	CU_ASSERT_NSTRING_EQUAL(u.exported->name, "symbol1", 7);
@@ -1014,7 +1026,7 @@ int main()
 		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackDebug", test_l_packUnpackDebug)) ||
 		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackElf", test_l_packUnpackElf)) ||
 		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackSymbol", test_l_packUnpackSymbol)) ||
-		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackDeb", test_l_packUnpackDeb)) ||
+		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackDep", test_l_packUnpackDep)) ||
 		(NULL == CU_add_test(pSuitePack, "test of test_packunpack", test_packunpack))
 		)
    {

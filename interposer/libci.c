@@ -2068,18 +2068,35 @@ void l_printDebugE(__cudaFatDebugEntry * pEntry){
 	printd(DBG_INFO, " ~~~~~~~~ __cudaFatDebugEntry: %p ~~~~~~~~~~\n", pEntry);
 	if( p != NULL ){
 		while( p ){
-			printd(DBG_INFO, "pEntry[%d] (gpuProfileName, debug, size): %s, %s, %d\n",
-					p->gpuProfileName, p->debug, p->size);
+			printd(DBG_INFO, "pEntry[%d] (gpuProfileName, debug, next, size): %s, %s, %p, %d\n",
+					i, p->gpuProfileName, p->debug, p->next, p->size);
 			p = p->next;
+			i++;
 		}
 	}
 }
+
+void l_printElfE(__cudaFatElfEntry * pEntry){
+	__cudaFatElfEntry *p = pEntry;
+	int i = 0;
+	printd(DBG_INFO, " ~~~~~~~~ __cudaFatElfEntry: %p ~~~~~~~~~~\n", pEntry);
+	if( p != NULL ){
+		while( p ){
+			printd(DBG_INFO, "pEntry[%d] (gpuProfileName, elf, next, size): %s, %s, %p, %d\n",
+					i, p->gpuProfileName, p->elf, p->next, p->size);
+			p = p->next;
+			i++;
+		}
+	}
+}
+
 
 void l_printFatBinary(__cudaFatCudaBinary * pFatBin){
 	if( pFatBin == NULL ){
 		printd(DBG_INFO, "FatBinary  = %p\n", pFatBin);
 	} else {
 		l_printDebugE(pFatBin->debug);
+		l_printElfE(pFatBin->elf);
 	}
 }
 /**
