@@ -362,10 +362,13 @@ int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet) {
 	printd(DBG_DEBUG, "%s: CUDA_ERROR=%d before RPC on method %d\n", __FUNCTION__,
 			packet->ret_ex_val.err, packet->method_id);
 
+	printd(DBG_DEBUG, "pPackedFat, packet->args[0].argui, size = %p, %ld\n",
+				packet->args[0].argp, packet->args[1].argi);
+
 	l_do_cuda_rpc(packet, (void *) packet->args[0].argui, packet->args[1].argi,
 			NULL, 0);
 
-	return (packet->ret_ex_val.err == 0)? OK : ERROR;
+	return (packet->ret_ex_val.handle != NULL) ? OK : ERROR;
 }
 
 /////////////////////////
@@ -379,8 +382,8 @@ int nvbackCudaGetDeviceCount_srv(cuda_packet_t *packet, conn_t * pConn){
     packet->ret_ex_val.err = cudaGetDeviceCount(&devCount);
     packet->args[0].argi = devCount;
 
-    printd(DBG_DEBUG, "%s.%d: CUDA_ERROR=%p for method id=%d after calling method\n",
-    		__FUNCTION__, __LINE__, packet->ret_ex_val.handle, packet->method_id);
+    printd(DBG_DEBUG, "%s.%d: CUDA_ERROR=%d for method id=%d after calling method\n",
+    		__FUNCTION__, __LINE__, packet->ret_ex_val.err, packet->method_id);
     return OK;
 }
 
@@ -393,7 +396,7 @@ int nvbackCudaGetDeviceProperties_srv(cuda_packet_t *packet, conn_t * pConn){
 
     // I guess you need to pack the change somehow the l_do_cuda_rpc
     // to use and send the response_data_buffer
-    printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+    printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 
     return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
@@ -405,15 +408,15 @@ int nvbackCudaMalloc_srv(cuda_packet_t * packet, conn_t * pConn){
 	packet->ret_ex_val.err = cudaMalloc(&packet->args[0].argp, packet->args[1].argi);
 
     printd(DBG_DEBUG,"%s: devPtr is %p, size %ld\n",__FUNCTION__,packet->args[0].argp, packet->args[1].argi);
-    printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d after execution\n",
-    		packet->ret_ex_val.handle, packet->method_id);
+    printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d after execution\n",
+    		packet->ret_ex_val.err, packet->method_id);
 	return OK;
 }
 
 int nvbackCudaFree_srv(cuda_packet_t *packet, conn_t *pConn){
 	printd(DBG_DEBUG,"%s: devPtr is %p\n",__FUNCTION__,packet->args[0].argp);
     packet->ret_ex_val.err = cudaFree(packet->args[0].argp);
-    printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+    printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
     return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
 
@@ -422,7 +425,7 @@ int nvbackCudaSetupArgument_srv(cuda_packet_t *packet, conn_t *pConn){
 	packet->ret_ex_val.err = cudaSetupArgument( arg,
 	            packet->args[1].argi,
 	            packet->args[2].argi);
-    printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+    printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
     return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
 
@@ -432,7 +435,7 @@ int nvbackCudaConfigureCall_srv(cuda_packet_t *packet, conn_t *pConn){
             packet->args[2].argi,
             (cudaStream_t) packet->args[3].argi);
 
-    printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+    printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
     return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
 
@@ -458,7 +461,7 @@ int nvbackCudaLaunch_srv(cuda_packet_t * packet, conn_t * pConn){
 	  }
 	}
 
-	printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+	printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 
 	return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
@@ -493,18 +496,30 @@ int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
 	            (void *)packet->args[1].argui,
 	            packet->args[2].argi,
 	            packet->args[3].argi);
-	printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
 
-	return OK;
+	printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+
+	return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
 
+/**
+ * in this function we do not return in the handle the
+ * packet->ret_ex_val.err is not set I believe as
+ * in most of the other calls so take this into account
+ */
 int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn){
 
-	__cudaFatCudaBinary * pFatC;
+	__cudaFatCudaBinary * pFatC = malloc(sizeof(__cudaFatCudaBinary));
 	void ** pFatCHandle;
 
-
-    pFatC = copyFatBinary((__cudaFatCudaBinary *)((char *)myconn->request_data_buffer + packet->ret_ex_val.data_unit));
+	if( mallocCheck(pFatC, __FUNCTION__, NULL ) == ERROR ){
+		exit(ERROR);
+	}
+	if( unpackFatBinary(pFatC, myconn->request_data_buffer) == ERROR ){
+		printd(DBG_ERROR, "%s.%s: Problems with unpacking fat binary\n", __FILE__, __FUNCTION__);
+		exit(ERROR);
+	}
+    //pFatC = copyFatBinary((__cudaFatCudaBinary *)((char *)myconn->request_data_buffer + packet->ret_ex_val.data_unit));
 
 	// call __cudaRegisterFatBinary; otherwise the compiler complaints that
 	// undefined reference to __cudaRegisterFatBinary
@@ -514,5 +529,6 @@ int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn){
     packet->ret_ex_val.handle = pFatCHandle;
 
     printd(DBG_DEBUG, "%s: FATCUBIN HANDLE: registered %p\n", __FUNCTION__, pFatCHandle);
-    return CUDA_SUCCESS;
+
+    return OK;
 }

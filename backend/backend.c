@@ -87,8 +87,6 @@ void * backend_thread(){
 		// let's assume that we have enough space. otherwise we have a problem
 		// pConn allocates the buffers for incoming cuda packets
 		// so we should be fine
-		printd(DBG_INFO, "%s.%d: Expecting %d packets.\n", __FUNCTION__,
-				__LINE__, hdr->num_cuda_pkts);
 		if(1 != get(pConn, rpkts, hdr->num_cuda_pkts * sizeof(rpkt_t))) {
 			break;
 		}
@@ -98,9 +96,15 @@ void * backend_thread(){
 		printd(DBG_INFO, "%s.%d: Received Method_id/Thr_id: %d, %lu.\n", __FUNCTION__,
 						__LINE__, rpkts[0].method_id, rpkts[0].thr_id);
 
+
 		// receiving the request buffer if any
 		if(hdr->data_size > 0){
-			assert(hdr->data_size <= (unsigned int) pConn->request_data_size);
+
+			printd(DBG_INFO, "%s.%d: Expecting data size/Buffer: %u, %d.\n", __FUNCTION__,
+											__LINE__, hdr->data_size, pConn->request_data_size);
+			// let's assume that the expected amount of data will fit into
+			// the buffer we have (size of pConn->request_data_buffer
+			assert(hdr->data_size <= TOTAL_XFER_MAX);
 			if(1 != get(pConn, pConn->request_data_buffer, hdr->data_size)){
 				break;
 			}

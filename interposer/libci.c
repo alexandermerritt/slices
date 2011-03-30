@@ -2125,7 +2125,6 @@ void l_printDepE(__cudaFatCudaBinary * p){
 		i++;
 		p = p->dependends;
 	}
-
 }
 
 void l_printElfE(__cudaFatElfEntry * p){
@@ -2139,7 +2138,6 @@ void l_printElfE(__cudaFatElfEntry * p){
 		p = p->next;
 		i++;
 	}
-
 }
 
 void l_printFatBinary(__cudaFatCudaBinary * pFatBin){
@@ -2214,15 +2212,15 @@ void** __cudaRegisterFatBinary(void* fatC) {
 		exit(ERROR);
 	}
 
-
 	// now update the packets information
 	pPacket->flags |= CUDA_Copytype;
 	pPacket->args[0].argp = pPackedFat;			// start of the request buffer
 	pPacket->args[1].argi = fb_size;			// the size of the request buffer
 
-	printd(DBG_DEBUG, "13HEEEEEEEEEEEEEY!!!!!!!!!!!!\n");
+	printd(DBG_DEBUG, "pPackedFat, pPacket->args[0].argp = %p, %p\n",
+			pPackedFat, pPacket->args[0].argp);
 	// send the packet
-	if (__nvback_cudaRegisterFatBinary(pPacket) != OK) {
+	if (__nvback_cudaRegisterFatBinary_rpc(pPacket) != OK) {
 		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;

@@ -46,6 +46,7 @@ int get_fat_rec_size(__cudaFatCudaBinary *fatCubin, cache_num_entries_t *num);
 
 int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 		cache_num_entries_t * const pEntriesCache);
+int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack);
 
 cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCudaError);
 
