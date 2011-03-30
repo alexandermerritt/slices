@@ -73,6 +73,8 @@ int l_getSize__cudaFatPtxEntry(const __cudaFatPtxEntry * pEntry, int * pCounter)
 	// to store the number of ptx entries
 	size += sizeof(size_pkt_field_t);
 
+	*pCounter = 0;
+
 	// size of the string, string, plus NULL terminator
 	if (pEntry != NULL) {
 		while (pEntry[i].gpuProfileName != NULL && pEntry[i].ptx != NULL) {
@@ -101,6 +103,8 @@ int l_getSize__cudaFatCubinEntry(const __cudaFatCubinEntry * pEntry, int * pCoun
 
 	// to store the number of entries
 	size += sizeof(size_pkt_field_t);
+
+	*pCounter = 0;
 
 	// size of the string, string, plus NULL terminator
 	if (pEntry != NULL) {
@@ -141,6 +145,8 @@ int l_getSize__cudaFatDebugEntry(__cudaFatDebugEntry * pEntry, int * pCounter){
 	// to store the number of entries
 	size += sizeof(size_pkt_field_t);
 
+	*pCounter = 0;
+
 	// Empirical experiments show that the
 	// end shows gpuProfileName and debug are NULL
 	// and it likely is an array not a list
@@ -169,7 +175,7 @@ int l_getSize__cudaFatDebugEntry(__cudaFatDebugEntry * pEntry, int * pCounter){
  * ....
  *
  * @param pEntry (in) the entry we want to count the size of
- * @param counter (out) a counter to count the entry symbols
+ * @param counter (out) a counter to count the entry symbols (zeroed)
  * @return the size of the entry (including the size of the pointer to the structure)
  */
 int l_getSize__cudaFatSymbolEntry(const __cudaFatSymbol * pEntry, int * pCounter){
@@ -177,6 +183,8 @@ int l_getSize__cudaFatSymbolEntry(const __cudaFatSymbol * pEntry, int * pCounter
 
 	// to store the number of entries
 	size += sizeof(size_pkt_field_t);     // counter
+
+	*pCounter = 0;
 
 	if( pEntry == NULL || pEntry->name == NULL){
 		size += l_getStringPktSize(NULL);
@@ -213,6 +221,8 @@ int l_getSize__cudaFatBinaryEntry(__cudaFatCudaBinary * pEntry, cache_num_entrie
 	int size = sizeof(size_pkt_field_t);   // for the counter
 	__cudaFatCudaBinary * p = pEntry;
 
+	// @todo clear the pCacheEntries?
+	// *pCacheEntries = {0} or whatever
 	while( p != NULL ){
 		cache_num_entries_t nent = { 0, 0, 0, 0, 0, 0, 0 };
 		size += l_getFatRecPktSize(p, &nent);
@@ -231,7 +241,7 @@ int l_getSize__cudaFatBinaryEntry(__cudaFatCudaBinary * pEntry, cache_num_entrie
  * This is almost identical to @see l_getSize__cudaFatDebugEntry()
  *
  * @param pEntry (in) the entry we want to count the size of
- * @oaram pEntriesCache (out) the cache for storing entries about FatEntries structures
+ * @oaram pCounter (out) the cache for storing number of elves (first zeroed)
  * @return the size of the entry (including the size of the pointer to the structure)
  */
 int l_getSize__cudaFatElfEntry(__cudaFatElfEntry * pEntry, int * pCounter){
@@ -240,6 +250,9 @@ int l_getSize__cudaFatElfEntry(__cudaFatElfEntry * pEntry, int * pCounter){
 	// that's why we want to iterate through all this elements
 	int size = 0;
 	__cudaFatElfEntry * p = pEntry;
+
+	// clear the counter
+	*pCounter = 0;
 
 	// to store the number of entries
 	size += sizeof(size_pkt_field_t);
@@ -351,6 +364,15 @@ int l_getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t
 
 int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t * pEntriesCache){
 	int size = 0;
+	// clear cache - this is again cleaned in particular l_getSize__cudaFat...
+	// functions
+	pEntriesCache->ncubs = 0;
+	pEntriesCache->ndebs = 0;
+	pEntriesCache->ndeps = 0;
+	pEntriesCache->nelves = 0;
+	pEntriesCache->nexps = 0;
+	pEntriesCache->nimps = 0;
+	pEntriesCache->nptxs = 0;
 
 	size = l_getFatRecPktSize(pFatCubin, pEntriesCache);
 	size += l_getSize__cudaFatBinaryEntry(pFatCubin->dependends, pEntriesCache);
@@ -996,6 +1018,7 @@ int l_packElf(char * pDst, __cudaFatElfEntry * pEntry, int n){
 		i++;
 	}
 
+	printd(DBG_INFO, "%d, %d\n", i, n);
 	assert( i == n );
 
 	return pDst - pDstOrig ;
