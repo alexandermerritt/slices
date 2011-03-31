@@ -51,6 +51,18 @@ extern __cudaFatSymbol * l_unpackSymbol(char * pSrc, int * pOffset);
 extern int l_packDep(char * pDst, __cudaFatCudaBinary * pEntry, int n);
 extern __cudaFatCudaBinary * l_unpackDep(char * pSrc, int * pOffset);
 
+
+// ----------------------------- Reg Func Args
+extern int l_getSize_regFuncArgs(void** fatCubinHandle, const char* hostFun,
+        char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
+        uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
+extern inline int l_getUint3PtrPktSize(uint3 * p);
+extern inline int l_getDim3PtrPktSize(dim3 * p);
+extern inline int l_getIntPtrPktSize(int * p);
+
+extern inline int l_packUint3Ptr(char * pDst, const uint3 *pSrc);
+extern inline uint3 * l_unpackUint3Ptr(const char *pSrc, int * pOffset);
+
 /* The suite initialization function.
  * Opens the temporary file used by the tests.
  * Returns zero on success, non-zero otherwise.
@@ -953,7 +965,8 @@ void test_packunpack(void){
 	// dependends
 	CU_ASSERT(NULL == u.dependends);
 
-/*	free(u.key);
+/*	hopefully system will clean up the memory mess after us
+ 	free(u.key);
 	free(u.ident);
 	free(u.usageMode);
 
@@ -981,6 +994,99 @@ void test_packunpack(void){
 
 	free(pPacket);
 }
+// ----------------- regFuncArgs tests
+void test_l_getPtrPktSize(void){
+	uint3 u;
+	dim3 d;
+	int i;
+
+	// first uint3
+	CU_ASSERT_EQUAL(l_getUint3PtrPktSize(NULL), sizeof(void*));
+	CU_ASSERT_EQUAL(l_getUint3PtrPktSize(&u), sizeof(void*)+3*sizeof(u.x));
+
+	// dim3
+	CU_ASSERT_EQUAL(l_getDim3PtrPktSize(NULL), sizeof(void*));
+	CU_ASSERT_EQUAL(l_getDim3PtrPktSize(&d), sizeof(void*)+3*sizeof(d.x));
+
+	// int
+	CU_ASSERT_EQUAL(l_getIntPtrPktSize(NULL), sizeof(void*));
+	CU_ASSERT_EQUAL(l_getIntPtrPktSize(&i), sizeof(void*)+sizeof(int));
+}
+
+void test_l_getSize_regFuncArgs(void){
+	int size;
+	int expected;
+	// what fields are expected
+	int core_expected = sizeof(void*) // pointer
+		+ 3* sizeof(size_pkt_field_t)	// three headers for strings (length field)
+		+ sizeof(int) // thread
+		+ 5 * sizeof(void*); // pointers
+
+	// 1.
+	size = l_getSize_regFuncArgs((void**)0x14b1d490, "123", "_Z12square_arrayPfi", "_Z12square_arrayPfi", -1,
+				NULL, NULL, NULL, NULL, NULL);
+	expected = strlen("123")
+			+ strlen("_Z12square_arrayPfi")
+			+ strlen("_Z12square_arrayPfi")
+			+ core_expected;
+
+	CU_ASSERT_EQUAL(size, expected);
+
+	// 2. null things
+	size = l_getSize_regFuncArgs(NULL, NULL, NULL, NULL, -1,
+					NULL, NULL, NULL, NULL, NULL);
+	expected = core_expected;
+	CU_ASSERT_EQUAL(size, expected);
+
+	// 3. not null things
+	uint3 i1 = {1,2,2};
+	uint3 i2 = {1,3,2};
+	dim3 d1 = {3,3,3};
+	dim3 d2  = {2,3,4};
+	int i = 1341;
+
+	size = l_getSize_regFuncArgs(NULL, "123", "a", "b", -1, &i1, &i2, &d1, &d2, &i);
+	expected = core_expected
+			+ 5 // string length
+			+ 6 * sizeof(i1.x) + 6 * sizeof(d1.x) + sizeof(int);
+	CU_ASSERT_EQUAL(size, expected);
+}
+
+void test_l_packUnpackUint3Ptr(void){
+	char arr[100];
+	int offset;
+	uint3 * pU;
+
+	// 0. pack from NULL src
+	offset = l_packUint3Ptr(NULL, NULL);
+	CU_ASSERT_EQUAL(offset, ERROR);
+
+	// 1. pack/unpack NULL pointer
+	offset = l_packUint3Ptr(arr, NULL);
+	CU_ASSERT_EQUAL(offset, sizeof(void*));
+	offset = 0;
+	pU = l_unpackUint3Ptr(arr, &offset);
+	CU_ASSERT_EQUAL(offset, sizeof(void*));
+	CU_ASSERT_PTR_NULL(pU);
+
+	// 2. unpack NULL
+	offset = 4;
+	pU = l_unpackUint3Ptr(NULL, &offset);
+	CU_ASSERT_PTR_NULL(pU);
+	CU_ASSERT_EQUAL(offset, ERROR);
+
+	// 3. pack/unpack normal non-NULL
+	uint3 u = { 1, 13, 5};
+	offset = l_packUint3Ptr(arr, &u);
+	CU_ASSERT_EQUAL(offset, sizeof(void*) + 3*sizeof(u.x));
+	offset = 0;
+	pU = l_unpackUint3Ptr(arr, &offset);
+	CU_ASSERT_EQUAL(offset, sizeof(void*) + 3*sizeof(u.x));
+	CU_ASSERT_PTR_NOT_NULL(pU);
+	CU_ASSERT_EQUAL(pU->x, 1);
+	CU_ASSERT_EQUAL(pU->y, 13);
+	CU_ASSERT_EQUAL(pU->z, 5);
+}
 
 /* The main() function for setting up and running the tests.
  * Returns a CUE_SUCCESS on successful running, another
@@ -990,13 +1096,14 @@ int main()
 {
    CU_pSuite pSuite = NULL;
    CU_pSuite pSuitePack = NULL;
+   CU_pSuite pSuiteRegFuncArgs = NULL;
 
    /* initialize the CUnit test registry */
    if (CUE_SUCCESS != CU_initialize_registry())
       return CU_get_error();
 
    /* add a suite to the registry */
-   pSuite = CU_add_suite("GetSizeTest_Suite", init_suite1, clean_suite1);
+   pSuite = CU_add_suite("FatBinary: GetSizeTest_Suite", init_suite1, clean_suite1);
    if (NULL == pSuite) {
       CU_cleanup_registry();
       return CU_get_error();
@@ -1014,7 +1121,7 @@ int main()
       return CU_get_error();
    }
 
-   pSuitePack = CU_add_suite("PackUnpackTest_Suite", init_suite1, clean_suite1);
+   pSuitePack = CU_add_suite("FatBinary PackUnpackTest_Suite", init_suite1, clean_suite1);
    if(NULL == pSuitePack){
 	   CU_cleanup_registry();
 	   return CU_get_error();
@@ -1033,6 +1140,22 @@ int main()
       CU_cleanup_registry();
       return CU_get_error();
    }
+
+   pSuiteRegFuncArgs = CU_add_suite("RegFuncArgs Test_Suite", NULL, NULL);
+   if(NULL == pSuitePack){
+	   CU_cleanup_registry();
+	   return CU_get_error();
+   }
+   /* add the tests to the suite */
+   if ((NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_getPtrPktSize", test_l_getPtrPktSize)) ||
+	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_getSize_regFuncArgs", test_l_getSize_regFuncArgs)) ||
+	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_packUnpackUint3Ptr", test_l_packUnpackUint3Ptr))
+   )
+   {
+      CU_cleanup_registry();
+      return CU_get_error();
+   }
+
 
    /* Run all tests using the CUnit Basic interface */
    CU_basic_set_mode(CU_BRM_VERBOSE);

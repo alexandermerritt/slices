@@ -2173,15 +2173,16 @@ void** __cudaRegisterFatBinary(void* fatC) {
 	// here we will store the number of entries to spare counting again and again
 	// @todo might be unimportant
 	cache_num_entries_t entries_cached = {0, 0, 0, 0, 0, 0, 0};
-	cache_num_entries_t nent = {0, 0, 0, 0, 0, 0, 0};
 	// the size of the packet for cubin
 	int fb_size;
 
+	// In original version of the code we created a kind of a structure
+	// in a contiguous thing
 	// in fact we are allocating the contiguous area of memory that should
 	// be treated as a void*, but we want to make it look like the structure
 	// __cudaFatCudaBinary; that's why we put it as a __cudaFatCudaBinary
 	// and not *void; it will be the serialized version of fatC
-	__cudaFatCudaBinary * pSerFatC;    // a pointer to a serialized fatC
+
 	// the original cubin to get rid of casting to __cudaFatCudaBinary
 	__cudaFatCudaBinary * pSrcFatC = (__cudaFatCudaBinary *)fatC;
 	// the place where the packed fat binary will be stored
@@ -2265,10 +2266,68 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle) {
 	(pFunc(fatCubinHandle));
 }
 
+void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
+		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
+		uint3* bid, dim3* bDim, dim3* gDim, int* wSize){
+	printd(DBG_DEBUG, "\t REG FUN ARGS:\n");
+	printd(DBG_DEBUG, "fatCubinHandle: %p\n", fatCubinHandle);
+	printd(DBG_DEBUG, "hostFun: %s\n", hostFun);
+	printd(DBG_DEBUG, "deviceFun: %s\n", deviceFun);
+	printd(DBG_DEBUG, "deviceName: %s\n", deviceName);
+	printd(DBG_DEBUG, "thread_limit: %d\n", thread_limit);
+	printd(DBG_DEBUG, "tid: %p\n", tid);
+	if( tid )
+		printd(DBG_DEBUG, "tid: (%ud, %ud, %ud)\n", tid->x, tid->y, tid->z );
+	printd(DBG_DEBUG, "bid: %p\n", bid);
+	if( bid )
+		printd(DBG_DEBUG, "bid: (%ud, %ud, %ud)\n", bid->x, bid->y, bid->z);
+	printd(DBG_DEBUG, "bDim: %p\n", bDim);
+	if( bDim )
+		printd(DBG_DEBUG, "bDim: (%ud, %ud, %ud)\n", bDim->x, bDim->y, bDim->z);
+	printd(DBG_DEBUG, "gDim: %p\n", gDim);
+	if( gDim )
+		printd(DBG_DEBUG, "gDim: (%ud, %ud, %ud)\n", gDim->x, gDim->y, gDim->z);
+
+	printd(DBG_DEBUG, "wSize: %p\n", wSize);
+}
+
+
 void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize) {
-	typedef void** (* pFuncType)(void** fatCubinHandle, const char* hostFun,
+	cuda_packet_t * pPacket;
+
+	if( l_remoteInitMetThrReq(&pPacket, __CUDA_REGISTER_FUNCTION, __FUNCTION__) == ERROR){
+		exit(ERROR);
+	}
+
+	l_printRegFunArgs(fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit,tid,
+			bid, bDim, gDim, wSize);
+
+	exit(-1);
+	reg_func_args_t * p;
+	// update packet
+	pPacket->flags |= CUDA_Copytype;
+	pPacket->args[0].reg_func_args = p;
+	int size = 0;
+	pPacket->args[1].argi = size;
+
+
+/*	if(nvbackCudaMalloc_rpc(pPacket) != OK ){
+		printd(DBG_ERROR, "%s.%d: Return from the RPC with an error\n", __FUNCTION__, __LINE__);
+		cuda_err = cudaErrorMemoryAllocation;
+		*devPtr = NULL;
+	} else {
+		printd(DBG_INFO, "%s.%d: Return from the RPC call DevPtr and size: %p\n", __FUNCTION__, __LINE__,
+				pPacket->args[0].argdp);
+		// unpack what we have got from the packet
+		*devPtr = pPacket->args[0].argp;
+		cuda_err = pPacket->ret_ex_val.err;
+	} */
+
+	free(pPacket);
+
+/*	typedef void** (* pFuncType)(void** fatCubinHandle, const char* hostFun,
 			char* deviceFun, const char* deviceName, int thread_limit,
 			uint3* tid, uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
 	static pFuncType pFunc = NULL;
@@ -2283,7 +2342,8 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	l_printFuncSig(__FUNCTION__);
 
 	(pFunc(fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit, tid,
-			bid, bDim, gDim, wSize));
+			bid, bDim, gDim, wSize)); */
+	return;
 }
 
 void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,

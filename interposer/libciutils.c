@@ -1216,6 +1216,8 @@ int l_packDep(char * pDst, __cudaFatCudaBinary * pEntry, int n){
 	if( 0 == n || NULL == pEntry ){
 		return pDst - pDstOrig;
 	} else {
+		printd(DBG_ERROR, "%s: Not implemented\n", __FUNCTION__);
+		assert(2==1);   // always complain
 		// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 		// @todo should be addressed appropriately
 		// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1446,187 +1448,191 @@ int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack){
 	return pFatPack - pFatPackOrig;
 }
 
-
-__cudaFatCudaBinary * serializeFatBinary1(__cudaFatCudaBinary * const pSrcFatC,
-		cache_num_entries_t * const pEntriesCache,
-		__cudaFatCudaBinary * const pDestFatC){
-
-	// holds where we currently are in the serializing area
-	char * pCurrent;
-
-	// @todo likely we will not need them. but let's see
-	__cudaFatPtxEntry *tempPtx, *nTempPtx;
-	__cudaFatCubinEntry *tempCub, *nTempCub;
-	__cudaFatDebugEntry *tempDeb, *nTempDeb;
-	__cudaFatElfEntry *tempElf, *nTempElf;
-	int len, i;
-
-	// Now make a copy in a contiguous buffer
-	// Doing it step by step because we need to allocate pointers
-	// as we go and there isnt much that will change by using memcpy
-	printd(DBG_DEBUG, "%s: nFatCubin addr = %p\n", __FUNCTION__, pDestFatC);
-	pDestFatC->magic = pSrcFatC->magic;
-	pDestFatC->version = pSrcFatC->version;
-	pDestFatC->gpuInfoVersion = pSrcFatC->gpuInfoVersion ;
-
-	// char*: key, ident, usageMode
-	pCurrent = (char *)((unsigned long)pDestFatC);
-	len = sizeof(__cudaFatCudaBinary);
-
-	// \todo Some repeat work. Can cache these lengths
-	GET_LOCAL_POINTER(pCurrent, len, pDestFatC->key, (char *));
-	COPY_STRINGS(pDestFatC,pSrcFatC,key,pCurrent,len);
-	// Adjust all the pointer variables to be offset from base
-	OFFSET_PTR_MEMB(pDestFatC,key,pDestFatC,(char *));
-	GET_LOCAL_POINTER(pCurrent, len, pDestFatC->ident, (char *));
-	COPY_STRINGS(pDestFatC,pSrcFatC,ident,pCurrent,len);
-	OFFSET_PTR_MEMB(pDestFatC,ident,pDestFatC,(char *));
-	GET_LOCAL_POINTER(pCurrent, len, pDestFatC->usageMode, (char *));
-	COPY_STRINGS(pDestFatC,pSrcFatC,usageMode,pCurrent,len);
-	OFFSET_PTR_MEMB(pDestFatC,usageMode,pDestFatC,(char *));
-
-	// Ptx block
-	GET_LOCAL_POINTER(pCurrent, len, pDestFatC->ptx, (__cudaFatPtxEntry *));
-	len = pEntriesCache->nptxs * sizeof(__cudaFatPtxEntry );
-	tempPtx = pSrcFatC->ptx;
-	nTempPtx = pDestFatC->ptx;
-	if (tempPtx != NULL) {
-		for (i = 0; i < pEntriesCache->nptxs; ++i) {
-			if (tempPtx[i].gpuProfileName != NULL) {
-				GET_LOCAL_POINTER(pCurrent, len, nTempPtx[i].gpuProfileName, (char *));
-				COPY_STRINGS((&nTempPtx[i]),(&tempPtx[i]),gpuProfileName,pCurrent,len);
-				OFFSET_PTR_MEMB((&nTempPtx[i]),gpuProfileName,pDestFatC,(char *));
-			} else
-				nTempPtx[i].gpuProfileName = 0;
-			if (tempPtx[i].ptx != NULL) {
-				GET_LOCAL_POINTER(pCurrent, len, nTempPtx[i].ptx, (char *));
-				COPY_STRINGS((&nTempPtx[i]),(&tempPtx[i]),ptx,pCurrent,len);
-				OFFSET_PTR_MEMB((&nTempPtx[i]),ptx,pDestFatC,(char *));
-			} else
-				nTempPtx[i].ptx = 0;
-		}
-		OFFSET_PTR_MEMB(pDestFatC,ptx,pDestFatC,(__cudaFatPtxEntry *));
-	} else
-		pDestFatC->ptx = NULL;
-
-
-	// Cubin block
-	GET_LOCAL_POINTER(pCurrent, len, pDestFatC->cubin, (__cudaFatCubinEntry *));
-	len = pEntriesCache->ncubs * sizeof(__cudaFatCubinEntry);
-	tempCub = pSrcFatC->cubin;
-	nTempCub = pDestFatC->cubin;
-	if (tempCub != NULL) {
-		for (i = 0; i < pEntriesCache->ncubs; ++i) {
-			if (tempCub[i].gpuProfileName != NULL) {
-				GET_LOCAL_POINTER(pCurrent, len, nTempCub[i].gpuProfileName, (char *));
-				COPY_STRINGS((&nTempCub[i]),(&tempCub[i]),gpuProfileName,pCurrent,len);
-				OFFSET_PTR_MEMB((&nTempCub[i]),gpuProfileName,pDestFatC,(char *));
-			}
-			else
-				nTempCub[i].gpuProfileName = 0;
-			if (tempCub[i].cubin != NULL) {
-				GET_LOCAL_POINTER(pCurrent, len, nTempCub[i].cubin, (char *));
-				COPY_STRINGS((&nTempCub[i]),(&tempCub[i]),cubin,pCurrent,len);
-				OFFSET_PTR_MEMB((&nTempCub[i]),cubin,pDestFatC,(char *));
-			}
-			else
-				nTempCub[i].cubin = 0;
-		}
-		OFFSET_PTR_MEMB(pDestFatC,cubin,pDestFatC,(__cudaFatCubinEntry *));
-	}
+/**
+ * Gets the size of teh packetized pointer to Uint3
+ */
+inline int l_getUint3PtrPktSize(uint3 * p){
+	if( p )
+		return sizeof(void*) + sizeof(uint3);
 	else
-		pDestFatC->cubin = NULL;
+		return sizeof(void*);		// p is NULL
+}
 
-	// Debug block
-	GET_LOCAL_POINTER(pCurrent, len, pDestFatC->debug, (__cudaFatDebugEntry *));
-	len = pEntriesCache->ndebs * sizeof(__cudaFatDebugEntry);
-	tempDeb = pSrcFatC->debug;
-	nTempDeb = pDestFatC->debug;
-	if (tempDeb != NULL) {
-		for (i = 0; i < pEntriesCache->ndebs; ++i) {
-			if (tempDeb[i].gpuProfileName != NULL) {
-				GET_LOCAL_POINTER(pCurrent, len, nTempDeb[i].gpuProfileName, (char *));
-				COPY_STRINGS((&nTempDeb[i]),(&tempDeb[i]),gpuProfileName,pCurrent,len);
-				OFFSET_PTR_MEMB((&nTempDeb[i]),gpuProfileName,pDestFatC,(char *));
-			}
-			else
-				nTempDeb[i].gpuProfileName = 0;
-			if (tempDeb[i].debug != NULL) {
-				GET_LOCAL_POINTER(pCurrent, len, nTempDeb[i].debug, (char *));
-				COPY_STRINGS((&nTempDeb[i]),(&tempDeb[i]),debug,pCurrent,len);
-				OFFSET_PTR_MEMB((&nTempDeb[i]),debug,pDestFatC,(char *));
-			}
-			else
-				nTempDeb[i].debug = 0;
-		}
-		OFFSET_PTR_MEMB(pDestFatC,debug,pDestFatC,(__cudaFatDebugEntry *));
-	}
+/**
+ * Returns the size of the packetized pointer to Dim3
+ */
+inline int l_getDim3PtrPktSize(dim3 * p){
+	if( p )
+		return sizeof(void*) + sizeof(dim3);
 	else
-		pDestFatC->debug = NULL;
+		return sizeof(void*);  // p is NULL
 
-	pDestFatC->debugInfo = pSrcFatC->debugInfo;
-	pDestFatC->flags = pSrcFatC->flags;
-#ifndef CORRECTWAY
-	pDestFatC->exported = pSrcFatC->exported;
-	pDestFatC->imported = pSrcFatC->imported;
-	pDestFatC->dependends = NULL;
-#else
-	GET_LOCAL_POINTER(pCurrent, (strlen(pSrcFatC->debug->debug) + 1), pDestFatC->exported, (__cudaFatSymbol *));
-	GET_LOCAL_POINTER(pCurrent, sizeof(__cudaFatSymbol), pDestFatC->exported->name, (char *));
-	strcpy(pDestFatC->exported->name, pSrcFatC->exported->name);
+}
 
-	GET_LOCAL_POINTER(pCurrent, (strlen(pSrcFatC->exported->name) + 1), pDestFatC->imported, (__cudaFatSymbol *));
-	GET_LOCAL_POINTER(pCurrent, sizeof(__cudaFatSymbol), pDestFatC->imported->name, (char *));
-	strcpy(pDestFatC->imported->name, pSrcFatC->imported->name);
-
-	GET_LOCAL_POINTER(pCurrent, len, pDestFatC->dependends, (__cudaFatCudaBinary *));
-	len = pEntriesCache->ndeps * sizeof(__cudaFatCudaBinary);
-	tempRec = pSrcFatC->dependends;
-	nTempRec = pDestFatC->dependends;
-	cache_num_entries_t nent = {0};
-	if (tempRec != NULL) {
-		// \todo This part definitely needs testing.
-		for (i = 0; i < pEntriesCache->ndeps; ++i) {
-			// \todo Right now, this is completely wrong. Every new
-			// element will end up overwriting the previous one bec
-			// copyFatBinary in this case does  not know where to
-			// start new allocations from.
-			GET_LOCAL_POINTER(pCurrent, len, pCurrent, (char *));
-			int size = get_fat_rec_size(&tempRec[i], &nent);
-			copyFatBinary(tempRec, &nent, &nTempRec[i]);
-			len = size;
-		}
-		OFFSET_PTR_MEMB(pDestFatC,dependends,pDestFatC,(__cudaFatCudaBinary *));
-	}
+/**
+ * returns the size of the packetized pointer to int
+ */
+inline int l_getIntPtrPktSize(int * p){
+	if( p )
+		return sizeof(void*) + sizeof(int);
 	else
-		pDestFatC->dependends = NULL;  // common case
-#endif
+		return sizeof(void*);	// p is NULL
 
-	pDestFatC->characteristic = pSrcFatC->characteristic;
+}
 
-	// elf block, added by Magda Slawinska
-	GET_LOCAL_POINTER(pCurrent, len, pDestFatC->elf, (__cudaFatElfEntry *));
-	len = pEntriesCache->nelves * sizeof(__cudaFatElfEntry );
-	tempElf = pSrcFatC->elf;
-	nTempElf = pDestFatC->elf;
-	if (tempElf != NULL) {
-		for (i = 0; i < pEntriesCache->nelves; ++i) {
-			if (tempElf[i].gpuProfileName != NULL) {
-				GET_LOCAL_POINTER(pCurrent, len, nTempElf[i].gpuProfileName, (char *));
-				COPY_STRINGS((&nTempElf[i]),(&tempElf[i]),gpuProfileName,pCurrent,len);
-				OFFSET_PTR_MEMB((&nTempElf[i]),gpuProfileName,pDestFatC,(char *));
-			} else
-				nTempElf[i].gpuProfileName = 0;
-			if (tempElf[i].elf != NULL) {
-				GET_LOCAL_POINTER(pCurrent, len, nTempElf[i].elf, (char *));
-				COPY_STRINGS((&nTempElf[i]),(&tempElf[i]),elf,pCurrent,len);
-				OFFSET_PTR_MEMB((&nTempElf[i]),elf,pDestFatC,(char *));
-			} else
-				nTempElf[i].elf = 0;
+/**
+ * counts the size of the reg func arguments
+ * I follow the original implementation which is also initially verified
+ * with the 3.2 execution
+ *
+ * @return total size in bytes
+ */
+int l_getSize_regFuncArgs(void** fatCubinHandle, const char* hostFun,
+        char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
+        uint3* bid, dim3* bDim, dim3* gDim, int* wSize){
+
+	int size = 0;
+
+	size = sizeof(fatCubinHandle); 						// fatCubinHandle
+	size += l_getStringPktSize(hostFun);
+	size += l_getStringPktSize(deviceFun);
+	size += l_getStringPktSize(deviceName);
+	size += sizeof(thread_limit);		 				// thread_limit
+	size += l_getUint3PtrPktSize(tid);  				// pointer to tid + tid
+	size += l_getUint3PtrPktSize(bid);				// pointer to bid + bid
+	size += l_getDim3PtrPktSize(bDim);					// bDim
+	size += l_getDim3PtrPktSize(gDim); 				// gDim
+	size += l_getIntPtrPktSize(wSize);		// wSize
+
+	return size;
+}
+
+/**
+ * packetizes the pointer to uint3 and writes it pDst
+ * @param pDst (in/out) when we right our packet
+ * @param pSrc (in) from where we are copying the uint3 (our uint3 pointer)
+ * @return offset we need to add to pDst later
+ *         ERROR if pDst is NULL
+ */
+inline int l_packUint3Ptr(char * pDst, const uint3 *pSrc){
+	// to allow to count the offset
+	char * pDstOrig = pDst;
+
+	if( !pDst )
+		return ERROR;
+
+	// copy the value of the pointer, use the trick with
+	// different views; now we treat our pDst as an array
+	// of uint3
+
+	uint3 ** pUint3 = (uint3**) pDst;
+	pDst += sizeof(void*);
+	pUint3[0] = pSrc;
+
+	// copy the values if any
+	if( pSrc ){
+		// now we treat our pDst as an array of unsigned int
+		unsigned int * pU = (unsigned int*) pDst;
+		pU[0] = pSrc->x;
+		pU[1] = pSrc->y;
+		pU[2] = pSrc->z;
+
+		pDst += 3 * sizeof(pSrc->x);
+	}
+
+	return pDst - pDstOrig;
+}
+
+/**
+ * unpacks the pointer to the Uint; tries to zero the *pOffset
+ * @param pSrc (in) from where we recreate the pointer to the uint3
+ * @param pOffset (out) changes the offset to enable us to update the pSrc
+ *        if < 0 then indicates some errors with memory allocation
+ *        or pSrc is NULL
+ * @return a pointer to a new uint3
+ *         NULL if problems with memory allocation or pSrc is NULL
+ */
+inline uint3 * l_unpackUint3Ptr(const char *pSrc, int * pOffset){
+
+	uint3 * p;
+
+	if( !pSrc ){
+		*pOffset = ERROR;
+		return NULL;
+	}
+
+	*pOffset = 0;		// cleans the counter
+
+	// pSrc
+	uint3 ** pUint3 = (uint3**) pSrc;
+	pSrc += sizeof(void*);
+	*pOffset = sizeof(void*);
+
+	if( pUint3[0]){
+		// not null
+		p = (uint3 *) malloc(sizeof(uint3));
+		if( mallocCheck(p, __FUNCTION__, NULL ) == ERROR ){
+			*pOffset = ERROR;
+			return NULL;
 		}
-		OFFSET_PTR_MEMB(pDestFatC,elf,pDestFatC,(__cudaFatElfEntry *));
-	} else
-		pDestFatC->elf = NULL;
+		// now we want to view the pSrc as an array of 3 unsigned int
+		unsigned int * pU = (unsigned int*) pSrc;
+		p->x = pU[0];
+		p->y = pU[1];
+		p->z = pU[2];
 
-	return pDestFatC;
+		*pOffset += 3 * sizeof(p->x);
+	} else {
+		assert(*pOffset == sizeof(void*));
+		return NULL;
+	}
+
+	return p;
+}
+
+/**
+ * Packs the function arguments in the very similar manner as packFatBinary.
+ * Allocates memory to hold the all this packed stuff and packs the stuff
+ * to that memory.
+ *
+ * @param all parameters are taken from ____cudaRegisterFunction
+ * @param pSize (out) returns the size of the char*
+ *
+ * @return pPack the pointer to the packed arguments
+ *         NULL if some memory allocation problems or copying files
+ */
+char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
+        char* deviceFun, const char* deviceName, int thread_limit,
+        uint3* tid, uint3* bid, dim3* bDim, dim3* gDim, int* wSize,
+	int *pSize){
+	// where we are
+	int offset;
+	char * pPack; // for the contiguous space with packed arguments up
+
+	*pSize = l_getSize_regFuncArgs(fatCubinHandle, hostFun,
+	         deviceFun,  deviceName, thread_limit,  tid,
+	         bid, bDim,  gDim,  wSize);
+
+	pPack = malloc(*pSize);
+	if( mallocCheck(pPack, __FUNCTION__, NULL) == ERROR )
+		return NULL;
+
+	memcpy(pPack, &fatCubinHandle, sizeof(void*));
+	pPack += sizeof(void*);
+
+	offset = l_packStr(pPack, hostFun);
+	if( ERROR == offset ) return NULL; else pPack += offset;
+
+	offset = l_packStr(pPack, deviceFun);
+	if( ERROR == offset ) return NULL; else pPack += offset;
+
+	offset = l_packStr(pPack, deviceName);
+	if( ERROR == offset ) return NULL; else pPack += offset;
+
+	memcpy(pPack, &thread_limit, sizeof(int));
+	pPack += sizeof(int);
+
+
+	//uint3* , uint3* bid, dim3* bDim, dim3* gDim, int* wSize,
+
 }
