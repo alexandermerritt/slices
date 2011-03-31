@@ -380,138 +380,6 @@ int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t *
 	return size;
 }
 
-int get_fat_rec_size(__cudaFatCudaBinary *fatCubin, cache_num_entries_t *num)
-{
-	int size = 0, i;
-	__cudaFatPtxEntry *tempPtx;
-	__cudaFatCubinEntry *tempCub;
-	__cudaFatDebugEntry *tempDeb;
-//	__cudaFatElfEntry * tempElf;
-	__cudaFatSymbol *tempExp, *tempImp;
-	__cudaFatCudaBinary *tempRec;
-
-	// Adding all fields independently to make sure we get platform
-	// dependent size of everything and remain agnostic to minor
-	// data type changes for these fields
-	size += sizeof(fatCubin->magic);
-	size += sizeof(fatCubin->version);
-	size += sizeof(fatCubin->gpuInfoVersion);
-	// The char * are supposed to be null terminated
-	size += (strlen(fatCubin->key) + 1) * sizeof(char);  // always 1 extra for the null char
-	size += (strlen(fatCubin->ident) + 1) * sizeof(char);
-	size += (strlen(fatCubin->usageMode) + 1) * sizeof(char);
-
-	size += sizeof( __cudaFatPtxEntry *);  // space to store addr
-	tempPtx = fatCubin->ptx;
-	i = 0;
-	if (tempPtx != NULL) {
-		while (!(tempPtx[i].gpuProfileName == NULL && tempPtx[i].ptx == NULL)) {
-			size += sizeof( __cudaFatPtxEntry);  // space to store elems at the addr
-			size += (strlen(tempPtx[i].gpuProfileName) + 1) * sizeof(char);  // size of elements
-			size += (strlen(tempPtx[i].ptx) + 1) * sizeof(char);
-			i++;
-			num->nptxs++;
-		}
-		// Account for the null entries but no strlen required
-		size += sizeof( __cudaFatPtxEntry);  // space to store elems at the addr
-		num->nptxs++;	// for the null entry
-	}
-	size += sizeof( __cudaFatCubinEntry *);  // space to store addr
-	tempCub = fatCubin->cubin;
-	i = 0;
-	if (tempCub != NULL) {
-		while (	!(tempCub[i].gpuProfileName == NULL && tempCub[i].cubin == NULL)) {
-			size += sizeof( __cudaFatCubinEntry);  // space to store elems at the addr
-			size += (strlen(tempCub[i].gpuProfileName) + 1) * sizeof(char);  // size of elements
-			size += (strlen(tempCub[i].cubin) + 1) * sizeof(char);
-			num->ncubs++;
-			i++;
-		}
-		size += sizeof( __cudaFatCubinEntry);  // space to store elems at the addr
-		num->ncubs++;
-	}
-	size += sizeof( __cudaFatDebugEntry *);  // space to store addr
-	tempDeb = fatCubin->debug;
-	i = 0;
-	if (tempDeb != NULL) {
-		while (!(tempDeb[i].gpuProfileName == NULL && tempDeb[i].debug == NULL)) {
-			size += sizeof( __cudaFatDebugEntry);  // space to store elems at the addr
-			size += (strlen(tempDeb[i].gpuProfileName) + 1) * sizeof(char);  // size of elements
-			size += (strlen(tempDeb[i].debug) + 1) * sizeof(char);
-			num->ndebs++;
-			i++;
-		}
-		size += sizeof( __cudaFatDebugEntry *);  // space to store elems at the addr
-		num->ndebs++;
-	}
-
-	size += sizeof(fatCubin->debugInfo);
-	size += sizeof(fatCubin->flags);
-
-	tempExp = fatCubin->exported;
-#ifndef CORRECTWAY
-	size += sizeof(__cudaFatSymbol *);  // space to store addr
-#else  // there can be some issue with the ptr addr which can cause the code to crash
-	// Therefore hacking
-	while (tempExp != NULL && tempExp->name != NULL) {
-		size += sizeof(__cudaFatSymbol *);  // space to store addr
-		size += sizeof(__cudaFatSymbol);  // space to store elems at the addr
-		size += strlen(tempExp->name) + 1;  // size of elements
-		tempExp++;
-	}
-#endif
-
-	tempImp = fatCubin->imported;
-#ifndef CORRECTWAY
-	size += sizeof(__cudaFatSymbol *);  // space to store addr
-#else  // there can be some issue with the ptr addr which can cause the code to crash
-	// Therefore hacking
-	while (tempImp != NULL && tempImp->name != NULL) {
-		size += sizeof(__cudaFatSymbol *);  // space to store addr
-		size += sizeof(__cudaFatSymbol);  // space to store elems at the addr
-		size += strlen(tempImp->name) + 1;  // size of elements
-		tempImp++;
-	}
-#endif
-
-	tempRec = fatCubin->dependends;
-#ifndef CORRECTWAY
-	size += sizeof(__cudaFatCudaBinary *);  // space to store addr
-#else
-	i = 0;
-	if (tempRec != NULL) {
-		while (tempRec[i].ident != NULL) {
-			cache_num_entries_t nent = {0};
-			size += sizeof(__cudaFatCudaBinary);
-			size += get_fat_rec_size(&tempRec[i], &nent);  // space to store elems at the addr
-			num->ndeps++;
-			i++;
-		}
-		size += sizeof(__cudaFatCudaBinary);
-		num->ndeps++;
-	}
-#endif
-
-	size += sizeof(fatCubin->characteristic);
-/*		size += sizeof( __cudaFatElfEntry *);  // space to store addr
-		tempElf = fatCubin->elf;
-		i = 0;
-		if (tempElf != NULL) {
-			while (!(tempElf[i].gpuProfileName == NULL && tempElf[i].elf == NULL)) {
-				size += sizeof( __cudaFatElfEntry);  // space to store elems at the addr
-				size += (strlen(tempElf[i].gpuProfileName) + 1) * sizeof(char);  // size of elements
-				size += (strlen(tempElf[i].elf) + 1) * sizeof(char);
-				num->nelves++;
-				i++;
-			}
-			size += sizeof( __cudaFatElfEntry*);  // space to store elems at the addr
-			num->nelves++;
-		} */
-//	printd(DLEVEL1, "%s: ident=%s, size found=%d\n", fatCubin->ident, size);
-	return size;
-}
-
-
 /**
  * allocates the cuda packet
  *
@@ -1527,7 +1395,7 @@ inline int l_packUint3Ptr(char * pDst, const uint3 *pSrc){
 
 	uint3 ** pUint3 = (uint3**) pDst;
 	pDst += sizeof(void*);
-	pUint3[0] = pSrc;
+	pUint3[0] = (uint3*) pSrc;
 
 	// copy the values if any
 	if( pSrc ){
