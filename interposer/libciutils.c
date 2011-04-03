@@ -1334,7 +1334,6 @@ inline int l_getDim3PtrPktSize(dim3 * p){
 		return sizeof(void*) + sizeof(dim3);
 	else
 		return sizeof(void*);  // p is NULL
-
 }
 
 /**
@@ -1459,12 +1458,167 @@ inline uint3 * l_unpackUint3Ptr(const char *pSrc, int * pOffset){
 }
 
 /**
+ * packetizes the pointer to dim3 and writes it pDst
+ * identical to the uint3
+ *
+ * @param pDst (in) when we right our packet
+ * @param pSrc (in) from where we are copying the uint3 (our uint3 pointer)
+ * @return offset we need to add to pDst later
+ *         ERROR if pDst is NULL
+ */
+inline int l_packDim3Ptr(char * pDst, const dim3 *pSrc){
+	// to allow to count the offset
+	char * pDstOrig = pDst;
+
+	if( !pDst )
+		return ERROR;
+
+	// copy the value of the pointer, use the trick with
+	// different views; now we treat our pDst as an array
+	// of dim3
+
+	dim3 ** pDim3 = (dim3**) pDst;
+	pDst += sizeof(void*);
+	pDim3[0] = (dim3*) pSrc;
+
+	// copy the values if any
+	if( pSrc ){
+		// now we treat our pDst as an array of unsigned int
+		unsigned int * pU = (unsigned int*) pDst;
+		pU[0] = pSrc->x;
+		pU[1] = pSrc->y;
+		pU[2] = pSrc->z;
+
+		pDst += 3 * sizeof(pSrc->x);
+	}
+
+	return pDst - pDstOrig;
+}
+
+/**
+ * unpacks the pointer to the Uint; tries to zero the *pOffset
+ * @param pSrc (in) from where we recreate the pointer to the uint3
+ * @param pOffset (out) changes the offset to enable us to update the pSrc
+ *        if < 0 then indicates some errors with memory allocation
+ *        or pSrc is NULL
+ * @return a pointer to a new uint3
+ *         NULL if problems with memory allocation or pSrc is NULL
+ */
+inline dim3 * l_unpackDim3Ptr(const char *pSrc, int * pOffset){
+
+	dim3 * p;
+
+	if( !pSrc ){
+		*pOffset = ERROR;
+		return NULL;
+	}
+
+	*pOffset = 0;		// cleans the counter
+
+	// pSrc
+	dim3 ** pDim3 = (dim3**) pSrc;
+	pSrc += sizeof(void*);
+	*pOffset = sizeof(void*);
+
+	if( pDim3[0]){
+		// not null
+		p = (dim3 *) malloc(sizeof(dim3));
+		if( mallocCheck(p, __FUNCTION__, NULL ) == ERROR ){
+			*pOffset = ERROR;
+			return NULL;
+		}
+		// now we want to view the pSrc as an array of 3 unsigned int
+		unsigned int * pU = (unsigned int*) pSrc;
+		p->x = pU[0];
+		p->y = pU[1];
+		p->z = pU[2];
+
+		*pOffset += 3 * sizeof(p->x);
+	} else {
+		assert(*pOffset == sizeof(void*));
+		return NULL;
+	}
+
+	return p;
+}
+
+/**
+ * packetize the pointer to the int
+ *
+ * @param pDst (in) when we right our packet
+ * @param pSrc (in) from where we are copying the uint3 (our uint3 pointer)
+ * @return offset we need to add to pDst later
+ *         ERROR if pDst is NULL
+ *
+ */
+inline int l_packIntPtr(char * pDst, int *pSrc){
+	char * pDstOrig = pDst;
+
+	if( !pDst )
+		return ERROR;
+
+	int ** p = (int**) pDst;
+	p[0] = pSrc;
+	pDst += sizeof(void*);
+
+	if( pSrc ){
+		int * d = (int*) pDst;
+		d[0] = *pSrc;
+		pDst += sizeof(int);
+	}
+
+	return pDst - pDstOrig;
+}
+/**
+ * unpacks the pointer to the Uint; tries to zero the *pOffset
+ * @param pSrc (in) from where we recreate the pointer to the uint3
+ * @param pOffset (out) changes the offset to enable us to update the pSrc
+ *        if < 0 then indicates some errors with memory allocation
+ *        or pSrc is NULL
+ * @return a pointer to a new uint3
+ *         NULL if problems with memory allocation or pSrc is NULL
+ */
+inline int * l_unpackIntPtr(const char *pSrc, int * pOffset){
+	int * p;
+
+	if( !pSrc ){
+		*pOffset = ERROR;
+		return NULL;
+	}
+
+	*pOffset = 0;		// cleans the counter
+
+	// pSrc
+	int ** t1 = (int**) pSrc;
+	pSrc += sizeof(void*);
+	*pOffset = sizeof(void*);
+
+	if( t1[0]){
+		// not null
+		p = (int*) malloc(sizeof(int));
+		if( mallocCheck(p, __FUNCTION__, NULL ) == ERROR ){
+			*pOffset = ERROR;
+			return NULL;
+		}
+		// now we want to view the pSrc as an array of 3 unsigned int
+		int * t2 = (int*) pSrc;
+		*p = t2[0];
+		*pOffset += sizeof(int);
+	} else {
+		assert(*pOffset == sizeof(void*));
+		return NULL;
+	}
+
+	return p;
+}
+
+/**
  * Packs the function arguments in the very similar manner as packFatBinary.
  * Allocates memory to hold the all this packed stuff and packs the stuff
  * to that memory.
  *
  * @param all parameters are taken from ____cudaRegisterFunction
- * @param pSize (out) returns the size of the char*
+ * @param pSize (out) returns the size of the packet pointed by pPack
  *
  * @return pPack the pointer to the packed arguments
  *         NULL if some memory allocation problems or copying files
@@ -1476,6 +1630,7 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
 	// where we are
 	int offset;
 	char * pPack; // for the contiguous space with packed arguments up
+	char * pPackStart; // the beginning
 
 	*pSize = l_getSize_regFuncArgs(fatCubinHandle, hostFun,
 	         deviceFun,  deviceName, thread_limit,  tid,
@@ -1485,7 +1640,10 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
 	if( mallocCheck(pPack, __FUNCTION__, NULL) == ERROR )
 		return NULL;
 
-	memcpy(pPack, &fatCubinHandle, sizeof(void*));
+	// remember the beginning of the packet
+	pPackStart = pPack;
+	void *** p = (void ***) pPack;
+	p[0] = fatCubinHandle;
 	pPack += sizeof(void*);
 
 	offset = l_packStr(pPack, hostFun);
@@ -1497,10 +1655,77 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
 	offset = l_packStr(pPack, deviceName);
 	if( ERROR == offset ) return NULL; else pPack += offset;
 
-	memcpy(pPack, &thread_limit, sizeof(int));
+	int * pInt = (int*) pPack;
+	pInt[0] = thread_limit;
 	pPack += sizeof(int);
 
+	offset = l_packUint3Ptr(pPack, tid);
+	if( ERROR == offset ) return NULL; else pPack += offset;
 
-	//uint3* , uint3* bid, dim3* bDim, dim3* gDim, int* wSize,
+	offset = l_packUint3Ptr(pPack, bid);
+	if( ERROR == offset ) return NULL; else pPack += offset;
 
+	offset = l_packDim3Ptr(pPack, bDim);
+	if( ERROR == offset ) return NULL; else pPack += offset;
+
+	offset = l_packDim3Ptr(pPack, gDim);
+	if( ERROR == offset ) return NULL; else pPack += offset;
+
+	offset = l_packIntPtr(pPack, wSize);
+	if( ERROR == offset ) return NULL; else pPack += offset;
+
+	return pPackStart;
+}
+
+/**
+ * Unpacks the reg func arguments
+ *
+ * @param pFatC the destination
+ * @param pFatPack our source
+ *
+ * @return OK everything went smoothly
+ *         ERROR there were some errors
+ */
+int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
+	int offset;
+
+	void *** v = (void***) pPacket;
+
+
+	pRegFuncArgs->fatCubinHandle = v[0];
+	pPacket += sizeof(void*);
+
+	// @todo it should be done better with NULL and with communicating
+	// an error - right now it doesn't have an effect
+	// you should change the implementation of l_packStr/l_unpackStr
+	// to differentiate the NULL and the ERROR in the offset
+	pRegFuncArgs->hostFun  = l_unpackStr(pPacket, &offset);
+	if( ERROR == offset ) return ERROR; else pPacket += offset;
+
+	pRegFuncArgs->deviceFun = l_unpackStr(pPacket, &offset);
+	if( ERROR == offset ) return ERROR; else pPacket += offset;
+
+	pRegFuncArgs->deviceName = l_unpackStr(pPacket, &offset);
+	if( ERROR == offset ) return ERROR; else pPacket += offset;
+
+	int * pI = (int *) pPacket;
+	pRegFuncArgs->thread_limit = pI[0];
+	pPacket += sizeof(int);
+
+	pRegFuncArgs->tid = l_unpackUint3Ptr(pPacket, &offset);
+	if( ERROR == offset ) return ERROR; else pPacket += offset;
+
+	pRegFuncArgs->bid = l_unpackUint3Ptr(pPacket, &offset);
+	if( ERROR == offset ) return ERROR; else pPacket += offset;
+
+	pRegFuncArgs->bDim = l_unpackDim3Ptr(pPacket, &offset);
+	if( ERROR == offset ) return ERROR; else pPacket += offset;
+
+	pRegFuncArgs->gDim = l_unpackDim3Ptr(pPacket, &offset);
+	if( ERROR == offset ) return ERROR; else pPacket += offset;
+
+	pRegFuncArgs->wSize = l_unpackIntPtr(pPacket, &offset);
+	if( ERROR == offset ) return ERROR; else pPacket += offset;
+
+	return OK;
 }

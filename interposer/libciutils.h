@@ -49,6 +49,14 @@ int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 		cache_num_entries_t * const pEntriesCache);
 int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack);
 
+char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
+        char* deviceFun, const char* deviceName, int thread_limit,
+        uint3* tid, uint3* bid, dim3* bDim, dim3* gDim, int* wSize,
+        int *pSize);
+
+int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket);
+
+
 cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCudaError);
 
 #endif /* CITUILS_H_ */

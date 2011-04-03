@@ -63,6 +63,18 @@ extern inline int l_getIntPtrPktSize(int * p);
 extern inline int l_packUint3Ptr(char * pDst, const uint3 *pSrc);
 extern inline uint3 * l_unpackUint3Ptr(const char *pSrc, int * pOffset);
 
+extern inline int l_packDim3Ptr(char * pDst, const dim3 *pSrc);
+extern inline dim3 * l_unpackDim3Ptr(const char *pSrc, int * pOffset);
+
+extern inline int l_packIntPtr(char * pDst, const int *pSrc);
+extern inline int * l_unpackIntPtr(const char *pSrc, int * pOffset);
+
+extern char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
+        char* deviceFun, const char* deviceName, int thread_limit,
+        uint3* tid, uint3* bid, dim3* bDim, dim3* gDim, int* wSize,
+	int *pSize);
+extern int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket);
+
 /* The suite initialization function.
  * Opens the temporary file used by the tests.
  * Returns zero on success, non-zero otherwise.
@@ -1088,6 +1100,128 @@ void test_l_packUnpackUint3Ptr(void){
 	CU_ASSERT_EQUAL(pU->z, 5);
 }
 
+void test_l_packUnpackDim3Ptr(void){
+	char arr[100];
+	int offset;
+	dim3 * pU;
+
+	// 0. pack from NULL src
+	offset = l_packDim3Ptr(NULL, NULL);
+	CU_ASSERT_EQUAL(offset, ERROR);
+
+	// 1. pack/unpack NULL pointer
+	offset = l_packDim3Ptr(arr, NULL);
+	CU_ASSERT_EQUAL(offset, sizeof(void*));
+	offset = 0;
+	pU = l_unpackDim3Ptr(arr, &offset);
+	CU_ASSERT_EQUAL(offset, sizeof(void*));
+	CU_ASSERT_PTR_NULL(pU);
+
+	// 2. unpack NULL
+	offset = 4;
+	pU = l_unpackDim3Ptr(NULL, &offset);
+	CU_ASSERT_PTR_NULL(pU);
+	CU_ASSERT_EQUAL(offset, ERROR);
+
+	// 3. pack/unpack normal non-NULL
+	dim3 u = { 1, 13, 5};
+	offset = l_packDim3Ptr(arr, &u);
+	CU_ASSERT_EQUAL(offset, sizeof(void*) + 3*sizeof(u.x));
+	offset = 0;
+	pU = l_unpackDim3Ptr(arr, &offset);
+	CU_ASSERT_EQUAL(offset, sizeof(void*) + 3*sizeof(u.x));
+	CU_ASSERT_PTR_NOT_NULL(pU);
+	CU_ASSERT_EQUAL(pU->x, 1);
+	CU_ASSERT_EQUAL(pU->y, 13);
+	CU_ASSERT_EQUAL(pU->z, 5);
+}
+
+void test_l_packUnpackIntPtr(void){
+	char arr[100];
+	int offset;
+	int * pU;
+
+	// 0. pack from NULL src
+	offset = l_packIntPtr(NULL, NULL);
+	CU_ASSERT_EQUAL(offset, ERROR);
+
+	// 1. pack/unpack NULL pointer
+	offset = l_packIntPtr(arr, NULL);
+	CU_ASSERT_EQUAL(offset, sizeof(void*));
+	offset = 0;
+	pU = l_unpackIntPtr(arr, &offset);
+	CU_ASSERT_EQUAL(offset, sizeof(void*));
+	CU_ASSERT_PTR_NULL(pU);
+
+	// 2. unpack NULL
+	offset = 4;
+	pU = l_unpackIntPtr(NULL, &offset);
+	CU_ASSERT_PTR_NULL(pU);
+	CU_ASSERT_EQUAL(offset, ERROR);
+
+	// 3. pack/unpack normal non-NULL
+	int u = 13;
+	offset = l_packIntPtr(arr, &u);
+	CU_ASSERT_EQUAL(offset, sizeof(int*) + sizeof(int));
+	offset = 0;
+	pU = l_unpackIntPtr(arr, &offset);
+	CU_ASSERT_EQUAL(offset, sizeof(int*) + sizeof(int));
+	CU_ASSERT_PTR_NOT_NULL(pU);
+	CU_ASSERT_EQUAL(*pU, 13);
+}
+
+void test_l_packUnpackRegFuncArgs(void){
+   reg_func_args_t a;
+   char * pack;
+   const char * str1 = "hej1";
+   char * str2 = "h";
+   const char * str3 = "a";
+   uint3 u1 = {1, 3,3};
+   uint3 u2 = {1, 13, 10};
+   dim3 d1 = {1,4, 5};
+   dim3 d2 = {2, 30, 10};
+   int wsize = 13;
+   int size;
+   int all_size;
+   void ** v = (void**)&pack;
+
+   // pack the pack
+   pack = packRegFuncArgs(v, str1, str2, str3, -1, &u1, &u2, &d1, &d2, &wsize, &size );
+
+   all_size = sizeof(void*)
+		   + sizeof(size_pkt_field_t) + strlen(str1)
+		   + sizeof(size_pkt_field_t) + strlen(str2)
+		   + sizeof(size_pkt_field_t) + strlen(str3)
+		   + sizeof(int)
+		   + sizeof(void*) + sizeof(uint3)
+		   + sizeof(void*) + sizeof(uint3)
+		   + sizeof(void*) + sizeof(dim3)
+		   + sizeof(void*) + sizeof(dim3)
+		   + sizeof(int*) + sizeof(int);
+
+   CU_ASSERT_EQUAL(size, all_size);
+   CU_ASSERT_EQUAL( unpackRegFuncArgs(&a, pack), OK);
+   CU_ASSERT_PTR_EQUAL(a.fatCubinHandle, v);
+   CU_ASSERT_NSTRING_EQUAL(a.hostFun, str1, strlen(str1));
+   CU_ASSERT_NSTRING_EQUAL(a.deviceFun, str2, strlen(str2));
+   CU_ASSERT_NSTRING_EQUAL(a.deviceName, str3, strlen(str3));
+   CU_ASSERT_EQUAL(a.thread_limit, -1);
+   CU_ASSERT_EQUAL(a.tid->x, u1.x );
+   CU_ASSERT_EQUAL(a.tid->y, u1.y );
+   CU_ASSERT_EQUAL(a.tid->z, u1.z );
+   CU_ASSERT_EQUAL(a.bid->x, u2.x );
+   CU_ASSERT_EQUAL(a.bid->y, u2.y );
+   CU_ASSERT_EQUAL(a.bid->z, u2.z );
+   CU_ASSERT_EQUAL(a.bDim->x, d1.x );
+   CU_ASSERT_EQUAL(a.bDim->y, d1.y );
+   CU_ASSERT_EQUAL(a.bDim->z, d1.z );
+   CU_ASSERT_EQUAL(a.gDim->x, d2.x );
+   CU_ASSERT_EQUAL(a.gDim->y, d2.y );
+   CU_ASSERT_EQUAL(a.gDim->z, d2.z );
+   CU_ASSERT_EQUAL(*a.wSize, wsize)
+
+}
+
 /* The main() function for setting up and running the tests.
  * Returns a CUE_SUCCESS on successful running, another
  * CUnit error code on failure.
@@ -1149,7 +1283,9 @@ int main()
    /* add the tests to the suite */
    if ((NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_getPtrPktSize", test_l_getPtrPktSize)) ||
 	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_getSize_regFuncArgs", test_l_getSize_regFuncArgs)) ||
-	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_packUnpackUint3Ptr", test_l_packUnpackUint3Ptr))
+	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_packUnpackUint3Ptr", test_l_packUnpackUint3Ptr)) ||
+	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_packUnpackDim3Ptr", test_l_packUnpackDim3Ptr)) ||
+	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_packUnpackRegFuncArgs", test_l_packUnpackRegFuncArgs))
    )
    {
       CU_cleanup_registry();

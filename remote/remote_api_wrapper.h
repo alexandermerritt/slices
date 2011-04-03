@@ -59,6 +59,7 @@ int nvbackCudaConfigureCall_rpc(cuda_packet_t *packet);
 int nvbackCudaLaunch_rpc(cuda_packet_t * packet);
 int nvbackCudaMemcpy_rpc(cuda_packet_t *packet);
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet);
+int __nvback_cudaRegisterFunction_rpc(cuda_packet_t *packet);
 
 /////////////////////////
 // SERVER SIDE CODE
@@ -72,5 +73,6 @@ int nvbackCudaConfigureCall_srv(cuda_packet_t *packet, conn_t *pConn);
 int nvbackCudaLaunch_srv(cuda_packet_t * packet, conn_t * pConn);
 int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * pConn);
 int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn);
+int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn);
 
 #endif

@@ -11,6 +11,9 @@
 
 // the original function we eventually want to invoked
 extern void** __cudaRegisterFatBinary(void* fatC);
+extern void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
+		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
+		uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
 
 int __nvback_cudaRegisterFatBinary(cuda_packet_t *packet);
 

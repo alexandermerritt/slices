@@ -2304,7 +2304,6 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	l_printRegFunArgs(fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit,tid,
 			bid, bDim, gDim, wSize);
 
-	exit(-1);
 	reg_func_args_t * p;
 	// update packet
 	pPacket->flags |= CUDA_Copytype;
@@ -2313,17 +2312,13 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	pPacket->args[1].argi = size;
 
 
-/*	if(nvbackCudaMalloc_rpc(pPacket) != OK ){
+	if(__nvback_cudaRegisterFunction_rpc(pPacket) != OK ){
 		printd(DBG_ERROR, "%s.%d: Return from the RPC with an error\n", __FUNCTION__, __LINE__);
-		cuda_err = cudaErrorMemoryAllocation;
-		*devPtr = NULL;
+		cuda_err = cudaErrorUnknown;
 	} else {
-		printd(DBG_INFO, "%s.%d: Return from the RPC call DevPtr and size: %p\n", __FUNCTION__, __LINE__,
-				pPacket->args[0].argdp);
-		// unpack what we have got from the packet
-		*devPtr = pPacket->args[0].argp;
+		// do nothing
 		cuda_err = pPacket->ret_ex_val.err;
-	} */
+	}
 
 	free(pPacket);
 

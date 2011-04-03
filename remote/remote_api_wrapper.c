@@ -371,6 +371,16 @@ int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet) {
 	return (packet->ret_ex_val.handle != NULL) ? OK : ERROR;
 }
 
+int __nvback_cudaRegisterFunction_rpc(cuda_packet_t *packet) {
+	printd(DBG_DEBUG, "%s: CUDA_ERROR=%d before RPC on method %d\n", __FUNCTION__,
+				packet->ret_ex_val.err, packet->method_id);
+	l_do_cuda_rpc(packet, (void *) packet->args[0].argui, packet->args[1].argi,
+				NULL, 0);
+
+	return (packet->ret_ex_val.err != 0) ? OK : ERROR;
+
+}
+
 /////////////////////////
 // SERVER SIDE CODE
 /////////////////////////
@@ -531,4 +541,35 @@ int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn){
     printd(DBG_DEBUG, "%s: FATCUBIN HANDLE: registered %p\n", __FUNCTION__, pFatCHandle);
 
     return OK;
+}
+
+int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
+	reg_func_args_t * c_args = malloc(sizeof(__cudaFatCudaBinary));
+
+	if( mallocCheck(c_args, __FUNCTION__, NULL ) == ERROR ){
+			exit(ERROR);
+	}
+
+	if(	unpackRegFuncArgs(c_args, myconn->request_data_buffer) == ERROR ){
+		printd(DBG_ERROR, "%s.%s: Problems with unpacking arguments in function register\n", __FILE__, __FUNCTION__);
+		exit(ERROR);
+	}
+
+	printd(DBG_DEBUG, "%s:FATCUBIN HANDLE: received=%p, expected=%p",__FUNCTION__, c_args->fatCubinHandle, fatcubin_info.fatCubinHandle);
+	assert(c_args->fatCubinHandle == fatcubin_info.fatCubinHandle);
+
+
+	packet->args[2].argp = (void *)c_args;
+	__cudaRegisterFunction( c_args->fatCubinHandle, (const char *)c_args->hostFun,
+	                c_args->deviceFun, (const char *)c_args->deviceName,
+	                c_args->thread_limit, c_args->tid,
+	                c_args->bid, c_args->bDim, c_args->gDim, c_args->wSize);
+//	dfi->reg_fns[dfi->num_reg_fns] = c_args;
+//	dfi->num_reg_fns++;
+	fatcubin_info.reg_fns[fatcubin_info.num_reg_fns] = c_args;
+	fatcubin_info.num_reg_fns++;
+
+	packet->ret_ex_val.err = 0;
+	printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+	return OK;
 }
