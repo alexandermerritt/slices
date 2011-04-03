@@ -221,6 +221,14 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 		__nvback_cudaRegisterFatBinary_srv(rpkt, pConn);
 		break;
 
+	case __CUDA_REGISTER_FUNCTION:
+		__nvback_cudaRegisterFunction_srv(rpkt, pConn);
+		break;
+
+	case __CUDA_UNREGISTER_FAT_BINARY:
+		__nvback_cudaUnregisterFatBinary_srv(rpkt, pConn);
+		break;
+
 	default:
 		printd(DBG_ERROR, "%s: Error: Unknown method ID %d\n", __FUNCTION__, rpkt->method_id);
 		rpkt->flags = CUDA_error;
@@ -229,6 +237,7 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
     if(rpkt->method_id != __CUDA_REGISTER_FAT_BINARY)
         if(0 != rpkt->ret_ex_val.err)
             printd(DBG_ERROR, "%s, Error: method returned an error\n", __FUNCTION__);
+
     return rpkt;
 }
 

@@ -57,6 +57,9 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
 int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket);
 
 
+int freeRegFunc(reg_func_args_t *args);
+int freeFatBinary(__cudaFatCudaBinary *fatCubin);
+
 cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCudaError);
 
 #endif /* CITUILS_H_ */

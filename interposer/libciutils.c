@@ -1729,3 +1729,41 @@ int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
 
 	return OK;
 }
+
+
+// -------------------------------------
+// frees functions
+// -------------------------------------
+
+/**
+ * copied from local nvidia_backed/local_api_wrapper.c
+ */
+int freeRegFunc(reg_func_args_t *args){
+	if (args == NULL)
+		return OK;
+
+	if (args->hostFun != NULL)
+		free(args->hostFun);
+	if (args->deviceFun != NULL)
+		free(args->deviceFun);
+	if (args->deviceName != NULL)
+		free(args->deviceName);
+	if (args->tid != NULL)
+		free(args->tid);
+	if (args->bid != NULL)
+		free(args->bid);
+	if (args->bDim != NULL)
+		free(args->bDim);
+	if (args->gDim != NULL)
+		free(args->gDim);
+	if (args->wSize != NULL)
+		free(args->wSize);
+	free(args);
+
+	return OK;
+}
+
+int freeFatBinary(__cudaFatCudaBinary *fatCubin){
+
+	return OK;
+}

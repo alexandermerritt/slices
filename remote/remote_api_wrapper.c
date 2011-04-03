@@ -378,7 +378,14 @@ int __nvback_cudaRegisterFunction_rpc(cuda_packet_t *packet) {
 				NULL, 0);
 
 	return (packet->ret_ex_val.err != 0) ? OK : ERROR;
+}
 
+int __nvback_cudaUnregisterFatBinary_rpc(cuda_packet_t *packet){
+	printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+	            packet->ret_ex_val.err, packet->method_id);
+	l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
+
+	return (packet->ret_ex_val.err != 0) ? OK : ERROR;
 }
 
 /////////////////////////
@@ -571,5 +578,42 @@ int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
 
 	packet->ret_ex_val.err = 0;
 	printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+	return OK;
+}
+
+int __nvback_cudaUnregisterFatBinary_srv(cuda_packet_t *packet, conn_t  * myconn){
+
+	int i;
+
+	printd(DBG_DEBUG, "%s, FIX MEEEEEEEEEEEEEEEEEEEEEEEE!!!!!!!!!!!!!\n", __FUNCTION__);
+
+	if( fatcubin_info.fatCubinHandle == NULL ){
+		packet->ret_ex_val.err = OK;
+		printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+		return ERROR;
+	}
+	__cudaUnregisterFatBinary(fatcubin_info.fatCubinHandle);
+
+/*	for (i = 0; i < dfi->num_reg_vars; ++i)
+	        freeRegVar(dfi->variables[i]);
+	for (i = 0; i < dfi->num_reg_texs; ++i)
+		freeRegTex(dfi->textures[i]); */
+	for (i = 0; i < fatcubin_info.num_reg_fns; ++i)
+		freeRegFunc(fatcubin_info.reg_fns[i]);
+	/*for (i = 0; i < dfi->num_reg_shared; ++i) {
+	   if (dfi->shared_vars[i] != NULL)
+		   free(dfi->shared_vars[i]);
+	   else
+		   break;
+	} */
+	freeFatBinary(fatcubin_info.fatCubin);
+
+	fatcubin_info.num_reg_fns = 0;
+	fatcubin_info.num_reg_vars = 0;
+	fatcubin_info.num_reg_texs = 0;
+	fatcubin_info.num_reg_shared = 0;
+	fatcubin_info.fatCubinHandle = NULL;
+
+	printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 	return OK;
 }

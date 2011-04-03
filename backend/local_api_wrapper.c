@@ -39,6 +39,7 @@ int __nvback_cudaRegisterFatBinary(cuda_packet_t *packet){
 }
 
 /**********************Helper functions for the unlisted calls************/
+/*
 // talking in terms of offset
 #define ALLOC_COPY_CHARS(nFat,fat,str,l) { \
 	l = strlen(fat->str) + 1; \
@@ -50,6 +51,7 @@ int __nvback_cudaRegisterFatBinary(cuda_packet_t *packet){
 	ptr->memb = dtype((unsigned long)ptr->memb + (unsigned long)base); \
 }
 
+*/
 
 /**
  * modified by MS to add the elf field from fatCubin;
@@ -57,7 +59,7 @@ int __nvback_cudaRegisterFatBinary(cuda_packet_t *packet){
  * this unpacks what has been packed
  *
  */
-void *copyFatBinary(__cudaFatCudaBinary *fatCubin){
+/*void *copyFatBinary(__cudaFatCudaBinary *fatCubin){
 	int i, len;
 	__cudaFatCudaBinary *tempRec, *nTempRec;
 	__cudaFatPtxEntry *tempPtx, *nTempPtx;
@@ -268,3 +270,4 @@ void *copyFatBinary(__cudaFatCudaBinary *fatCubin){
 
 	return nFatCubin;
 } // end copyFatBinary
+*/

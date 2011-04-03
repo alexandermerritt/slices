@@ -75,6 +75,9 @@ extern char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
 	int *pSize);
 extern int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket);
 
+extern int freeRegFunc(reg_func_args_t *args);
+extern int freeFatBinary(__cudaFatCudaBinary *fatCubin);
+
 /* The suite initialization function.
  * Opens the temporary file used by the tests.
  * Returns zero on success, non-zero otherwise.
@@ -1219,7 +1222,14 @@ void test_l_packUnpackRegFuncArgs(void){
    CU_ASSERT_EQUAL(a.gDim->y, d2.y );
    CU_ASSERT_EQUAL(a.gDim->z, d2.z );
    CU_ASSERT_EQUAL(*a.wSize, wsize)
+}
 
+void test_freeRegFunc(void){
+	//@todo to be implemented
+}
+
+void test_freeFatBinary(void){
+	// @todo to be implemented
 }
 
 /* The main() function for setting up and running the tests.
