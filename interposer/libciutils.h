@@ -11,6 +11,7 @@
 
 #include <__cudaFatFormat.h>
 #include "packetheader.h"
+#include "fatcubininfo.h"
 
 /**
  * For storing the number of records  for particular structures
@@ -53,7 +54,6 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
         char* deviceFun, const char* deviceName, int thread_limit,
         uint3* tid, uint3* bid, dim3* bDim, dim3* gDim, int* wSize,
         int *pSize);
-
 int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket);
 
 
@@ -61,5 +61,18 @@ int freeRegFunc(reg_func_args_t *args);
 int freeFatBinary(__cudaFatCudaBinary *fatCubin);
 
 cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCudaError);
+
+// print utilities
+void l_printFatBinary(__cudaFatCudaBinary * pFatBin);
+
+void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
+		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
+		uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
+
+/**
+ * cleans the structure, frees the allocated memory, sets values to zeros,
+ * nulls, etc; intended to be used in __unregisterCudaFatBinary
+ */
+int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo);
 
 #endif /* CITUILS_H_ */

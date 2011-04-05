@@ -35,6 +35,39 @@ int mallocCheck(const void * const p, const char * const pFuncName,
 }
 
 /**
+ * cleans the structure, frees the allocated memory, sets values to zeros,
+ * nulls, etc; intended to be used in __unregisterCudaFatBinary
+ */
+int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo){
+	int i;
+
+	// we assume that the pFatCInfo is not a null pointer
+	assert(NULL == pFatCInfo);
+	/*	for (i = 0; i < dfi->num_reg_vars; ++i)
+		        freeRegVar(dfi->variables[i]);
+		for (i = 0; i < dfi->num_reg_texs; ++i)
+					freeRegTex(dfi->textures[i]); */
+	for (i = 0; i < pFatCInfo->num_reg_fns; ++i)
+		freeRegFunc(pFatCInfo->reg_fns[i]);
+		/*for (i = 0; i < dfi->num_reg_shared; ++i) {
+		   if (dfi->shared_vars[i] != NULL)
+			   free(dfi->shared_vars[i]);
+		   else
+			   break;
+		} */
+	freeFatBinary(pFatCInfo->fatCubin);
+
+	pFatCInfo->num_reg_fns = 0;
+	pFatCInfo->num_reg_vars = 0;
+	pFatCInfo->num_reg_texs = 0;
+	pFatCInfo->num_reg_shared = 0;
+	pFatCInfo->fatCubinHandle = NULL;
+	pFatCInfo->fatCubin = NULL;
+
+	return OK;
+}
+
+/**
  * returns the size of the packet for the string
  * |string_length|string|
  *
@@ -397,9 +430,139 @@ cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCuda
 	return packet;
 }
 
+// -------------------------------
+// print functions
+// ------------------------------
+
+void l_printPtxE(__cudaFatPtxEntry * p){
+	int i = 0;
+	printd(DBG_INFO, "__cudaFatPtxEntry: %p\n", p);
+
+	while(1){
+		printd(DBG_INFO, "p[%d] (gpuProfileName, ptx): %s, %s\n",
+						i, p[i].gpuProfileName, p[i].ptx);
+
+		if( !(p+i) || !p[i].gpuProfileName || !p[i].ptx )
+			break;
+
+		i++;
+	}
+}
+
+void l_printCubinE(__cudaFatCubinEntry * p){
+	int i = 0;
+	printd(DBG_INFO, "__cudaFatCubinEntry: %p\n", p);
+
+	while(1){
+		printd(DBG_INFO, "p[%d] (gpuProfileName, cubin): %s, %s\n",
+				i, p[i].gpuProfileName, p[i].cubin);
+
+		if( !(p+i) || !p[i].gpuProfileName || !p[i].cubin )
+			break;
+
+		i++;
+	}
+}
+
+void l_printSymbolE(__cudaFatSymbol * p, char * name){
+	int i = 0;
+	printd(DBG_INFO, "__cudaFatSymbol: %s,  %p\n", name, p);
+
+	while(p && p->name ){
+		printd(DBG_INFO, "p[%d] (name): %s\n",
+				i, p[i].name);
+		i++;
+	}
+}
+
+void l_printDebugE(__cudaFatDebugEntry * p){
+	int i = 0;
+	printd(DBG_INFO, "__cudaFatDebugEntry: %p\n", p);
+	while( p ){
+		printd(DBG_INFO, "p[%d] (gpuProfileName, debug, next, size): %s, %s, %p, %d\n",
+				i, p->gpuProfileName, p->debug, p->next, p->size);
+		p = p->next;
+		i++;
+	}
+}
+
+void l_printDepE(__cudaFatCudaBinary * p){
+	int i = 0;
+
+	printd(DBG_INFO, "__cudaFatCudaBinary: %p\n", p);
+
+	while( p && p->ident){
+
+		printd(DBG_INFO, "p[%i]\n", i);
+		i++;
+		p = p->dependends;
+	}
+}
+
+void l_printElfE(__cudaFatElfEntry * p){
+
+	int i = 0;
+	printd(DBG_INFO, "__cudaFatElfEntry: %p\n", p);
+
+	while( p ){
+		printd(DBG_INFO, "p[%d] (gpuProfileName, elf, next, size): %s, %p, %p, %d\n",
+				i, p->gpuProfileName,  p->elf, p->next, p->size);
+		p = p->next;
+		i++;
+	}
+}
+
+
+void l_printFatBinary(__cudaFatCudaBinary * pFatBin){
+	if( pFatBin == NULL ){
+		printd(DBG_INFO, "~~~~~~~~ FatBinary  = %p\n", pFatBin);
+	} else {
+		printd(DBG_DEBUG, "\tmagic: %ld, version: %ld , gpuInfoVersion: %ld\n",
+				pFatBin->magic, pFatBin->version, pFatBin->gpuInfoVersion);
+		printd(DBG_DEBUG, "\tkey: %s, ident: %s, usageMode: %s\n",
+				pFatBin->key, pFatBin->ident, pFatBin->usageMode);
+		l_printPtxE(pFatBin->ptx);
+		l_printCubinE(pFatBin->cubin);
+		l_printDebugE(pFatBin->debug);
+
+		printd(DBG_DEBUG, "\tdebugInfo (pointer, char*): %p, %s\n", pFatBin->debugInfo, (char*) pFatBin->debugInfo);
+		printd(DBG_DEBUG, "\tflags: %u\n", pFatBin->flags);
+		l_printSymbolE(pFatBin->exported, "exported");
+		l_printSymbolE(pFatBin->imported, "imported");
+		l_printDepE(pFatBin->dependends);
+		printd(DBG_DEBUG, "\tcharacteristics: %u\n", pFatBin->characteristic);
+		l_printElfE(pFatBin->elf);
+	}
+}
+
+void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
+		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
+		uint3* bid, dim3* bDim, dim3* gDim, int* wSize){
+	printd(DBG_DEBUG, "\t REG FUN ARGS:\n");
+	printd(DBG_DEBUG, "fatCubinHandle: %p\n", fatCubinHandle);
+	printd(DBG_DEBUG, "hostFun: %s\n", hostFun);
+	printd(DBG_DEBUG, "deviceFun: %s\n", deviceFun);
+	printd(DBG_DEBUG, "deviceName: %s\n", deviceName);
+	printd(DBG_DEBUG, "thread_limit: %d\n", thread_limit);
+	printd(DBG_DEBUG, "tid: %p\n", tid);
+	if( tid )
+		printd(DBG_DEBUG, "tid: (%ud, %ud, %ud)\n", tid->x, tid->y, tid->z );
+	printd(DBG_DEBUG, "bid: %p\n", bid);
+	if( bid )
+		printd(DBG_DEBUG, "bid: (%ud, %ud, %ud)\n", bid->x, bid->y, bid->z);
+	printd(DBG_DEBUG, "bDim: %p\n", bDim);
+	if( bDim )
+		printd(DBG_DEBUG, "bDim: (%ud, %ud, %ud)\n", bDim->x, bDim->y, bDim->z);
+	printd(DBG_DEBUG, "gDim: %p\n", gDim);
+	if( gDim )
+		printd(DBG_DEBUG, "gDim: (%ud, %ud, %ud)\n", gDim->x, gDim->y, gDim->z);
+
+	printd(DBG_DEBUG, "wSize: %p\n", wSize);
+}
+
 
 // counts the new_marker; changes curr_marker and new_marker
-#define GET_LOCAL_POINTER(curr_marker, size, new_marker, dtype) { \
+/*#define GET_LOCAL_POINTER(curr_marker, size, new_marker, dtype) { \
 	curr_marker = (char *)((unsigned long)curr_marker + size); \
 	new_marker = dtype(curr_marker); \
 }
@@ -412,7 +575,7 @@ cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCuda
 
 #define OFFSET_PTR_MEMB(ptr,memb,base,dtype) { \
 	ptr->memb = dtype((unsigned long)ptr->memb - (unsigned long)base); \
-}
+}*/
 
 
 /**
@@ -1763,7 +1926,104 @@ int freeRegFunc(reg_func_args_t *args){
 	return OK;
 }
 
+/**
+ * free resources occupied by the fatCubin
+ *
+ * @return OK normally should return ok
+ */
 int freeFatBinary(__cudaFatCudaBinary *fatCubin){
+
+	int i;
+	__cudaFatPtxEntry *tempPtx;
+	__cudaFatCubinEntry *tempCub;
+	__cudaFatDebugEntry *tempDeb;
+	__cudaFatElfEntry *tempElf;
+
+	if( fatCubin == NULL )
+		return OK;
+
+	if( fatCubin->key != NULL )
+		free(fatCubin->key);
+	if (fatCubin->ident != NULL)
+		free(fatCubin->ident);
+	if (fatCubin->usageMode != NULL)
+		free(fatCubin->usageMode);
+
+	// free ptx
+	// Ptx block
+	if (fatCubin->ptx != NULL) {
+		tempPtx = fatCubin->ptx;
+		i = 0;
+		while (!(tempPtx[i].gpuProfileName == NULL && tempPtx[i].ptx == NULL)) {
+			if (tempPtx[i].gpuProfileName != NULL)
+				free(tempPtx[i].gpuProfileName);
+			if (tempPtx[i].ptx != NULL)
+				free(tempPtx[i].ptx);
+			i++;
+		}
+		free(fatCubin->ptx);
+	}
+
+	// Cubin block
+	if (fatCubin->cubin != NULL) {
+		tempCub = fatCubin->cubin;
+		i = 0;
+		while (!(tempCub[i].gpuProfileName == NULL && tempCub[i].cubin == NULL)) {
+			if (tempCub[i].gpuProfileName != NULL)
+				free(tempCub[i].gpuProfileName);
+			if (tempCub[i].cubin != NULL)
+				free(tempCub[i].cubin);
+			i++;
+		}
+
+		free(fatCubin->cubin);
+	}
+
+	// Debug block
+	if (fatCubin->debug != NULL) {
+		tempDeb = fatCubin->debug;
+		i = 0;
+		while (!(tempDeb[i].gpuProfileName == NULL && tempDeb[i].debug == NULL)) {
+			if (tempDeb[i].gpuProfileName != NULL)
+				free(tempDeb[i].gpuProfileName);
+			if (tempDeb[i].debug != NULL)
+				free(tempDeb[i].debug);
+			i++;
+		}
+		free(fatCubin->debug);
+	}
+
+	// Debug block
+	if (fatCubin->debug != NULL) {
+		tempDeb = fatCubin->debug;
+		i = 0;
+		while (!(tempDeb[i].gpuProfileName == NULL && tempDeb[i].debug == NULL)) {
+			if (tempDeb[i].gpuProfileName != NULL)
+				free(tempDeb[i].gpuProfileName);
+			if (tempDeb[i].debug != NULL)
+				free(tempDeb[i].debug);
+			i++;
+		}
+		free(fatCubin->debug);
+	}
+
+	// elf block
+	if (fatCubin->elf != NULL) {
+		tempElf = fatCubin->elf;
+		i = 0;
+		while (!(tempElf[i].gpuProfileName == NULL && tempElf[i].elf == NULL)) {
+			if (tempElf[i].gpuProfileName != NULL)
+				free(tempElf[i].gpuProfileName);
+			if (tempElf[i].elf != NULL)
+				free(tempElf[i].elf);
+			i++;
+		}
+		free(fatCubin->elf);
+	}
+
+	// @todo IGNORING DEPENDENDS AS OF NOW
+	// exported/imported
+	free(fatCubin);
 
 	return OK;
 }

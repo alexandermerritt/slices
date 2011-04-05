@@ -29,17 +29,20 @@ int cuda_main(void) {
 	cudaDeviceProp prop;
 
 
-	cudaGetDeviceCount(&deviceCount);
+
+/*	cudaGetDeviceCount(&deviceCount);
 
 	for(i = 0; i < deviceCount; i++){
 		cudaGetDeviceProperties(&prop, i);
 	}
+*/
+//	printf("%s.%d: The number of cuda devices is %d\n", __FUNCTION__, __LINE__, deviceCount);
 
-	printf("%s.%d: The number of cuda devices is %d\n", __FUNCTION__, __LINE__, deviceCount);
 
 	a_h = (float *) malloc(size); // Allocate array on host
+	a_d = NULL;
 	cudaMalloc((void **) &a_d, size); // Allocate array on device
-	// Initialize host array and copy it to CUDA device
+/*	// Initialize host array and copy it to CUDA device
 	for (int i = 0; i < N; i++)
 		a_h[i] = (float) i;
 	cudaMemcpy(a_d, a_h, size, cudaMemcpyHostToDevice);
@@ -52,6 +55,7 @@ int cuda_main(void) {
 	// Print results
 	for (int i = 0; i < N; i++)
 		printf("%d %f\n", i, a_h[i]);
+*/
 	// Cleanup
 	free(a_h);
 	cudaFree(a_d);
@@ -72,6 +76,10 @@ int main(){
 	// 3. wire vgpu to gpus
 	// 4. gpu assembly
 	// 5. some process needs to clean up after - but we do not worry about that
+
+	printf("\n*******************************\n");
+	printf("CUDA APP START\n");
+	printf("*******************************\n");
 
 	// now call the cuda main, so our GA enabler library can sort out
 	// which cuda call goes where

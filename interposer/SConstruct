@@ -41,8 +41,8 @@ interposerEnv.SharedLibrary('libci.so', ['libci.c',
 									'libciutils.c', 
    									'../remote/remote_api_wrapper.c', 
    									'../remote/connection.c',    									
-   									'../remote/remote_packet.c',
-   									'../backend/local_api_wrapper.c'])
+   									'../remote/remote_packet.c'
+   									])
    									
 # building tests
 envTest = Environment(LIBS = ['cunit', 'ncurses', 'pthread'],

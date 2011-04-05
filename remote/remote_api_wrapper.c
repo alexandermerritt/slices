@@ -29,8 +29,6 @@
 #include <dlfcn.h>
 #include "connection.h"
 
-
-#include "local_api_wrapper.h"
 #include "fatcubininfo.h"   // for fatcubin_info_t
 
 //! Right now the host where we are connecting to (where clients, ie, *_rpc connects
@@ -39,45 +37,32 @@
 #	define REMOTE_HOSTNAME "cuda2.cc.gt.atl.ga.us"
 #endif
 
+
 //! open the connection forever; if you open and then close the
 //! connection the program stops to work, so you have to make it static
 static conn_t myconn;
 
-//! stores information about the fatcubin_info
-static fatcubin_info_t fatcubin_info;
+// @todo maybe this is stupid to maintain to separate fatcubin_info
+// structures but I believe it is not; since there is a lot of guessing
+// that's why I am doing this as two separate variables
+
+//! stores information about the fatcubin_info on the client side
+//static fatcubin_info_t fatcubin_info_rpc;
+
+//! stores information about the fatcubin_info on the server side
+static fatcubin_info_t fatcubin_info_srv;
+
+// the original function we eventually want to invoke
+extern void** __cudaRegisterFatBinary(void* fatC);
+extern void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
+		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
+		uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
+extern void __cudaUnregisterFatBinary(void** fatCubinHandle);
+
+
 ///////////////////
 // RPC CALL UTILS//
 ///////////////////
-
-/**
- * @brief Process an entire batched set of CUDA API calls ("stream") to the remote host.
- *
- * We add the specific packet to the buffer that is maintained by the connection.
- * We also check if there are some requests in the reqbuf and we add this to our
- * connection. Then we send the connection data. TODO here I have problems, since
- * conn_t is a connection, and not the data so it should be called something
- * else (sending_endpoint (?) ).
- * It also deals with response. Since the connection can expect responses. Then
- * the response is passed through packet and rspbuf.
- *
- * @param myconn (out) connection will provide where the
- * @param packet (inout) the packet we will add to our buffer stream defined in
- *        myconn; 'in parameter' if we are sending the packet
- *        'out parameter' if we are getting a response
- * @param reqbuf (in) from this buffer data are added to myconn
- * @param reqbuf_size (in) size of the request buffer
- * @param rspbuf (out) we copy here a response we got
- * @param rspbuf_size (out) the size of the response buffer
- */
-/*int do_cuda_rpc(cuda_packet_t *packet,
-		void *reqbuf,
-		int reqbuf_size,
-		void *rspbuf,
-		int rspbuf_size) {
-
-
-	return 0;
-}*/
 
 /**
  * closes the connection and frees the memory occupied by the connection
@@ -99,6 +84,15 @@ int l_cleanUpConn(conn_t * pConn, const int exit_code){
  * executes the cuda call over the network
  * This is the entire protocol of sending and receiving requests.
  * Including data send as arguments, as well as extra responses
+ *
+ * We add the specific packet to the buffer that is maintained by the connection.
+ * We also check if there are some requests in the reqbuf and we add this to our
+ * connection. Then we send the connection data. TODO here I have problems, since
+ * conn_t is a connection, and not the data so it should be called something
+ * else (sending_endpoint (?) ).
+ * It also deals with response. Since the connection can expect responses. Then
+ * the response is passed through packet and rspbuf.
+ *
  * @param pPacket the packet that contains data to be send and executed over the
  * network
  * @param reqbuf (in) from this buffer data are added to myconn
@@ -118,8 +112,8 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 	size_t rpkt_size = sizeof(rpkt_t);
 
 
-	printd(DBG_DEBUG, "reqbuf %p, reqbuf_size %d, rspbuf %p, rspbuf_size %d\n",
-			reqbuf, reqbuf_size, rspbuf, rspbuf_size);
+	printd(DBG_DEBUG, "MethodID: %d, reqbuf %p, reqbuf_size %d, rspbuf %p, rspbuf_size %d\n",
+			packet->method_id, reqbuf, reqbuf_size, rspbuf, rspbuf_size);
 
 	// connect if not connected, otherwise reuse the connection
 	// if you close and open the connection, the program exits; a kind of
@@ -288,12 +282,12 @@ int nvbackCudaMalloc_rpc(cuda_packet_t *packet){
             packet->ret_ex_val.err, packet->method_id);
     // clear the packet, we are also sending the size of
     // the memory to allocate
-    packet->args[0].argp = NULL;
+    //packet->args[0].argp = NULL;
     l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
 
-    printd(DBG_DEBUG,"%s: devPtr is %p",__FUNCTION__, packet->args[0].argp);
+    printd(DBG_DEBUG,"%s: devPtr is %p",__FUNCTION__, packet->args[0].argdp);
 
-    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+    return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
 
 int nvbackCudaSetupArgument_rpc(cuda_packet_t *packet){
@@ -315,14 +309,10 @@ int nvbackCudaConfigureCall_rpc(cuda_packet_t *packet){
 
 int nvbackCudaLaunch_rpc(cuda_packet_t * packet){
 
-	printd(DBG_ERROR, "%s: FIXME!!!!!!!!!!!!! I am an ERRRRRRRRRRRRRRRRRRR%d\n",
-				__FUNCTION__, packet->method_id);
-
 	printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
 	            packet->ret_ex_val.err, packet->method_id);
 
 	l_do_cuda_rpc(packet,  NULL, 0, NULL, 0);
-
 
 	return (packet->ret_ex_val.err == 0) ? OK : ERROR;
 }
@@ -359,10 +349,10 @@ int nvbackCudaMemcpy_rpc(cuda_packet_t *packet){
 }
 
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet) {
-	printd(DBG_DEBUG, "%s: CUDA_ERROR=%d before RPC on method %d\n", __FUNCTION__,
+	printd(DBG_DEBUG, "%s: CUDA_ERROR=%u before RPC on method %d\n", __FUNCTION__,
 			packet->ret_ex_val.err, packet->method_id);
 
-	printd(DBG_DEBUG, "pPackedFat, packet->args[0].argui, size = %p, %ld\n",
+	printd(DBG_DEBUG, "pPackedFat, packet->args[0].argp, size = %p, %ld\n",
 				packet->args[0].argp, packet->args[1].argi);
 
 	l_do_cuda_rpc(packet, (void *) packet->args[0].argui, packet->args[1].argi,
@@ -377,7 +367,7 @@ int __nvback_cudaRegisterFunction_rpc(cuda_packet_t *packet) {
 	l_do_cuda_rpc(packet, (void *) packet->args[0].argui, packet->args[1].argi,
 				NULL, 0);
 
-	return (packet->ret_ex_val.err != 0) ? OK : ERROR;
+	return (packet->ret_ex_val.err == 0) ? OK : ERROR;
 }
 
 int __nvback_cudaUnregisterFatBinary_rpc(cuda_packet_t *packet){
@@ -385,7 +375,7 @@ int __nvback_cudaUnregisterFatBinary_rpc(cuda_packet_t *packet){
 	            packet->ret_ex_val.err, packet->method_id);
 	l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
 
-	return (packet->ret_ex_val.err != 0) ? OK : ERROR;
+	return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
 
 /////////////////////////
@@ -419,15 +409,28 @@ int nvbackCudaGetDeviceProperties_srv(cuda_packet_t *packet, conn_t * pConn){
 }
 
 int nvbackCudaMalloc_srv(cuda_packet_t * packet, conn_t * pConn){
+	void *p = NULL;
 	// just call the function
-	packet->args[0].argp = NULL;
+	packet->args[0].argdp = NULL;
 
-	packet->ret_ex_val.err = cudaMalloc(&packet->args[0].argp, packet->args[1].argi);
+	packet->ret_ex_val.err = cudaErrorUnknown;
+//	printd(DBG_DEBUG, "%s: Size to allocate: %ld\n", __FUNCTION__, packet->args[1].argi);
+	size_t size = packet->args[1].argi;
 
-    printd(DBG_DEBUG,"%s: devPtr is %p, size %ld\n",__FUNCTION__,packet->args[0].argp, packet->args[1].argi);
+	printf("\n hej!!!!!!!! przed\n");
+	packet->ret_ex_val.err = cudaMalloc(packet->args[0].argdp, 40);
+	//cudaMalloc(&p, 40);
+	printf("\n hej!!!!!!!! po\n");
+
+
+	//packet->ret_ex_val.err = cudaMalloc(packet->args[0].argdp, size);
+
+	printd(DBG_DEBUG,"%s: devPtr is %p, allocated size %ld\n",__FUNCTION__, &p, packet->args[1].argi);
+
     printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d after execution\n",
     		packet->ret_ex_val.err, packet->method_id);
-	return OK;
+
+	return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
 
 int nvbackCudaFree_srv(cuda_packet_t *packet, conn_t *pConn){
@@ -460,20 +463,17 @@ int nvbackCudaLaunch_srv(cuda_packet_t * packet, conn_t * pConn){
 	int i;
 	const char *arg;
 
-	printd(DBG_ERROR, "%s: ***************** FIXME ***** ERROR! ********%d\n",
-			__FUNCTION__, packet->method_id);
-
 	// this is entry for the cudaLaunch
 	arg = (const char *)packet->args[0].argcp;
 
 	packet->ret_ex_val.err = cudaErrorLaunchFailure;
 
-	for(i = 0; i < fatcubin_info.num_reg_fns; ++i){
-	  if (fatcubin_info.reg_fns[i] != NULL && fatcubin_info.reg_fns[i]->hostFEaddr == arg){
+	for(i = 0; i < fatcubin_info_srv.num_reg_fns; ++i){
+	  if (fatcubin_info_srv.reg_fns[i] != NULL && fatcubin_info_srv.reg_fns[i]->hostFEaddr == arg){
 	      printd(DBG_DEBUG, "%s: function %p:%s\n", __FUNCTION__,
-	    		  fatcubin_info.reg_fns[i]->hostFEaddr,
-	    		  fatcubin_info.reg_fns[i]->hostFun);
-	      packet->ret_ex_val.err = cudaLaunch(fatcubin_info.reg_fns[i]->hostFun);
+	    		  fatcubin_info_srv.reg_fns[i]->hostFEaddr,
+	    		  fatcubin_info_srv.reg_fns[i]->hostFun);
+	      packet->ret_ex_val.err = cudaLaunch(fatcubin_info_srv.reg_fns[i]->hostFun);
 	      break;
 	  }
 	}
@@ -526,93 +526,89 @@ int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
  */
 int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn){
 
-	__cudaFatCudaBinary * pFatC = malloc(sizeof(__cudaFatCudaBinary));
-	void ** pFatCHandle;
+	// non NULL value indicates that the unregister function has not been
+	// invoked
+	assert( NULL == fatcubin_info_srv.fatCubin );
+	fatcubin_info_srv.fatCubin = malloc(sizeof(__cudaFatCudaBinary));
 
-	if( mallocCheck(pFatC, __FUNCTION__, NULL ) == ERROR ){
+	//void ** pFatCHandle;
+
+	if( mallocCheck(fatcubin_info_srv.fatCubin, __FUNCTION__, NULL ) == ERROR ){
 		exit(ERROR);
 	}
-	if( unpackFatBinary(pFatC, myconn->request_data_buffer) == ERROR ){
-		printd(DBG_ERROR, "%s.%s: Problems with unpacking fat binary\n", __FILE__, __FUNCTION__);
+	if( unpackFatBinary(fatcubin_info_srv.fatCubin, myconn->request_data_buffer) == ERROR ){
+		printd(DBG_ERROR, "%s: __ERROR__ Problems with unpacking fat binary\n",__FUNCTION__);
 		exit(ERROR);
+	} else {
+		printd(DBG_ERROR, "%s: __OK__ No problem with unpacking fat binary\n",__FUNCTION__);
+		l_printFatBinary(fatcubin_info_srv.fatCubin);
 	}
-    //pFatC = copyFatBinary((__cudaFatCudaBinary *)((char *)myconn->request_data_buffer + packet->ret_ex_val.data_unit));
 
-	// call __cudaRegisterFatBinary; otherwise the compiler complaints that
-	// undefined reference to __cudaRegisterFatBinary
-    pFatCHandle = __cudaRegisterFatBinary(pFatC);
+	// not NULL value may indicate that the fatcubin_info structure has not
+	// been nicely cleaned
+	assert( NULL == fatcubin_info_srv.fatCubinHandle );
+    fatcubin_info_srv.fatCubinHandle = __cudaRegisterFatBinary(fatcubin_info_srv.fatCubin);
 
-    packet->args[1].argp = pFatC;
-    packet->ret_ex_val.handle = pFatCHandle;
+    packet->args[1].argp = fatcubin_info_srv.fatCubin;
+    packet->ret_ex_val.handle = fatcubin_info_srv.fatCubinHandle;
 
-    printd(DBG_DEBUG, "%s: FATCUBIN HANDLE: registered %p\n", __FUNCTION__, pFatCHandle);
+    printd(DBG_DEBUG, "%s: FATCUBIN HANDLE: registered %p\n", __FUNCTION__, fatcubin_info_srv.fatCubinHandle);
 
     return OK;
 }
 
 int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
-	reg_func_args_t * c_args = malloc(sizeof(__cudaFatCudaBinary));
+	reg_func_args_t * pA = malloc(sizeof(reg_func_args_t));
 
-	if( mallocCheck(c_args, __FUNCTION__, NULL ) == ERROR ){
+	if( mallocCheck(pA, __FUNCTION__, NULL ) == ERROR ){
 			exit(ERROR);
 	}
 
-	if(	unpackRegFuncArgs(c_args, myconn->request_data_buffer) == ERROR ){
-		printd(DBG_ERROR, "%s.%s: Problems with unpacking arguments in function register\n", __FILE__, __FUNCTION__);
+	if(	unpackRegFuncArgs(pA, myconn->request_data_buffer) == ERROR ){
+		printd(DBG_ERROR, "%s: __ERROR__: Problems with unpacking arguments in function register\n", __FUNCTION__);
 		exit(ERROR);
 	}
 
-	printd(DBG_DEBUG, "%s:FATCUBIN HANDLE: received=%p, expected=%p",__FUNCTION__, c_args->fatCubinHandle, fatcubin_info.fatCubinHandle);
-	assert(c_args->fatCubinHandle == fatcubin_info.fatCubinHandle);
+	printd(DBG_DEBUG, "%s:FATCUBIN HANDLE: received=%p, expected=%p",__FUNCTION__,
+			pA->fatCubinHandle, fatcubin_info_srv.fatCubinHandle);
 
+	assert(pA->fatCubinHandle == fatcubin_info_srv.fatCubinHandle);
 
-	packet->args[2].argp = (void *)c_args;
-	__cudaRegisterFunction( c_args->fatCubinHandle, (const char *)c_args->hostFun,
-	                c_args->deviceFun, (const char *)c_args->deviceName,
-	                c_args->thread_limit, c_args->tid,
-	                c_args->bid, c_args->bDim, c_args->gDim, c_args->wSize);
-//	dfi->reg_fns[dfi->num_reg_fns] = c_args;
-//	dfi->num_reg_fns++;
-	fatcubin_info.reg_fns[fatcubin_info.num_reg_fns] = c_args;
-	fatcubin_info.num_reg_fns++;
+	l_printRegFunArgs(pA->fatCubinHandle, (const char *)pA->hostFun, pA->deviceFun,
+			(const char *)pA->deviceName, pA->thread_limit,
+			pA->tid, pA->bid, pA->bDim, pA->gDim,pA->wSize);
 
-	packet->ret_ex_val.err = 0;
-	printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+	// remember the pointer to server registered function
+	packet->args[2].argp = (void *)pA;
+
+	__cudaRegisterFunction( pA->fatCubinHandle, (const char *)pA->hostFun,
+			pA->deviceFun, (const char *)pA->deviceName,
+			pA->thread_limit, pA->tid, pA->bid, pA->bDim, pA->gDim, pA->wSize);
+
+	// warn us if we want to write outbounds; fatcubin_info_srv.num_reg_fns
+	// should indicate the first free slot you can write in an array
+	assert(fatcubin_info_srv.num_reg_fns < MAX_REGISTERED_CUDA_FUNCTIONS);
+	fatcubin_info_srv.reg_fns[fatcubin_info_srv.num_reg_fns] = pA;
+	fatcubin_info_srv.num_reg_fns++;
+
+	packet->ret_ex_val.err = cudaSuccess;
+	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 	return OK;
 }
 
 int __nvback_cudaUnregisterFatBinary_srv(cuda_packet_t *packet, conn_t  * myconn){
 
-	int i;
-
-	printd(DBG_DEBUG, "%s, FIX MEEEEEEEEEEEEEEEEEEEEEEEE!!!!!!!!!!!!!\n", __FUNCTION__);
-
-	if( fatcubin_info.fatCubinHandle == NULL ){
-		packet->ret_ex_val.err = OK;
-		printd(DBG_DEBUG, "CUDA_ERROR=%p for method id=%d\n", packet->ret_ex_val.handle, packet->method_id);
+	if( fatcubin_info_srv.fatCubinHandle == NULL ){
+		// I do not check what happens if you try to unregister NULL binary
+		// but maybe something will happen or needs to happen that's why invoking
+		__cudaUnregisterFatBinary(fatcubin_info_srv.fatCubinHandle);
+		packet->ret_ex_val.err = cudaSuccess;
+		printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 		return ERROR;
 	}
-	__cudaUnregisterFatBinary(fatcubin_info.fatCubinHandle);
+	__cudaUnregisterFatBinary(fatcubin_info_srv.fatCubinHandle);
 
-/*	for (i = 0; i < dfi->num_reg_vars; ++i)
-	        freeRegVar(dfi->variables[i]);
-	for (i = 0; i < dfi->num_reg_texs; ++i)
-		freeRegTex(dfi->textures[i]); */
-	for (i = 0; i < fatcubin_info.num_reg_fns; ++i)
-		freeRegFunc(fatcubin_info.reg_fns[i]);
-	/*for (i = 0; i < dfi->num_reg_shared; ++i) {
-	   if (dfi->shared_vars[i] != NULL)
-		   free(dfi->shared_vars[i]);
-	   else
-		   break;
-	} */
-	freeFatBinary(fatcubin_info.fatCubin);
-
-	fatcubin_info.num_reg_fns = 0;
-	fatcubin_info.num_reg_vars = 0;
-	fatcubin_info.num_reg_texs = 0;
-	fatcubin_info.num_reg_shared = 0;
-	fatcubin_info.fatCubinHandle = NULL;
+	cleanFatCubinInfo(&fatcubin_info_srv);
 
 	printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 	return OK;

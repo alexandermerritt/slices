@@ -54,7 +54,7 @@
 #include "remote_api_wrapper.h" // for nvback....rpc/srv functions
 #include "connection.h"
 #include "libciutils.h"
-#include "local_api_wrapper.h"  // for copyFatBinary
+
 
 //! to indicate the error with the dynamic loaded library
 static cudaError_t cudaErrorDL = cudaErrorUnknown;
@@ -64,13 +64,16 @@ static cudaError_t cuda_err = 0;
 
 //! Right now the host where we are connecting to
 const char * SERVER_HOSTNAME = "cuda2.cc.gt.atl.ga.us";
-
+//const char * SERVER_HOSTNAME = "prost.cc.gt.atl.ga.us";
 
 #define MAX_REGISTERED_VARS 10
 // \todo Clean it up later. Just need to make sure MemcpySymbol does jazz
 // only when a variable has been registered
 char *reg_host_vars[MAX_REGISTERED_VARS];
 static int num_registered_vars = 0;
+
+//! stores information about the fatcubin_info on the client side
+static fatcubin_info_t fatcubin_info_rpc;
 
 
 /**
@@ -88,6 +91,7 @@ int l_handleDlError() {
 
 	return ret;
 }
+
 /**
  * Prints function signature
  * @param pSignature The string describing the function signature
@@ -119,6 +123,7 @@ int l_setMetThrReq(cuda_packet_t ** const pPacket, const uint16_t methodId){
 	(*pPacket)->method_id = methodId;
 	(*pPacket)->thr_id = pthread_self();
 	(*pPacket)->flags = CUDA_request;
+	(*pPacket)->ret_ex_val.err = cudaErrorUnknown;
 
 	return OK;
 }
@@ -145,6 +150,7 @@ int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
 	(*pPacket)->method_id = methodId;
 	(*pPacket)->thr_id = pthread_self();
 	(*pPacket)->flags = CUDA_request;
+	(*pPacket)->ret_ex_val.err = cudaErrorUnknown;
 
 	return OK;
 }
@@ -808,7 +814,7 @@ cudaError_t cudaLaunch(const char *entry) {
 	pPacket->args[0].argcp = (char *)entry;
 	// send the packet
 	if (nvbackCudaLaunch_rpc(pPacket) != OK) {
-		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		printd(DBG_ERROR, "%s.%d: __ERROR__: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
@@ -889,18 +895,20 @@ cudaError_t cudaMalloc(void **devPtr, size_t size) {
 				return cuda_err;
 	}
 
-	pPacket->args[0].argdp = devPtr;
+	//pPacket->args[0].argdp = devPtr;
+	pPacket->args[0].argdp = NULL;
 	pPacket->args[1].argi = size;
 
 	if(nvbackCudaMalloc_rpc(pPacket) != OK ){
-		printd(DBG_ERROR, "%s.%d: Return from the RPC with an error\n", __FUNCTION__, __LINE__);
+		printd(DBG_ERROR, "%s.%d: __ERROR__: Return from the RPC\n", __FUNCTION__, __LINE__);
 		cuda_err = cudaErrorMemoryAllocation;
 		*devPtr = NULL;
 	} else {
-		printd(DBG_INFO, "%s.%d: Return from the RPC call DevPtr and size: %p\n", __FUNCTION__, __LINE__,
+		printd(DBG_INFO, "%s.%d: __OK__:  Return from the RPC call DevPtr and size: %p\n", __FUNCTION__, __LINE__,
 				pPacket->args[0].argdp);
 		// unpack what we have got from the packet
-		*devPtr = pPacket->args[0].argp;
+		//*devPtr = pPacket->args[0].argp;
+		devPtr = pPacket->args[0].argdp;
 		cuda_err = pPacket->ret_ex_val.err;
 	}
 
@@ -2068,105 +2076,7 @@ cudaError_t cudaGetExportTable(const void **ppExportTable,
 
 void** pFatBinaryHandle = NULL;
 
-void l_printPtxE(__cudaFatPtxEntry * p){
-	int i = 0;
-	printd(DBG_INFO, "__cudaFatPtxEntry: %p\n", p);
 
-	while(1){
-		printd(DBG_INFO, "p[%d] (gpuProfileName, ptx): %s, %s\n",
-						i, p[i].gpuProfileName, p[i].ptx);
-
-		if( !(p+i) || !p[i].gpuProfileName || !p[i].ptx )
-			break;
-
-		i++;
-	}
-}
-
-void l_printCubinE(__cudaFatCubinEntry * p){
-	int i = 0;
-	printd(DBG_INFO, "__cudaFatCubinEntry: %p\n", p);
-
-	while(1){
-		printd(DBG_INFO, "p[%d] (gpuProfileName, cubin): %s, %s\n",
-				i, p[i].gpuProfileName, p[i].cubin);
-
-		if( !(p+i) || !p[i].gpuProfileName || !p[i].cubin )
-			break;
-
-		i++;
-	}
-}
-
-void l_printSymbolE(__cudaFatSymbol * p, char * name){
-	int i = 0;
-	printd(DBG_INFO, "__cudaFatSymbol: %s,  %p\n", name, p);
-
-	while(p && p->name ){
-		printd(DBG_INFO, "p[%d] (name): %s\n",
-				i, p[i].name);
-		i++;
-	}
-}
-
-void l_printDebugE(__cudaFatDebugEntry * p){
-	int i = 0;
-	printd(DBG_INFO, "__cudaFatDebugEntry: %p\n", p);
-	while( p ){
-		printd(DBG_INFO, "p[%d] (gpuProfileName, debug, next, size): %s, %s, %p, %d\n",
-				i, p->gpuProfileName, p->debug, p->next, p->size);
-		p = p->next;
-		i++;
-	}
-}
-
-void l_printDepE(__cudaFatCudaBinary * p){
-	int i = 0;
-
-	printd(DBG_INFO, "__cudaFatCudaBinary: %p\n", p);
-
-	while( p && p->ident){
-
-		printd(DBG_INFO, "p[%i]\n", i);
-		i++;
-		p = p->dependends;
-	}
-}
-
-void l_printElfE(__cudaFatElfEntry * p){
-
-	int i = 0;
-	printd(DBG_INFO, "__cudaFatElfEntry: %p\n", p);
-
-	while( p ){
-		printd(DBG_INFO, "p[%d] (gpuProfileName, elf, next, size): %s, %p, %p, %d\n",
-				i, p->gpuProfileName,  p->elf, p->next, p->size);
-		p = p->next;
-		i++;
-	}
-}
-
-void l_printFatBinary(__cudaFatCudaBinary * pFatBin){
-	if( pFatBin == NULL ){
-		printd(DBG_INFO, "~~~~~~~~ FatBinary  = %p\n", pFatBin);
-	} else {
-		printd(DBG_DEBUG, "\tmagic: %ld, version: %ld , gpuInfoVersion: %ld\n",
-				pFatBin->magic, pFatBin->version, pFatBin->gpuInfoVersion);
-		printd(DBG_DEBUG, "\tkey: %s, ident: %s, usageMode: %s\n",
-				pFatBin->key, pFatBin->ident, pFatBin->usageMode);
-		l_printPtxE(pFatBin->ptx);
-		l_printCubinE(pFatBin->cubin);
-		l_printDebugE(pFatBin->debug);
-
-		printd(DBG_DEBUG, "\tdebugInfo (pointer, char*): %p, %s\n", pFatBin->debugInfo, (char*) pFatBin->debugInfo);
-		printd(DBG_DEBUG, "\tflags: %u\n", pFatBin->flags);
-		l_printSymbolE(pFatBin->exported, "exported");
-		l_printSymbolE(pFatBin->imported, "imported");
-		l_printDepE(pFatBin->dependends);
-		printd(DBG_DEBUG, "\tcharacteristics: %u\n", pFatBin->characteristic);
-		l_printElfE(pFatBin->elf);
-	}
-}
 /**
  * The implementation is taken from __nvback_cudaRegisterFatBinary_rpc from
  * remote_api_wrapper and from cudart.c __cudaRegisterFatBinary
@@ -2195,7 +2105,7 @@ void** __cudaRegisterFatBinary(void* fatC) {
 	char * pPackedFat = NULL;
 
 	if (fatC == NULL) {
-		printd(DBG_ERROR, "%s, Null CUDA fat binary. Have to exit\n", __FUNCTION__);
+		printd(DBG_ERROR, "%s: __ERROR__, Null CUDA fat binary. Have to exit\n", __FUNCTION__);
 		exit(ERROR);
 	}
 
@@ -2224,23 +2134,25 @@ void** __cudaRegisterFatBinary(void* fatC) {
 	pPacket->args[0].argp = pPackedFat;			// start of the request buffer
 	pPacket->args[1].argi = fb_size;			// the size of the request buffer
 
-	printd(DBG_DEBUG, "pPackedFat, pPacket->args[0].argp = %p, %p\n",
-			pPackedFat, pPacket->args[0].argp);
+	printd(DBG_DEBUG, "pPackedFat, pPacket->args[0].argp = %p, %ld\n",
+			pPacket->args[0].argp, pPacket->args[1].argi);
 	// send the packet
 	if (__nvback_cudaRegisterFatBinary_rpc(pPacket) != OK) {
-		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		printd(DBG_ERROR, "__ERROR__: Return from rpc with the wrong return value.\n");
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
-		pFatBinaryHandle = (void**) pPacket->ret_ex_val.err;
+		fatcubin_info_rpc.fatCubinHandle = (void**) pPacket->ret_ex_val.err;
+		printd(DBG_INFO, "fatcubin_info_rpc.fatCubinHandle = %p\n", fatcubin_info_rpc.fatCubinHandle);
 	}
 
 	free(pPacket);
 
+	return fatcubin_info_rpc.fatCubinHandle;
 /*
 // -------------
 	static void** (*func)(void* fatC) = NULL;
-	char *error;
+	//char *error;
 
 	if (!func) {
 		func = dlsym(RTLD_NEXT, "__cudaRegisterFatBinary");
@@ -2249,11 +2161,9 @@ void** __cudaRegisterFatBinary(void* fatC) {
 			exit(-1);
 	}
 
-	l_printFuncSig(__FUNCTION__);
-	func(fatC)
+	//l_printFuncSig(__FUNCTION__);
+	return (func(fatC));
 */
-
-	return pFatBinaryHandle;
 }
 
 void __cudaUnregisterFatBinary(void** fatCubinHandle) {
@@ -2267,11 +2177,12 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle) {
 	pPacket->args[0].argdp = pFatBinaryHandle;
 
 	if (__nvback_cudaUnregisterFatBinary_rpc(pPacket) != OK) {
-		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		printd(DBG_ERROR, "%s.%d: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
 		// @todo do nothing (?)
+		printd(DBG_ERROR, "%s.%d: __OK__ Return from rpc with ok value.\n", __FUNCTION__, __LINE__);
 	}
 
 	free(pPacket);
@@ -2282,6 +2193,7 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle) {
 	// local housekeeping for variables et al
 	num_registered_vars = 0;
 
+	// -----------------
 /*	typedef void** (* pFuncType)(void** fatCubinHandle);
 	static pFuncType pFunc = NULL;
 
@@ -2297,31 +2209,6 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle) {
 	(pFunc(fatCubinHandle)); */
 }
 
-void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
-		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
-		uint3* bid, dim3* bDim, dim3* gDim, int* wSize){
-	printd(DBG_DEBUG, "\t REG FUN ARGS:\n");
-	printd(DBG_DEBUG, "fatCubinHandle: %p\n", fatCubinHandle);
-	printd(DBG_DEBUG, "hostFun: %s\n", hostFun);
-	printd(DBG_DEBUG, "deviceFun: %s\n", deviceFun);
-	printd(DBG_DEBUG, "deviceName: %s\n", deviceName);
-	printd(DBG_DEBUG, "thread_limit: %d\n", thread_limit);
-	printd(DBG_DEBUG, "tid: %p\n", tid);
-	if( tid )
-		printd(DBG_DEBUG, "tid: (%ud, %ud, %ud)\n", tid->x, tid->y, tid->z );
-	printd(DBG_DEBUG, "bid: %p\n", bid);
-	if( bid )
-		printd(DBG_DEBUG, "bid: (%ud, %ud, %ud)\n", bid->x, bid->y, bid->z);
-	printd(DBG_DEBUG, "bDim: %p\n", bDim);
-	if( bDim )
-		printd(DBG_DEBUG, "bDim: (%ud, %ud, %ud)\n", bDim->x, bDim->y, bDim->z);
-	printd(DBG_DEBUG, "gDim: %p\n", gDim);
-	if( gDim )
-		printd(DBG_DEBUG, "gDim: (%ud, %ud, %ud)\n", gDim->x, gDim->y, gDim->z);
-
-	printd(DBG_DEBUG, "wSize: %p\n", wSize);
-}
-
 
 void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
@@ -2335,16 +2222,26 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	l_printRegFunArgs(fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit,tid,
 			bid, bDim, gDim, wSize);
 
-	reg_func_args_t * p;
+	int size = 0;
+	//reg_func_args_t *
+	char * p = packRegFuncArgs(fatCubinHandle, hostFun,
+			deviceFun, deviceName, thread_limit, tid,
+			 bid, bDim, gDim, wSize, &size);
+
+	if( !p ){
+		printd(DBG_ERROR, "%s: Problems with allocating the memory. Quitting ... \n", __FUNCTION__);
+		exit(ERROR);
+	}
 	// update packet
 	pPacket->flags |= CUDA_Copytype;
-	pPacket->args[0].reg_func_args = p;
-	int size = 0;
+	pPacket->args[0].argp = p;
 	pPacket->args[1].argi = size;
 
 
+	//(void *) packet->args[0].argui, packet->args[1].argi
+
 	if(__nvback_cudaRegisterFunction_rpc(pPacket) != OK ){
-		printd(DBG_ERROR, "%s.%d: Return from the RPC with an error\n", __FUNCTION__, __LINE__);
+		printd(DBG_ERROR, "%s.%d: __ERROR__: Return from the RPC with an error\n", __FUNCTION__, __LINE__);
 		cuda_err = cudaErrorUnknown;
 	} else {
 		// do nothing
@@ -2353,6 +2250,7 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 
 	free(pPacket);
 
+	// --------------
 /*	typedef void** (* pFuncType)(void** fatCubinHandle, const char* hostFun,
 			char* deviceFun, const char* deviceName, int thread_limit,
 			uint3* tid, uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
@@ -2365,7 +2263,7 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 			exit(-1);
 	}
 
-	l_printFuncSig(__FUNCTION__);
+	//l_printFuncSig(__FUNCTION__);
 
 	(pFunc(fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit, tid,
 			bid, bDim, gDim, wSize)); */

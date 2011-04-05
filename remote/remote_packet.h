@@ -25,9 +25,4 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t *pConn);
 void strm_execute(strm_t *strm, conn_t * pConn);
 
 
-
-
-
-
-
 #endif /* REMOTE_PACKET_H_ */

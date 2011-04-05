@@ -44,7 +44,10 @@ void * backend_thread(){
 	if( (pConn = conn_malloc(__FUNCTION__, NULL)) == NULL ) return NULL;
 
 
+	fprintf(stderr, "**************************************\n");
 	fprintf(stderr, "%s.%d: hey, here server thread!\n", __FUNCTION__, __LINE__);
+	fprintf(stderr, "**************************************\n");
+
 	// set up the connection
 	conn_localbind(pConnListen);
 	conn_accept(pConnListen, pConn);   // blocking
