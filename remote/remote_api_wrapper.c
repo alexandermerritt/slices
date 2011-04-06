@@ -547,13 +547,17 @@ int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn){
 	// not NULL value may indicate that the fatcubin_info structure has not
 	// been nicely cleaned
 	assert( NULL == fatcubin_info_srv.fatCubinHandle );
+	printd(DBG_DEBUG, "%s: FATCUBIN HANDLE: before %p\n", __FUNCTION__, fatcubin_info_srv.fatCubinHandle);
+	printd(DBG_DEBUG, "%s: FATCUBIN: before %p\n", __FUNCTION__, fatcubin_info_srv.fatCubin);
+
+	// start to build the structure
     fatcubin_info_srv.fatCubinHandle = __cudaRegisterFatBinary(fatcubin_info_srv.fatCubin);
 
     packet->args[1].argp = fatcubin_info_srv.fatCubin;
     packet->ret_ex_val.handle = fatcubin_info_srv.fatCubinHandle;
 
     printd(DBG_DEBUG, "%s: FATCUBIN HANDLE: registered %p\n", __FUNCTION__, fatcubin_info_srv.fatCubinHandle);
-
+    printd(DBG_DEBUG, "%s: FATCUBIN: registered %p\n", __FUNCTION__, fatcubin_info_srv.fatCubin);
     return OK;
 }
 

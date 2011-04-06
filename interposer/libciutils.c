@@ -523,7 +523,7 @@ void l_printFatBinary(__cudaFatCudaBinary * pFatBin){
 				pFatBin->key, pFatBin->ident, pFatBin->usageMode);
 		l_printPtxE(pFatBin->ptx);
 		l_printCubinE(pFatBin->cubin);
-		l_printDebugE(pFatBin->debug);
+//		l_printDebugE(pFatBin->debug);
 
 		printd(DBG_DEBUG, "\tdebugInfo (pointer, char*): %p, %s\n", pFatBin->debugInfo, (char*) pFatBin->debugInfo);
 		printd(DBG_DEBUG, "\tflags: %u\n", pFatBin->flags);
@@ -1140,15 +1140,16 @@ __cudaFatElfEntry * l_unpackElf(char * pSrc, int * pOffset){
  *
  */
 int l_packSymbol(char * pDst, const __cudaFatSymbol * pEntry, int n){
-	int offset;
+	int offset = 0;
 	int tmp;
 	int i;
 
 	if( NULL == pDst )
 		return ERROR;
 
-	// write the number of ptx entries
-	memcpy(pDst,&n, sizeof(size_pkt_field_t) );
+	// write the number of entries
+	size_pkt_field_t * p = (size_pkt_field_t * ) pDst;
+	p[0] = n;
 	pDst += sizeof(size_pkt_field_t);
 	offset = sizeof(size_pkt_field_t);
 
@@ -1188,22 +1189,27 @@ __cudaFatSymbol * l_unpackSymbol(char * pSrc, int * pOffset){
 		return NULL;
 
 	// find out how many entries do we have
-	memcpy(&n, pSrc, sizeof(size_pkt_field_t) );
+	size_pkt_field_t * p = (size_pkt_field_t*) pSrc;
+	n = p[0];
 	pSrc += sizeof(size_pkt_field_t);
 
-	// make place for the terminating NULL entry
-	pEntry = (__cudaFatSymbol *) malloc( (n + 1) * sizeof(__cudaFatSymbol ));
+	if (0 == n) {
+		pEntry = NULL;
+	} else {
+		// create the place and unpack the stuff
+		// make place for the terminating NULL entry
+		pEntry = (__cudaFatSymbol *) malloc((n + 1) * sizeof(__cudaFatSymbol ));
 
-	for(i = 0; i < n; i++){
-		pEntry[i].name =  l_unpackStr(pSrc, &offset);
-		pSrc += offset;
+		for (i = 0; i < n; i++) {
+			pEntry[i].name = l_unpackStr(pSrc, &offset);
+			pSrc += offset;
+		}
+
+		// add null terminators
+		assert(i == n);
+
+		pEntry[i].name = NULL;
 	}
-
-	// add null terminators
-	assert(i == n);
-
-	pEntry[i].name = NULL;
-
 	// count the offset
 	*pOffset = pSrc - pSrcOrig;
 
@@ -1396,7 +1402,7 @@ int l_packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 	offset = l_packCubin(pFatPack, pSrcFatC->cubin, pEntriesCache->ncubs);
 	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
 
-	// pack debug
+//	// pack debug
 	offset = l_packDebug(pFatPack, pSrcFatC->debug, pEntriesCache->ndebs);
 	if ( ERROR == offset ) return ERROR; else pFatPack += offset;
 

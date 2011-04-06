@@ -54,6 +54,7 @@
 #include "remote_api_wrapper.h" // for nvback....rpc/srv functions
 #include "connection.h"
 #include "libciutils.h"
+#include <assert.h>
 
 
 //! to indicate the error with the dynamic loaded library
@@ -2115,8 +2116,7 @@ void** __cudaRegisterFatBinary(void* fatC) {
 	}
 
 	fb_size = getFatRecPktSize(pSrcFatC, &entries_cached);
-	printd(DBG_DEBUG, "%s, FatCubin size: %d\n", __FUNCTION__,
-			getFatRecPktSize(pSrcFatC,&entries_cached ));
+	printd(DBG_DEBUG, "%s, FatCubin size: %d\n", __FUNCTION__,fb_size);
 	l_printFatBinary(pSrcFatC);
 
 	pPackedFat = (char*) malloc(fb_size);
@@ -2142,8 +2142,18 @@ void** __cudaRegisterFatBinary(void* fatC) {
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
-		fatcubin_info_rpc.fatCubinHandle = (void**) pPacket->ret_ex_val.err;
+		// get the response, get the fat cubin handle
+		fatcubin_info_rpc.fatCubin = pSrcFatC;
+		fatcubin_info_rpc.fatCubinHandle = pPacket->ret_ex_val.handle;
+
+		// @todo maybe I am wrong with this assert, maybe it should
+		// be what is got from rpc call: args[1].argp which is
+		// the fatCubin of the remote server
+		// actually I think it doesn't matter, since to unregister
+		// you need a handler
+		assert(fatC == fatcubin_info_rpc.fatCubin);
 		printd(DBG_INFO, "fatcubin_info_rpc.fatCubinHandle = %p\n", fatcubin_info_rpc.fatCubinHandle);
+		printd(DBG_INFO, "fatcubin_info_rpc.fatCubin = %p\n", fatcubin_info_rpc.fatCubin);
 	}
 
 	free(pPacket);

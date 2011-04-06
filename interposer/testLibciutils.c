@@ -670,9 +670,14 @@ void test_l_packUnpackSymbol(void){
 	// 1. NULL dst
 	CU_ASSERT_EQUAL(l_packSymbol(NULL, sym, 2), ERROR);
 
-	// 2. NULL entry
+	// 2. NULL entry - this is a very typical thing
 	offset = sizeof(size_pkt_field_t);
 	CU_ASSERT_EQUAL(l_packSymbol(arr, NULL, 0), offset);
+	offset = 0;
+	unpack = l_unpackSymbol(arr, &offset);
+	CU_ASSERT_EQUAL(offset, sizeof(size_pkt_field_t));
+	CU_ASSERT_PTR_NULL(unpack);
+
 
 	// 3. regular thing
 	offset = sizeof(size_pkt_field_t)
