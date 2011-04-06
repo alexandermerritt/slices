@@ -893,27 +893,28 @@ cudaError_t cudaMalloc(void **devPtr, size_t size) {
 	cuda_packet_t * pPacket;
 
 	if( l_remoteInitMetThrReq(&pPacket, CUDA_MALLOC, __FUNCTION__) == ERROR){
-				return cuda_err;
+		return cuda_err;
 	}
 
-	//pPacket->args[0].argdp = devPtr;
-	pPacket->args[0].argdp = NULL;
+	pPacket->args[0].argdp = devPtr;
 	pPacket->args[1].argi = size;
 
+	printf("\ndevPtr %p, *devPtr %p, size %ld\n", devPtr, *devPtr, size);
+
 	if(nvbackCudaMalloc_rpc(pPacket) != OK ){
-		printd(DBG_ERROR, "%s.%d: __ERROR__: Return from the RPC\n", __FUNCTION__, __LINE__);
+		printd(DBG_ERROR, "%s: __ERROR__: Return from the RPC\n", __FUNCTION__);
 		cuda_err = cudaErrorMemoryAllocation;
 		*devPtr = NULL;
 	} else {
-		printd(DBG_INFO, "%s.%d: __OK__:  Return from the RPC call DevPtr and size: %p\n", __FUNCTION__, __LINE__,
-				pPacket->args[0].argdp);
+		printd(DBG_INFO, "%s: __OK__:  Return from the RPC call DevPtr %p\n", __FUNCTION__,
+				pPacket->args[0].argp);
 		// unpack what we have got from the packet
-		//*devPtr = pPacket->args[0].argp;
-		devPtr = pPacket->args[0].argdp;
+		*devPtr = pPacket->args[0].argp;
 		cuda_err = pPacket->ret_ex_val.err;
 	}
 
 	free(pPacket);
+	return cuda_err;
 
 	/*
 	typedef cudaError_t (* pFuncType)(void **devPtr, size_t size);
@@ -927,7 +928,6 @@ cudaError_t cudaMalloc(void **devPtr, size_t size) {
 	}
 
 	return (pFunc(devPtr, size)); */
-	return cuda_err;
 }
 
 cudaError_t cudaMallocHost(void **ptr, size_t size) {
@@ -2233,28 +2233,30 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 			bid, bDim, gDim, wSize);
 
 	int size = 0;
-	//reg_func_args_t *
+
 	char * p = packRegFuncArgs(fatCubinHandle, hostFun,
 			deviceFun, deviceName, thread_limit, tid,
 			 bid, bDim, gDim, wSize, &size);
 
 	if( !p ){
-		printd(DBG_ERROR, "%s: Problems with allocating the memory. Quitting ... \n", __FUNCTION__);
+		printd(DBG_ERROR, "%s: __ERROR__ Problems with allocating the memory. Quitting ... \n", __FUNCTION__);
 		exit(ERROR);
 	}
-	// update packet
+	// update packet; point to the buffer from which you will
+	// take data to send over the network
 	pPacket->flags |= CUDA_Copytype;
-	pPacket->args[0].argp = p;
-	pPacket->args[1].argi = size;
-
+	pPacket->args[0].argp = p;			// buffer pointer
+	pPacket->args[1].argi = size;       // size of the buffer
 
 	//(void *) packet->args[0].argui, packet->args[1].argi
 
 	if(__nvback_cudaRegisterFunction_rpc(pPacket) != OK ){
-		printd(DBG_ERROR, "%s.%d: __ERROR__: Return from the RPC with an error\n", __FUNCTION__, __LINE__);
+		printd(DBG_ERROR, "%s: __ERROR__: Return from the RPC with an error\n", __FUNCTION__);
 		cuda_err = cudaErrorUnknown;
 	} else {
-		// do nothing
+		// do nothing;
+		// @todo don't you need to put some stuff
+		// to fatcubin_info_rpc like the functions registered?
 		cuda_err = pPacket->ret_ex_val.err;
 	}
 

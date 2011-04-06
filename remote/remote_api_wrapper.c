@@ -285,7 +285,7 @@ int nvbackCudaMalloc_rpc(cuda_packet_t *packet){
     //packet->args[0].argp = NULL;
     l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
 
-    printd(DBG_DEBUG,"%s: devPtr is %p",__FUNCTION__, packet->args[0].argdp);
+    printd(DBG_DEBUG,"%s: devPtr is %p",__FUNCTION__, packet->args[0].argp);
 
     return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
@@ -367,7 +367,7 @@ int __nvback_cudaRegisterFunction_rpc(cuda_packet_t *packet) {
 	l_do_cuda_rpc(packet, (void *) packet->args[0].argui, packet->args[1].argi,
 				NULL, 0);
 
-	return (packet->ret_ex_val.err == 0) ? OK : ERROR;
+	return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
 
 int __nvback_cudaUnregisterFatBinary_rpc(cuda_packet_t *packet){
@@ -409,23 +409,15 @@ int nvbackCudaGetDeviceProperties_srv(cuda_packet_t *packet, conn_t * pConn){
 }
 
 int nvbackCudaMalloc_srv(cuda_packet_t * packet, conn_t * pConn){
-	void *p = NULL;
-	// just call the function
-	packet->args[0].argdp = NULL;
-
-	packet->ret_ex_val.err = cudaErrorUnknown;
-//	printd(DBG_DEBUG, "%s: Size to allocate: %ld\n", __FUNCTION__, packet->args[1].argi);
-	size_t size = packet->args[1].argi;
 
 	printf("\n hej!!!!!!!! przed\n");
-	packet->ret_ex_val.err = cudaMalloc(packet->args[0].argdp, 40);
-	//cudaMalloc(&p, 40);
+
+	printf("\ndevPtr %p, *devPtr %p, size %ld\n",&(packet->args[0].argp) , packet->args[0].argp, packet->args[1].argi);
+    packet->args[0].argp = NULL;
+    packet->ret_ex_val.err = cudaMalloc(&(packet->args[0].argp), packet->args[1].argi);
+    printd(DBG_DEBUG,"%s: devPtr is %p",__FUNCTION__,packet->args[0].argp);
+
 	printf("\n hej!!!!!!!! po\n");
-
-
-	//packet->ret_ex_val.err = cudaMalloc(packet->args[0].argdp, size);
-
-	printd(DBG_DEBUG,"%s: devPtr is %p, allocated size %ld\n",__FUNCTION__, &p, packet->args[1].argi);
 
     printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d after execution\n",
     		packet->ret_ex_val.err, packet->method_id);
@@ -583,7 +575,7 @@ int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
 			pA->tid, pA->bid, pA->bDim, pA->gDim,pA->wSize);
 
 	// remember the pointer to server registered function
-	packet->args[2].argp = (void *)pA;
+	//packet->args[2].argp = pA;
 
 	__cudaRegisterFunction( pA->fatCubinHandle, (const char *)pA->hostFun,
 			pA->deviceFun, (const char *)pA->deviceName,
@@ -596,7 +588,7 @@ int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
 	fatcubin_info_srv.num_reg_fns++;
 
 	packet->ret_ex_val.err = cudaSuccess;
-	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+//	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 	return OK;
 }
 

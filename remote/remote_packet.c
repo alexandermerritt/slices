@@ -190,6 +190,7 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 	case CUDA_GET_DEVICE_COUNT:
 		nvbackCudaGetDeviceCount_srv(rpkt, pConn);
 		break;
+
 	case CUDA_GET_DEVICE_PROPERTIES:
 		nvbackCudaGetDeviceProperties_srv(rpkt, pConn);
 		break;
@@ -232,6 +233,7 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 	default:
 		printd(DBG_ERROR, "%s: Error: Unknown method ID %d\n", __FUNCTION__, rpkt->method_id);
 		rpkt->flags = CUDA_error;
+		break;
 	}
 
     if(rpkt->method_id != __CUDA_REGISTER_FAT_BINARY)
