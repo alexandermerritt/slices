@@ -50,6 +50,7 @@ static conn_t myconn;
 //static fatcubin_info_t fatcubin_info_rpc;
 
 //! stores information about the fatcubin_info on the server side
+//static fatcubin_info_t fatcubin_info_srv;
 static fatcubin_info_t fatcubin_info_srv;
 
 // the original function we eventually want to invoke
@@ -375,7 +376,9 @@ int __nvback_cudaUnregisterFatBinary_rpc(cuda_packet_t *packet){
 	            packet->ret_ex_val.err, packet->method_id);
 	l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
 
-	return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
+	// this doesn't get info from the _srv counterpart
+	//return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
+	return OK;
 }
 
 /////////////////////////
@@ -606,6 +609,8 @@ int __nvback_cudaUnregisterFatBinary_srv(cuda_packet_t *packet, conn_t  * myconn
 
 	cleanFatCubinInfo(&fatcubin_info_srv);
 
+	packet->ret_ex_val.err = cudaSuccess;
 	printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+
 	return OK;
 }

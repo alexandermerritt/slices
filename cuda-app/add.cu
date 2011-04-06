@@ -25,7 +25,7 @@ int cuda_main(void) {
 	const int N = 10; // Number of elements in arrays
 	size_t size = N * sizeof(float);
 	int i;
-	int deviceCount;
+	int deviceCount = 0;
 	cudaDeviceProp prop;
 
 
@@ -42,7 +42,7 @@ int cuda_main(void) {
 	a_h = (float *) malloc(size); // Allocate array on host
 	a_d = NULL;
 	cudaMalloc((void **) &a_d, size); // Allocate array on device
-/*	// Initialize host array and copy it to CUDA device
+	// Initialize host array and copy it to CUDA device
 	for (int i = 0; i < N; i++)
 		a_h[i] = (float) i;
 	cudaMemcpy(a_d, a_h, size, cudaMemcpyHostToDevice);
@@ -55,7 +55,7 @@ int cuda_main(void) {
 	// Print results
 	for (int i = 0; i < N; i++)
 		printf("%d %f\n", i, a_h[i]);
-*/
+
 	// Cleanup
 	free(a_h);
 	cudaFree(a_d);

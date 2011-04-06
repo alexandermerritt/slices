@@ -454,9 +454,8 @@ void test_l_packUnpackStr(void){
 	// @todo you might want to check what contains arr, but
 	// we won't do that
 	unpack = l_unpackStr(arr, &offset);
-	CU_ASSERT(unpack != NULL);
+	CU_ASSERT(unpack == NULL);
 	CU_ASSERT(sizeof(size_pkt_field_t) == offset);
-	CU_ASSERT(*unpack == '\0');
 	free(unpack);
 
 	// 1b. test empty string
@@ -465,9 +464,8 @@ void test_l_packUnpackStr(void){
 	// @todo you might want to check what contains arr, but
 	// we won't do that
 	unpack = l_unpackStr(arr, &offset);
-	CU_ASSERT(unpack != NULL);
+	CU_ASSERT(unpack == NULL);
 	CU_ASSERT(sizeof(size_pkt_field_t) == offset);
-	CU_ASSERT(*unpack == '\0');
 	free(unpack);
 
 	// 2. test normal string

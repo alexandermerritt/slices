@@ -42,7 +42,7 @@ int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo){
 	int i;
 
 	// we assume that the pFatCInfo is not a null pointer
-	assert(NULL == pFatCInfo);
+	assert(NULL != pFatCInfo);
 	/*	for (i = 0; i < dfi->num_reg_vars; ++i)
 		        freeRegVar(dfi->variables[i]);
 		for (i = 0; i < dfi->num_reg_texs; ++i)
@@ -640,10 +640,17 @@ inline char * l_unpackStr(const char *pSrc, int * pOffset){
 		return NULL;
 
 	// read the length
-	memcpy(&length, pSrc, sizeof(size_pkt_field_t));
+	size_pkt_field_t * p = (size_pkt_field_t *) pSrc;
+	length = p[0];
+	//memcpy(&length, pSrc, sizeof(size_pkt_field_t));
 	pSrc += sizeof(size_pkt_field_t);
 	*pOffset = sizeof(size_pkt_field_t);
 
+	if ( 0 == length ){
+		return NULL;
+	}
+
+	// since we have the >0 length string to copy, so copy it
 	// now allocate enough memory for the string and the NULL
 	// terminator
 	pDst = malloc(length + 1);
@@ -653,10 +660,10 @@ inline char * l_unpackStr(const char *pSrc, int * pOffset){
 	if( length > 0){
 		memcpy(pDst, pSrc, length);
 		*pOffset += length;
+		// add NULL
+		pDst[length] = '\0';
 	}
 
-	// add NULL
-	*(pDst + length) = '\0';
 
 	return pDst;
 }
@@ -951,11 +958,14 @@ __cudaFatDebugEntry * l_unpackDebug(char * pSrc, int * pOffset){
 		return NULL;
 
 	// find out how many debug entries do we have
-	memcpy(&n, pSrc, sizeof(size_pkt_field_t) );
+	size_pkt_field_t * p = (size_pkt_field_t *) pSrc;
+	n = p[0];
+	//memcpy(&n, pSrc, sizeof(size_pkt_field_t) );
 	pSrc += sizeof(size_pkt_field_t);
 
 	if( 0 == n ){
 		*pOffset = sizeof(size_pkt_field_t);
+		return NULL;
 	}
 
 	pEntry = (__cudaFatDebugEntry *) malloc((n+1) * sizeof(__cudaFatDebugEntry ));
@@ -975,11 +985,8 @@ __cudaFatDebugEntry * l_unpackDebug(char * pSrc, int * pOffset){
 	}
 
 	// add null terminators
-	if( n == 0 ){
-		i = 1;
-	} else {
-		assert( n == i );
-	}
+	assert( n == i );
+
 	pEntry[i].next = NULL;
 	pEntry[i].gpuProfileName = NULL;
 	pEntry[i].debug = NULL;
@@ -1076,11 +1083,14 @@ __cudaFatElfEntry * l_unpackElf(char * pSrc, int * pOffset){
 		return NULL;
 
 	// find out how many debug entries do we have
-	memcpy(&n, pSrc, sizeof(size_pkt_field_t) );
+	size_pkt_field_t * p = (size_pkt_field_t *) pSrc;
+	n = p[0];
+	//memcpy(&n, pSrc, sizeof(size_pkt_field_t) );
 	pSrc += sizeof(size_pkt_field_t);
 
 	if( 0 == n ){
 		*pOffset = sizeof(size_pkt_field_t);
+		return NULL;
 	}
 
 	pEntry = (__cudaFatElfEntry *) malloc((n+1) * sizeof(__cudaFatElfEntry ));
@@ -1108,11 +1118,8 @@ __cudaFatElfEntry * l_unpackElf(char * pSrc, int * pOffset){
 	}
 
 	// add null terminators
-	if( n == 0 ){
-		i = 1;
-	} else {
-		assert( n == i );
-	}
+	assert( n == i );
+
 	pEntry[i].next = NULL;
 	pEntry[i].gpuProfileName = NULL;
 	pEntry[i].elf = NULL;
@@ -1797,7 +1804,7 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
         uint3* tid, uint3* bid, dim3* bDim, dim3* gDim, int* wSize,
 	int *pSize){
 	// where we are
-	int offset;
+	int offset=0;
 	char * pPack; // for the contiguous space with packed arguments up
 	char * pPackStart; // the beginning
 
@@ -1811,37 +1818,50 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
 
 	// remember the beginning of the packet
 	pPackStart = pPack;
+	printf("Start:  pPack = %p, offset = %d\n", pPack, offset);
+
 	void *** p = (void ***) pPack;
 	p[0] = fatCubinHandle;
 	pPack += sizeof(void*);
+	printf("Handle:  pPack = %p, offset = %d\n",  pPack, offset);
+
 
 	offset = l_packStr(pPack, hostFun);
 	if( ERROR == offset ) return NULL; else pPack += offset;
+	printf("hostFun: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packStr(pPack, deviceFun);
 	if( ERROR == offset ) return NULL; else pPack += offset;
+	printf("deviceFun: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packStr(pPack, deviceName);
 	if( ERROR == offset ) return NULL; else pPack += offset;
+	printf("deviceName: pPack = %p, offset = %d\n",  pPack, offset);
 
 	int * pInt = (int*) pPack;
 	pInt[0] = thread_limit;
 	pPack += sizeof(int);
+	printf("thread_limit: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packUint3Ptr(pPack, tid);
 	if( ERROR == offset ) return NULL; else pPack += offset;
+	printf("tid: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packUint3Ptr(pPack, bid);
 	if( ERROR == offset ) return NULL; else pPack += offset;
+	printf("bid: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packDim3Ptr(pPack, bDim);
 	if( ERROR == offset ) return NULL; else pPack += offset;
+	printf("bDim: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packDim3Ptr(pPack, gDim);
 	if( ERROR == offset ) return NULL; else pPack += offset;
+	printf("gDim: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packIntPtr(pPack, wSize);
 	if( ERROR == offset ) return NULL; else pPack += offset;
+	printf("wSize: pPack = %p, offset = %d\n",  pPack, offset);
 
 	return pPackStart;
 }
@@ -1856,45 +1876,60 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
  *         ERROR there were some errors
  */
 int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
-	int offset;
+	int offset = 0;
 
 	void *** v = (void***) pPacket;
 
-
+	printf("Start: pPacket = %p, offset = %d\n",  pPacket, offset);
 	pRegFuncArgs->fatCubinHandle = v[0];
 	pPacket += sizeof(void*);
+	printf("Handle: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	// @todo it should be done better with NULL and with communicating
 	// an error - right now it doesn't have an effect
 	// you should change the implementation of l_packStr/l_unpackStr
 	// to differentiate the NULL and the ERROR in the offset
 	pRegFuncArgs->hostFun  = l_unpackStr(pPacket, &offset);
+	//offset += 75;
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
+	printf("hostFun: pPacket = %p, offset = %d\n",  pPacket, offset);
 
-	pRegFuncArgs->deviceFun = l_unpackStr(pPacket, &offset);
+	pRegFuncArgs->deviceFun =
+			//"_Z12square_arrayPfi";
+			l_unpackStr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
+	printf("deviceFun: pPacket = %p, offset = %d\n",  pPacket, offset);
 
-	pRegFuncArgs->deviceName = l_unpackStr(pPacket, &offset);
+	pRegFuncArgs->deviceName =
+			//"_Z12square_arrayPfi";
+			l_unpackStr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
+	printf("deviceName: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	int * pI = (int *) pPacket;
 	pRegFuncArgs->thread_limit = pI[0];
 	pPacket += sizeof(int);
+	printf("thread_limit: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->tid = l_unpackUint3Ptr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
+	printf("tid: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->bid = l_unpackUint3Ptr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
+	printf("bid: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->bDim = l_unpackDim3Ptr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
+	printf("bDim: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->gDim = l_unpackDim3Ptr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
+	printf("gDim: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->wSize = l_unpackIntPtr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
+	printf("wSize: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	return OK;
 }

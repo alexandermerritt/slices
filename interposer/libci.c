@@ -2184,7 +2184,7 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle) {
 	}
 
 	// update packet
-	pPacket->args[0].argdp = pFatBinaryHandle;
+	pPacket->args[0].argdp = fatcubin_info_rpc.fatCubinHandle;
 
 	if (__nvback_cudaUnregisterFatBinary_rpc(pPacket) != OK) {
 		printd(DBG_ERROR, "%s.%d: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
