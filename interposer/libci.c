@@ -1212,10 +1212,11 @@ cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 
 	// send the packet
 	if(nvbackCudaMemcpy_rpc(pPacket) != OK ){
-		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
+		printd(DBG_DEBUG, "%s: __OK__ Return from RPC.\n", __FUNCTION__);
 		cuda_err = pPacket->ret_ex_val.err;
 	}
 

@@ -161,6 +161,9 @@ int conn_close( conn_t *conn ) {
     if( conn->socket > 0 ) close( conn->socket );
     conn->socket = -1;
 
+    free(conn->address);
+    conn->address = NULL;
+
     return 0;
 }
 /**

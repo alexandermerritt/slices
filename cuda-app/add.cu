@@ -41,7 +41,9 @@ int cuda_main(void) {
 
 	a_h = (float *) malloc(size); // Allocate array on host
 	a_d = NULL;
+
 	cudaMalloc((void **) &a_d, size); // Allocate array on device
+	printf("after cudaMalloc: a_d = %p\n", a_d);
 	// Initialize host array and copy it to CUDA device
 	for (int i = 0; i < N; i++)
 		a_h[i] = (float) i;
@@ -49,7 +51,7 @@ int cuda_main(void) {
 	// Do calculation on device:
 	int block_size = 4;
 	int n_blocks = N / block_size + (N % block_size == 0 ? 0 : 1);
-	square_array <<< n_blocks, block_size >>> (a_d, N);
+//	square_array <<< n_blocks, block_size >>> (a_d, N);
 	// Retrieve result from device and store it in host array
 	cudaMemcpy(a_h, a_d, sizeof(float) * N, cudaMemcpyDeviceToHost);
 	// Print results

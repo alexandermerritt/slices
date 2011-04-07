@@ -319,12 +319,25 @@ int nvbackCudaLaunch_rpc(cuda_packet_t * packet){
 }
 
 int nvbackCudaMemcpy_rpc(cuda_packet_t *packet){
+
+	printd(DBG_DEBUG, "Packet content: args[0].argp (dst)= %p, args[1].argp (src)= %p\n",
+			packet->args[0].argp, packet->args[1].argp);
+	printd(DBG_DEBUG,"args[2].argi=%ld, args[3].argi=%ld\n", packet->args[2].argi, packet->args[3].argi);
+
 	// this is the kind of the original cudaMemcpy
 	int64_t kind = packet->args[3].argi;
 
 	switch(packet->args[3].argi){
 	case cudaMemcpyHostToDevice:
 		packet->method_id = CUDA_MEMCPY_H2D;
+
+		int i;
+		int n = packet->args[2].argi / sizeof(float);
+		float * p = (float *)packet->args[1].argui;
+		for (i = 0; i < n; i++) {
+			printf("p[i] = %f \n", p[i]);
+		}
+
 		l_do_cuda_rpc(packet, (void *)packet->args[1].argui, packet->args[2].argi, NULL, 0);
 		break;
 	case cudaMemcpyDeviceToHost:
@@ -413,14 +426,14 @@ int nvbackCudaGetDeviceProperties_srv(cuda_packet_t *packet, conn_t * pConn){
 
 int nvbackCudaMalloc_srv(cuda_packet_t * packet, conn_t * pConn){
 
-	printf("\n hej!!!!!!!! przed\n");
 
-	printf("\ndevPtr %p, *devPtr %p, size %ld\n",&(packet->args[0].argp) , packet->args[0].argp, packet->args[1].argi);
+	printf("\nbefore devPtr %p, *devPtr %p, size %ld\n",&(packet->args[0].argp) , packet->args[0].argp, packet->args[1].argi);
     packet->args[0].argp = NULL;
     packet->ret_ex_val.err = cudaMalloc(&(packet->args[0].argp), packet->args[1].argi);
+    printf(" after devPtr is %p, *devPtr %p\n", &(packet->args[0].argp), packet->args[0].argp);
+
     printd(DBG_DEBUG,"%s: devPtr is %p",__FUNCTION__,packet->args[0].argp);
 
-	printf("\n hej!!!!!!!! po\n");
 
     printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d after execution\n",
     		packet->ret_ex_val.err, packet->method_id);
@@ -436,7 +449,12 @@ int nvbackCudaFree_srv(cuda_packet_t *packet, conn_t *pConn){
 }
 
 int nvbackCudaSetupArgument_srv(cuda_packet_t *packet, conn_t *pConn){
-	void *arg = (void*) ((char *)pConn->request_data_buffer + packet->ret_ex_val.data_unit);
+	// this packet->ret_ex_val.data_unit is the offset used in batching
+	// to put data and offset of the data to the request_data_buffer
+	// but since we do not use batching it doesn't make no sense here
+	// and may contribute to some bugs
+	//void *arg = (void*) ((char *)pConn->request_data_buffer + packet->ret_ex_val.data_unit);
+	void *arg = (void*) ((char *)pConn->request_data_buffer);
 	packet->ret_ex_val.err = cudaSetupArgument( arg,
 	            packet->args[1].argi,
 	            packet->args[2].argi);
@@ -479,6 +497,12 @@ int nvbackCudaLaunch_srv(cuda_packet_t * packet, conn_t * pConn){
 }
 
 int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
+
+	printd(DBG_DEBUG, "Packet content: args[0].argp (dst)= %p, args[1].argp (src)= %p\n",
+			packet->args[0].argp, packet->args[1].argp);
+		printd(DBG_DEBUG,"args[2].argi=%ld, args[3].argi=%ld\n", packet->args[2].argi, packet->args[3].argi);
+
+
 	switch(packet->method_id){
 	//case cudaMemcpyHostToHost:
 	case CUDA_MEMCPY_H2H:
@@ -490,7 +514,17 @@ int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
 		printd(DBG_DEBUG, "request_data_size = %d, received count =%ld\n",
 				myconn->request_data_size, packet->args[2].argi);
 		assert(myconn->request_data_size == packet->args[2].argi);
-		packet->args[1].argui = (uint64_t)((char *)myconn->request_data_buffer + packet->ret_ex_val.data_unit);
+		// originally this packet->ret_ex_val.data_unit is 30
+		//packet->args[1].argui = (uint64_t)((char *)myconn->request_data_buffer + packet->ret_ex_val.data_unit);
+		packet->args[1].argui = (uint64_t)((char *)myconn->request_data_buffer);
+
+		int i;
+		int n = packet->args[2].argi / sizeof(float);
+		float * p = (float *)packet->args[1].argui;
+		for (i = 0; i < n; i++) {
+			printf("packet->ret_ex_val.data_unit = %d, p[i] = %f \n", packet->ret_ex_val.data_unit, p[i]);
+		}
+
 		break;
 		//case cudaMemcpyDeviceToHost:
 	case CUDA_MEMCPY_D2H:
@@ -504,14 +538,25 @@ int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
 		break;
 	}
 
+
 	packet->ret_ex_val.err = cudaMemcpy( (void *)packet->args[0].argui,
 	            (void *)packet->args[1].argui,
 	            packet->args[2].argi,
 	            packet->args[3].argi);
 
+	if( CUDA_MEMCPY_D2H == packet->method_id ){
+		int ii;
+		int nn = packet->args[2].argi / sizeof(float);
+		float * pp = (float *)packet->args[0].argui;
+		for (ii = 0; ii < nn; ii++) {
+			printf("packet->ret_ex_val.data_unit = %d, p[i] = %f \n", packet->ret_ex_val.data_unit, pp[ii]);
+		}
+
+	}
+
 	printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 
-	return (packet->ret_ex_val.err == 0)? OK : ERROR;
+	return (packet->ret_ex_val.err == cudaSuccess)? OK : ERROR;
 }
 
 /**
