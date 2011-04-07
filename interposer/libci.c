@@ -816,6 +816,8 @@ cudaError_t cudaLaunch(const char *entry) {
 				return cuda_err;
 	}
 	pPacket->args[0].argcp = (char *)entry;
+
+	printf("%s, entry: %s\n", __FUNCTION__, entry);
 	// send the packet
 	if (nvbackCudaLaunch_rpc(pPacket) != OK) {
 		printd(DBG_ERROR, "%s.%d: __ERROR__: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);

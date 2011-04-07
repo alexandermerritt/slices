@@ -110,6 +110,9 @@ typedef struct tf_arg {
 typedef struct {
 	void** fatCubinHandle;
 	char* hostFun;
+	// the hostFEaddr is used to keep the local pointer to the hostFun
+	// this is retrieved when launch is called; this is only the pointer
+	// not the string
 	char* hostFEaddr;  // original Key in BE to retrieve when launch is called
     char* deviceFun;
 	char* deviceName;

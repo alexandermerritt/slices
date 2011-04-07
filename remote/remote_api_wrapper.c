@@ -489,6 +489,10 @@ int nvbackCudaLaunch_srv(cuda_packet_t * packet, conn_t * pConn){
 	// this is entry for the cudaLaunch
 	arg = (const char *)packet->args[0].argcp;
 
+	printf("%s: entry: fatcubin_info_srv.num_reg_fns=%d\n", __FUNCTION__, fatcubin_info_srv.num_reg_fns);
+	printf("%s: entry: hostFEaddr=%p, arg=%p\n", __FUNCTION__, fatcubin_info_srv.reg_fns[0]->hostFEaddr,
+			arg);
+
 	packet->ret_ex_val.err = cudaErrorLaunchFailure;
 
 	for(i = 0; i < fatcubin_info_srv.num_reg_fns; ++i){

@@ -1538,6 +1538,10 @@ int l_getSize_regFuncArgs(void** fatCubinHandle, const char* hostFun,
 
 	size = sizeof(fatCubinHandle); 						// fatCubinHandle
 	size += l_getStringPktSize(hostFun);
+	// for storing the local pointer to hostFun; this pointer is
+	// translated and compared with a remote pointer when cudaLaunch is
+	// invoked; the translation is taken care on the server side
+	size += sizeof(char*);
 	size += l_getStringPktSize(deviceFun);
 	size += l_getStringPktSize(deviceName);
 	size += sizeof(thread_limit);		 				// thread_limit
@@ -1830,6 +1834,12 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
 	if( ERROR == offset ) return NULL; else pPack += offset;
 	printf("hostFun: pPack = %p, offset = %d\n",  pPack, offset);
 
+	// pack the value of the pointer
+	const char ** c = (const char**) pPack;
+	c[0] = hostFun;
+	pPack += sizeof(char*);
+	printf("hostFEaddr: pPack = %p, offset = %d\n",  pPack, offset);
+
 	offset = l_packStr(pPack, deviceFun);
 	if( ERROR == offset ) return NULL; else pPack += offset;
 	printf("deviceFun: pPack = %p, offset = %d\n",  pPack, offset);
@@ -1893,6 +1903,11 @@ int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
 	//offset += 75;
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
 	printf("hostFun: pPacket = %p, offset = %d\n",  pPacket, offset);
+
+	char** c = (char **) pPacket;
+	pRegFuncArgs->hostFEaddr = c[0];
+	pPacket += sizeof(char*);
+	printf("hostFEaddr: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->deviceFun =
 			//"_Z12square_arrayPfi";

@@ -1037,6 +1037,7 @@ void test_l_getSize_regFuncArgs(void){
 	// what fields are expected
 	int core_expected = sizeof(void*) // pointer
 		+ 3* sizeof(size_pkt_field_t)	// three headers for strings (length field)
+		+ sizeof(void*) // one for storing a pointer to the string
 		+ sizeof(int) // thread
 		+ 5 * sizeof(void*); // pointers
 
@@ -1196,6 +1197,7 @@ void test_l_packUnpackRegFuncArgs(void){
 
    all_size = sizeof(void*)
 		   + sizeof(size_pkt_field_t) + strlen(str1)
+		   + sizeof(void*)
 		   + sizeof(size_pkt_field_t) + strlen(str2)
 		   + sizeof(size_pkt_field_t) + strlen(str3)
 		   + sizeof(int)
@@ -1209,6 +1211,7 @@ void test_l_packUnpackRegFuncArgs(void){
    CU_ASSERT_EQUAL( unpackRegFuncArgs(&a, pack), OK);
    CU_ASSERT_PTR_EQUAL(a.fatCubinHandle, v);
    CU_ASSERT_NSTRING_EQUAL(a.hostFun, str1, strlen(str1));
+   CU_ASSERT_PTR_EQUAL(a.hostFEaddr, str1);
    CU_ASSERT_NSTRING_EQUAL(a.deviceFun, str2, strlen(str2));
    CU_ASSERT_NSTRING_EQUAL(a.deviceName, str3, strlen(str3));
    CU_ASSERT_EQUAL(a.thread_limit, -1);
