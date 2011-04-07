@@ -305,7 +305,7 @@ int nvbackCudaConfigureCall_rpc(cuda_packet_t *packet){
             packet->ret_ex_val.err, packet->method_id);
 
     l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
-    return (packet->ret_ex_val.err == 0) ? OK : ERROR;
+    return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
 
 int nvbackCudaLaunch_rpc(cuda_packet_t * packet){
@@ -425,7 +425,12 @@ int nvbackCudaGetDeviceProperties_srv(cuda_packet_t *packet, conn_t * pConn){
 }
 
 int nvbackCudaMalloc_srv(cuda_packet_t * packet, conn_t * pConn){
-
+	// @todo valgrind shows that there a memory leak. I will leave it now
+	// but I think this is because when we return from cudaMalloc some
+	// memory is allocated which can be released after sending a packet
+	// the remote part (of course not the part on the device), but
+	// a kind of 'host' memory on the remote side. Need to return to this
+	// issue later
 
 	printf("\nbefore devPtr %p, *devPtr %p, size %ld\n",&(packet->args[0].argp) , packet->args[0].argp, packet->args[1].argi);
     packet->args[0].argp = NULL;
@@ -468,8 +473,13 @@ int nvbackCudaConfigureCall_srv(cuda_packet_t *packet, conn_t *pConn){
             packet->args[2].argi,
             (cudaStream_t) packet->args[3].argi);
 
+	printf("After: gridDim(x,y,z)=%u, %u, %u; blockDim(x,y,z)=%u, %u, %u; sharedMem (size) = %ld; stream =%ld\n",
+			packet->args[0].arg_dim.x, packet->args[0].arg_dim.y, packet->args[0].arg_dim.z,
+			packet->args[1].arg_dim.x, packet->args[1].arg_dim.y, packet->args[1].arg_dim.z,
+			packet->args[2].argi, packet->args[3].argi);
+
     printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
-    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+    return (packet->ret_ex_val.err == cudaSuccess)? OK : ERROR;
 }
 
 int nvbackCudaLaunch_srv(cuda_packet_t * packet, conn_t * pConn){

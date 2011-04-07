@@ -696,19 +696,24 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 
 	cuda_packet_t *pPacket;
 
-	if( l_remoteInitMetThrReq(&pPacket, CUDA_CONFIGURE_CALL, __FUNCTION__) == ERROR){
-				return cuda_err;
-	}
+	if( l_remoteInitMetThrReq(&pPacket, CUDA_CONFIGURE_CALL, __FUNCTION__) == ERROR)
+		return cuda_err;
 
 	pPacket->args[0].arg_dim = gridDim;
 	pPacket->args[1].arg_dim = blockDim;
 	pPacket->args[2].argi = sharedMem;
 	pPacket->args[3].arg_str = stream;
 
+	printf("gridDim(x,y,z)=%u, %u, %u; blockDim(x,y,z)=%u, %u, %u; sharedMem (size) = %ld; stream =%ld\n",
+			pPacket->args[0].arg_dim.x, pPacket->args[0].arg_dim.y, pPacket->args[0].arg_dim.z,
+			pPacket->args[1].arg_dim.x, pPacket->args[1].arg_dim.y, pPacket->args[1].arg_dim.z,
+			pPacket->args[2].argi, (long unsigned) pPacket->args[3].arg_str);
+
+
 	// send the packet
 	if (nvbackCudaConfigureCall_rpc(pPacket) != OK) {
-		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
-		// @todo some cleaning or setting cuda_err
+		printd(DBG_ERROR, "%s: __ERROR__: Return from rpc with the wrong return value.\n", __FUNCTION__);
+		// indicate error situation
 		cuda_err = cudaErrorUnknown;
 	} else {
 		cuda_err = pPacket->ret_ex_val.err;
@@ -717,8 +722,6 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 	free(pPacket);
 
 	return cuda_err;
-
-
 
 /*	typedef cudaError_t (* pFuncType)(dim3 gridDim, dim3 blockDim,
 			size_t sharedMem, cudaStream_t stream);
