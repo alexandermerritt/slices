@@ -141,7 +141,7 @@ int l_setMetThrReq(cuda_packet_t ** const pPacket, const uint16_t methodId){
 
 int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
 		const uint16_t methodId, const char* pSignature){
-	printf(">>>>>>>>>> Implemented >>>>>>>>>>: %s\n", pSignature);
+	printf(">>>>>>>>>> Implemented >>>>>>>>>>: %s (method id = %lu)\n", pSignature, methodId);
 
 	// Now make a packet and send
 	if ((*pPacket = callocCudaPacket(pSignature, &cuda_err)) == NULL) {
@@ -1003,14 +1003,13 @@ cudaError_t cudaFree(void * devPtr) {
 	pPacket->args[0].argp = devPtr;
 
 	// send the packet
-	if(nvbackCudaFree_rpc(pPacket) != OK ){
-		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
-		// @todo some cleaning or setting cuda_err
-		cuda_err = cudaErrorUnknown;
+	if(nvbackCudaFree_rpc(pPacket) == OK ){
+		printd(DBG_DEBUG, "%s: __OK__ The used pointer %p\n", __FUNCTION__,
+						pPacket->args[0].argp);
+		cuda_err = cudaSuccess;
 	} else {
-		printd(DBG_INFO, "%s.%d: The used pointer %p\n", __FUNCTION__, __LINE__,
-				pPacket->args[0].argp);
-		cuda_err = pPacket->ret_ex_val.err;
+		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		cuda_err = cudaErrorUnknown;
 	}
 
 	free(pPacket);

@@ -76,6 +76,10 @@ int strm_expects_response(strm_t *strm)
         case CUDA_LAUNCH:
              return 1;
              break;
+        // asynchronous calls that return to the client immediately
+        // CUDA_FREE
+        default:
+        	break;
     }
     return 0;
 }

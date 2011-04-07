@@ -273,8 +273,8 @@ int nvbackCudaFree_rpc(cuda_packet_t *packet){
             packet->ret_ex_val.err, packet->method_id);
 
     l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
-
-    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+    // asynchronous call; just return the ok
+    return OK;
 }
 
 int nvbackCudaMalloc_rpc(cuda_packet_t *packet){
@@ -531,14 +531,6 @@ int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
 		// originally this packet->ret_ex_val.data_unit is 30
 		//packet->args[1].argui = (uint64_t)((char *)myconn->request_data_buffer + packet->ret_ex_val.data_unit);
 		packet->args[1].argui = (uint64_t)((char *)myconn->request_data_buffer);
-
-		int i;
-		int n = packet->args[2].argi / sizeof(float);
-		float * p = (float *)packet->args[1].argui;
-		for (i = 0; i < n; i++) {
-			printf("packet->ret_ex_val.data_unit = %d, p[i] = %f \n", packet->ret_ex_val.data_unit, p[i]);
-		}
-
 		break;
 		//case cudaMemcpyDeviceToHost:
 	case CUDA_MEMCPY_D2H:
@@ -552,21 +544,10 @@ int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
 		break;
 	}
 
-
 	packet->ret_ex_val.err = cudaMemcpy( (void *)packet->args[0].argui,
 	            (void *)packet->args[1].argui,
 	            packet->args[2].argi,
 	            packet->args[3].argi);
-
-	if( CUDA_MEMCPY_D2H == packet->method_id ){
-		int ii;
-		int nn = packet->args[2].argi / sizeof(float);
-		float * pp = (float *)packet->args[0].argui;
-		for (ii = 0; ii < nn; ii++) {
-			printf("packet->ret_ex_val.data_unit = %d, p[i] = %f \n", packet->ret_ex_val.data_unit, pp[ii]);
-		}
-
-	}
 
 	printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 
@@ -636,9 +617,6 @@ int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
 			(const char *)pA->deviceName, pA->thread_limit,
 			pA->tid, pA->bid, pA->bDim, pA->gDim,pA->wSize);
 
-	// remember the pointer to server registered function
-	//packet->args[2].argp = pA;
-
 	__cudaRegisterFunction( pA->fatCubinHandle, (const char *)pA->hostFun,
 			pA->deviceFun, (const char *)pA->deviceName,
 			pA->thread_limit, pA->tid, pA->bid, pA->bDim, pA->gDim, pA->wSize);
@@ -650,7 +628,8 @@ int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
 	fatcubin_info_srv.num_reg_fns++;
 
 	packet->ret_ex_val.err = cudaSuccess;
-//	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+
 	return OK;
 }
 
@@ -669,7 +648,7 @@ int __nvback_cudaUnregisterFatBinary_srv(cuda_packet_t *packet, conn_t  * myconn
 	cleanFatCubinInfo(&fatcubin_info_srv);
 
 	packet->ret_ex_val.err = cudaSuccess;
-	printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 
 	return OK;
 }

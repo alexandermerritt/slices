@@ -523,7 +523,7 @@ void l_printFatBinary(__cudaFatCudaBinary * pFatBin){
 				pFatBin->key, pFatBin->ident, pFatBin->usageMode);
 		l_printPtxE(pFatBin->ptx);
 		l_printCubinE(pFatBin->cubin);
-//		l_printDebugE(pFatBin->debug);
+		l_printDebugE(pFatBin->debug);
 
 		printd(DBG_DEBUG, "\tdebugInfo (pointer, char*): %p, %s\n", pFatBin->debugInfo, (char*) pFatBin->debugInfo);
 		printd(DBG_DEBUG, "\tflags: %u\n", pFatBin->flags);
