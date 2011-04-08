@@ -70,7 +70,7 @@ int strm_expects_response(strm_t *strm)
         case CUDA_THREAD_SYNCHRONIZE:
         //case CUDA_SETUP_ARGUMENT:
         // CUDA_CONFIGURE_CALL added by me
-        case CUDA_CONFIGURE_CALL:
+        //case CUDA_CONFIGURE_CALL:
         // CUDA_LAUNCH added by me
         case CUDA_LAUNCH:
              return 1;

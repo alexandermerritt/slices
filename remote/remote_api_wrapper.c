@@ -306,7 +306,8 @@ int nvbackCudaConfigureCall_rpc(cuda_packet_t *packet){
             packet->ret_ex_val.err, packet->method_id);
 
     l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
-    return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
+    // asynchronous call
+    return OK;
 }
 
 int nvbackCudaLaunch_rpc(cuda_packet_t * packet){

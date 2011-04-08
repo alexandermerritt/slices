@@ -711,12 +711,13 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 
 
 	// send the packet
-	if (nvbackCudaConfigureCall_rpc(pPacket) != OK) {
+	if (nvbackCudaConfigureCall_rpc(pPacket) == OK) {
+		// asynchronous call
+		cuda_err = cudaSuccess;
+	} else {
 		printd(DBG_ERROR, "%s: __ERROR__: Return from rpc with the wrong return value.\n", __FUNCTION__);
 		// indicate error situation
 		cuda_err = cudaErrorUnknown;
-	} else {
-		cuda_err = pPacket->ret_ex_val.err;
 	}
 
 	free(pPacket);
