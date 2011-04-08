@@ -18,6 +18,7 @@
 
 #include <__cudaFatFormat.h> // for __cudaFatPtxEntry, and others
 #include "libciutils.h"	     // for cache_num_entries_t
+#include "method_id.h"		// for ids of the cuda calls
 
 extern inline int l_getStringPktSize(const char const * string);
 extern int l_getSize__cudaFatPtxEntry(const __cudaFatPtxEntry * pEntry, int * pCounter);
@@ -77,6 +78,11 @@ extern int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket);
 
 extern int freeRegFunc(reg_func_args_t *args);
 extern int freeFatBinary(__cudaFatCudaBinary *fatCubin);
+
+// -------------------
+// misc
+// ------------------
+extern char * methodIdToString(const int method_id);
 
 /* The suite initialization function.
  * Opens the temporary file used by the tests.
@@ -1238,6 +1244,27 @@ void test_freeFatBinary(void){
 	// @todo to be implemented
 }
 
+
+// -------------------------
+// misc
+
+void test_methodIdToString(void){
+	char * str;
+	char * refStr[] = {"cudaConfigureCall", "cudaUnbindTexture", "__cudaUnregisterFatBinary"};
+	int ids[] = {CUDA_CONFIGURE_CALL, CUDA_UNBIND_TEXTURE, __CUDA_UNREGISTER_FAT_BINARY };
+	unsigned int i;
+
+	// 1. non existing
+	str = methodIdToString(-3);
+	CU_ASSERT_PTR_NULL(str);
+
+	// 2. normal situation
+	for(i = 0; i < sizeof(ids)/sizeof(int); i++){
+		str = methodIdToString(ids[i]);
+		CU_ASSERT_NSTRING_EQUAL(str, refStr[i], strlen(refStr[i]));
+	}
+}
+
 /* The main() function for setting up and running the tests.
  * Returns a CUE_SUCCESS on successful running, another
  * CUnit error code on failure.
@@ -1247,6 +1274,7 @@ int main()
    CU_pSuite pSuite = NULL;
    CU_pSuite pSuitePack = NULL;
    CU_pSuite pSuiteRegFuncArgs = NULL;
+   CU_pSuite pSuiteMisc = NULL;
 
    /* initialize the CUnit test registry */
    if (CUE_SUCCESS != CU_initialize_registry())
@@ -1308,6 +1336,18 @@ int main()
       return CU_get_error();
    }
 
+   pSuiteMisc = CU_add_suite("Misc Test_Suite", NULL, NULL);
+   if(NULL == pSuitePack){
+   	   CU_cleanup_registry();
+   	   return CU_get_error();
+   }
+
+   if ((NULL == CU_add_test(pSuiteMisc, "test_methodIdToString", test_methodIdToString))
+      )
+   {
+	   CU_cleanup_registry();
+	   return CU_get_error();
+   }
 
    /* Run all tests using the CUnit Basic interface */
    CU_basic_set_mode(CU_BRM_VERBOSE);

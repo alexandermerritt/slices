@@ -12,6 +12,7 @@
 #include <assert.h>
 #include "remote_api_wrapper.h"
 
+extern char * methodIdToString(const int method_id);
 
 int strm_full(strm_t * strm)
 {
@@ -186,7 +187,9 @@ int rsp_strm_has_data(const strm_t * strm)
 
 rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 {
-    printd(DBG_DEBUG, "%s: \tcalling function %d\n", __FUNCTION__, rpkt->method_id);
+    printd(DBG_DEBUG, "%s: \tcalling function %s, id=%d\n", __FUNCTION__,
+    		methodIdToString(rpkt->method_id),
+    		rpkt->method_id);
 
     // FIXME Use the provided function table instead of this large switch statement.
     switch (rpkt->method_id) {

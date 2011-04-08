@@ -75,12 +75,12 @@ void * backend_thread(){
 		if (1 != get(pConn, hdr, sizeof(strm_hdr_t))) {
 			break;
 		}
-		printd(DBG_DEBUG, "%s.%d: received request header. Expecting  %d packets. And extra request buffer of data size %d\n",
-						__FUNCTION__, __LINE__,  hdr->num_cuda_pkts, hdr->data_size);
+		printd(DBG_DEBUG, "%s: received request header. Expecting  %d packets. And extra request buffer of data size %d\n",
+						__FUNCTION__,  hdr->num_cuda_pkts, hdr->data_size);
 
 		if (hdr->num_cuda_pkts <= 0) {
 			printd(DBG_WARNING,
-					"%s.%d: Received header specifying zero packets, ignoring\n", __FUNCTION__, __LINE__);
+					"%s: Received header specifying zero packets, ignoring\n", __FUNCTION__);
 			continue;
 		}
 
@@ -93,18 +93,19 @@ void * backend_thread(){
 		if(1 != get(pConn, rpkts, hdr->num_cuda_pkts * sizeof(rpkt_t))) {
 			break;
 		}
-		printd(DBG_INFO, "%s. %d: Received %d packets, each of size of(%lu)\n",
-				__FUNCTION__, __LINE__, hdr->num_cuda_pkts, sizeof(rpkt_t));
+		printd(DBG_INFO, "%s: Received %d packets, each of size of (%lu) bytes\n",
+				__FUNCTION__, hdr->num_cuda_pkts, sizeof(rpkt_t));
 
-		printd(DBG_INFO, "%s.%d: Received Method_id/Thr_id: %d, %lu.\n", __FUNCTION__,
-						__LINE__, rpkts[0].method_id, rpkts[0].thr_id);
+		printd(DBG_INFO, "%s: Received method %s (method_id %d) from Thr_id: %lu.\n",
+				__FUNCTION__, methodIdToString(rpkts[0].method_id),
+				rpkts[0].method_id, rpkts[0].thr_id);
 
 
 		// receiving the request buffer if any
 		if(hdr->data_size > 0){
 
-			printd(DBG_INFO, "%s.%d: Expecting data size/Buffer: %u, %d.\n", __FUNCTION__,
-											__LINE__, hdr->data_size, pConn->request_data_size);
+			printd(DBG_INFO, "%s: Expecting data size/Buffer: %u, %d.\n", __FUNCTION__,
+											 hdr->data_size, pConn->request_data_size);
 			// let's assume that the expected amount of data will fit into
 			// the buffer we have (size of pConn->request_data_buffer
 			assert(hdr->data_size <= TOTAL_XFER_MAX);

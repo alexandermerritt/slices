@@ -44,7 +44,7 @@ int mallocCheck(const void * const p, const char * const pFuncName,
 
 
 int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t * pEntriesCache);
-int get_fat_rec_size(__cudaFatCudaBinary *fatCubin, cache_num_entries_t *num);
+//int get_fat_rec_size(__cudaFatCudaBinary *fatCubin, cache_num_entries_t *num);
 
 int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 		cache_num_entries_t * const pEntriesCache);
@@ -64,7 +64,6 @@ cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCuda
 
 // print utilities
 void l_printFatBinary(__cudaFatCudaBinary * pFatBin);
-
 void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
@@ -74,5 +73,13 @@ void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
  * nulls, etc; intended to be used in __unregisterCudaFatBinary
  */
 int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo);
+
+/**
+ * Translates method id to string
+ * @param method_id The method id
+ * @return a string corresponding to a given method id
+ *         NULL if a method id has not been found
+ */
+char * methodIdToString(const int method_id);
 
 #endif /* CITUILS_H_ */

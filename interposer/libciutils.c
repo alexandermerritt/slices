@@ -15,6 +15,8 @@
 #include "debug.h"
 #include <assert.h>
 
+#include "method_id.h"   // for method identifiers
+
 
 /**
  * checks if the memory has been appropriately allocated
@@ -2082,4 +2084,59 @@ int freeFatBinary(__cudaFatCudaBinary *fatCubin){
 	free(fatCubin);
 
 	return OK;
+}
+
+// ---------------------------
+//
+// ---------------------------
+/**
+ * Translates method id to string
+ * @param method_id The method id
+ * @return a string corresponding to a given method id
+ *         NULL if a method id has not been found
+ */
+char * methodIdToString(const int method_id){
+	// could be an array of char* where you access the string with the
+	// method_id indices, but then it might lead to errors if the order
+	// in method_id.h will change, so this way is safer
+
+	char * fname;
+
+	switch(method_id){
+	case CUDA_MALLOC: fname = "cudaMalloc"; break;
+	case CUDA_FREE: fname = "cudaFree"; break;
+	case CUDA_MEMCPY_H2D: fname = "cudaMemcpyH2D"; break;
+	case CUDA_MEMCPY_D2H: fname = "cudaMemcpyD2H"; break;
+	case CUDA_MEMCPY_H2H: fname = "cudaMemcpyH2H"; break;
+	case CUDA_MEMCPY_D2D: fname = "cudaMemcpyD2D"; break;
+	case CUDA_SETUP_ARGUMENT: fname = "cudaSetupArgument"; break;
+	case CUDA_LAUNCH: fname = "cudaLaunch"; break;
+	case CUDA_GET_DEVICE_COUNT: fname = "cudaGetDeviceCount"; break;
+	case CUDA_GET_DEVICE_PROPERTIES: fname = "cudaGetDeviceProperties"; break;
+	case CUDA_SET_DEVICE: fname = "cudaSetDevice"; break;
+	case CUDA_CONFIGURE_CALL: fname = "cudaConfigureCall"; break;
+	case FE_BE_PIN_PAGES: fname = "feBePinPages"; break;
+	case CUDA_THREAD_SYNCHRONIZE: fname = "cudaThreadSynchronize"; break;
+	case CUDA_MEMSET: fname = "cudaMemset"; break;
+	case CUDA_UNBIND_TEXTURE: fname = "cudaUnbindTexture"; break;
+	case CUDA_BIND_TEXTURE_TO_ARRAY: fname = "cudaBindTextureToArray"; break;
+	case CUDA_FREE_HOST: fname = "cudaFreeHost"; break;
+	case CUDA_MEMCPY_TO_SYMBOL: fname = "cudaMemcpyToSymbpl"; break;
+	case CUDA_MALLOC_ARRAY: fname = "cudaMallocArray"; break;
+	case CUDA_FREE_ARRAY: fname = "cudaFreeArray"; break;
+	case CUDA_MEMCPY_TO_ARRAY_D2D: fname = "cudaMemcpyToArrayD2D"; break;
+	case CUDA_MEMCPY_TO_ARRAY_H2D: fname = "cudaMemcpyToArrayH2D"; break;
+	case CUDA_MEMCPY_TO_ARRAY_D2H: fname = "cudaMemcpyToArrayD2H"; break;
+	case CUDA_MEMCPY_TO_ARRAY_H2H: fname = "cudaMemcpyToArrayH2H"; break;
+	case __CUDA_REGISTER_FAT_BINARY: fname = "__cudaRegisterFatBinary"; break;
+	case __CUDA_REGISTER_FUNCTION: fname = "__cudaRegisterFunction"; break;
+	case __CUDA_REGISTER_VARIABLE: fname = "__cudaRegisterVariable"; break;
+	case __CUDA_REGISTER_TEXTURE: fname = "__cudaRegisterTexture"; break;
+	case __CUDA_REGISTER_SHARED: fname = "__cudaRegisterShared"; break;
+	case __CUDA_UNREGISTER_FAT_BINARY: fname = "__cudaUnregisterFatBinary"; break;
+
+	default: fname = NULL; break;
+	}
+
+	return fname;
 }
