@@ -267,6 +267,26 @@ int nvbackCudaGetDeviceProperties_rpc(cuda_packet_t *packet){
     return (packet->ret_ex_val.err == 0) ? OK : ERROR;
 }
 
+int nvbackCudaGetDevice_rpc(cuda_packet_t * pPacket){
+	printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+	            pPacket->ret_ex_val.err, pPacket->method_id);
+    l_do_cuda_rpc(pPacket, NULL, 0, NULL, 0);
+
+    return (pPacket->ret_ex_val.err == 0) ? OK : ERROR;
+}
+
+int nvbackCudaSetDevice_rpc(cuda_packet_t *packet){
+    printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+            packet->ret_ex_val.err, packet->method_id);
+
+    l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
+    // error value in packet->ret_ex_val.err
+    // let's assume this is an asynchronous call, don't care about the packet->ret_ex_val.err
+
+    return OK;
+}
+
+
 int nvbackCudaFree_rpc(cuda_packet_t *packet){
 
     printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
@@ -333,14 +353,6 @@ int nvbackCudaMemcpy_rpc(cuda_packet_t *packet){
 	switch(packet->args[3].argi){
 	case cudaMemcpyHostToDevice:
 		packet->method_id = CUDA_MEMCPY_H2D;
-
-		int i;
-		int n = packet->args[2].argi / sizeof(float);
-		float * p = (float *)packet->args[1].argui;
-		for (i = 0; i < n; i++) {
-			printf("p[i] = %f \n", p[i]);
-		}
-
 		l_do_cuda_rpc(packet, (void *)packet->args[1].argui, packet->args[2].argi, NULL, 0);
 		break;
 	case cudaMemcpyDeviceToHost:
@@ -426,6 +438,29 @@ int nvbackCudaGetDeviceProperties_srv(cuda_packet_t *packet, conn_t * pConn){
 
     return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
+
+int nvbackCudaGetDevice_srv(cuda_packet_t *packet, conn_t * pConn){
+    int device = 0;
+
+    packet->ret_ex_val.err = cudaGetDevice(&device);
+    packet->args[0].argi = device;
+
+    printd(DBG_DEBUG, "Current assigned device id = %ld\n", packet->args[0].argi );
+    printd(DBG_DEBUG, "%s: CUDA_ERROR=%d for method id=%d after calling method\n",
+    		__FUNCTION__, packet->ret_ex_val.err, packet->method_id);
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
+
+int nvbackCudaSetDevice_srv(cuda_packet_t *packet, conn_t * pConn){
+	packet->ret_ex_val.err = cudaSetDevice(packet->args[0].argi);
+
+	printd(DBG_DEBUG, "Set device id = %ld\n", packet->args[0].argi );
+    printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
 
 int nvbackCudaMalloc_srv(cuda_packet_t * packet, conn_t * pConn){
 	// @todo valgrind shows that there a memory leak. I will leave it now

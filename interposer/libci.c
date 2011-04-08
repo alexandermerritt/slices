@@ -260,7 +260,11 @@ cudaError_t cudaThreadSetCacheConfig(enum cudaFuncCache cacheConfig) {
 }
 // -------------------------------------------
 cudaError_t cudaGetLastError(void) {
-	typedef cudaError_t (* pFuncType)(void);
+	printd(DBG_DEBUG, ">>>>>>>>>> Implemented >>>>>>>>>>: %s (no id)\n", __FUNCTION__);
+
+	return cuda_err;
+
+/*	typedef cudaError_t (* pFuncType)(void);
 	static pFuncType pFunc = NULL;
 
 	if (!pFunc) {
@@ -272,7 +276,7 @@ cudaError_t cudaGetLastError(void) {
 
 	l_printFuncSig(__FUNCTION__);
 
-	return (pFunc());
+	return (pFunc()); */
 }
 cudaError_t cudaPeekAtLastError(void) {
 	typedef cudaError_t (* pFuncType)(void);
@@ -313,20 +317,20 @@ cudaError_t cudaGetDeviceCount(int *count) {
 	}
 
 	// send the packet
-	if(nvbackCudaGetDeviceCount_rpc(pPacket) != OK ){
-		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
-		// @todo some cleaning or setting cuda_err
-		cuda_err = cudaErrorUnknown;
-	} else {
-		printd(DBG_INFO, "%s.%d: the number of devices is %ld. Got from the RPC call\n", __FUNCTION__, __LINE__,
-				pPacket->args[0].argi);
+	if(nvbackCudaGetDeviceCount_rpc(pPacket) == OK ){
+		printd(DBG_INFO, "%s: __OK__ the number of devices is %ld. Got from the RPC call\n", __FUNCTION__,
+						pPacket->args[0].argi);
 		// remember the count number what we get from the remote device
 		*count = pPacket->args[0].argi;
 		cuda_err = pPacket->ret_ex_val.err;
+	} else {
+		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		cuda_err = cudaErrorUnknown;
 	}
 
 	free(pPacket);
 
+	return cuda_err;
 
 	// TODO call the function locally right now - it should be removed in the future
 	// when it should react appropriately and call rpc or local version.
@@ -344,7 +348,6 @@ cudaError_t cudaGetDeviceCount(int *count) {
 	}
 
 	return (pFunc(count)); */
-	return cuda_err;
 }
 
 /**
@@ -394,13 +397,13 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 	pPacket->args[2].argi = sizeof(struct cudaDeviceProp); // for driver; I do not understand why we do this
 
 	// send the packet
-	if (nvbackCudaGetDeviceProperties_rpc(pPacket) != OK) {
-		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
-		// @todo some cleaning or setting cuda_err
-		cuda_err = cudaErrorUnknown;
-	} else {
+	if (nvbackCudaGetDeviceProperties_rpc(pPacket) == OK) {
 		l_printCudaDeviceProp(prop);
 		cuda_err = pPacket->ret_ex_val.err;
+	} else {
+		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		// @todo some cleaning or setting cuda_err
+		cuda_err = cudaErrorUnknown;
 	}
 
 	free(pPacket);
@@ -441,7 +444,27 @@ cudaError_t cudaChooseDevice(int *device,
 	return (pFunc(device, prop));
 }
 cudaError_t cudaSetDevice(int device) {
-	typedef cudaError_t (* pFuncType)(int device);
+	cuda_packet_t *pPacket;
+
+	if( l_remoteInitMetThrReq(&pPacket, CUDA_SET_DEVICE, __FUNCTION__) == ERROR){
+		return cuda_err;
+	}
+	pPacket->args[0].argi = device;
+
+	// send the packet
+	if (nvbackCudaSetDevice_rpc(pPacket) == OK) {
+		cuda_err = pPacket->ret_ex_val.err;
+	} else {
+		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		cuda_err = cudaErrorUnknown;
+	}
+
+	free(pPacket);
+
+	return cuda_err;
+
+
+/*	typedef cudaError_t (* pFuncType)(int device);
 	static pFuncType pFunc = NULL;
 
 	if (!pFunc) {
@@ -453,10 +476,32 @@ cudaError_t cudaSetDevice(int device) {
 
 	l_printFuncSig(__FUNCTION__);
 
-	return (pFunc(device));
+	return (pFunc(device)); */
 }
 cudaError_t cudaGetDevice(int *device) {
-	typedef cudaError_t (* pFuncType)(int *device);
+	cuda_packet_t * pPacket;
+
+	if (l_remoteInitMetThrReq(&pPacket, CUDA_GET_DEVICE, __FUNCTION__) == ERROR) {
+		return cuda_err;
+	}
+
+	// send the packet
+	if (nvbackCudaGetDevice_rpc(pPacket) == OK) {
+		printd(DBG_INFO, "%s: __OK__ RPC call returned: assigned device id = %ld.\n", __FUNCTION__,
+				pPacket->args[0].argi);
+		// remember the count number what we get from the remote device
+		*device = pPacket->args[0].argi;
+		cuda_err = pPacket->ret_ex_val.err;
+	} else {
+		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		cuda_err = cudaErrorUnknown;
+	}
+
+	free(pPacket);
+
+	return cuda_err;
+
+/*	typedef cudaError_t (* pFuncType)(int *device);
 	static pFuncType pFunc = NULL;
 
 	if (!pFunc) {
@@ -468,7 +513,7 @@ cudaError_t cudaGetDevice(int *device) {
 
 	l_printFuncSig(__FUNCTION__);
 
-	return (pFunc(device));
+	return (pFunc(device)); */
 }
 cudaError_t cudaSetValidDevices(int *device_arr, int len) {
 	typedef cudaError_t (* pFuncType)(int *device_arr, int len);

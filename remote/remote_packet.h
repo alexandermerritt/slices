@@ -17,8 +17,8 @@
 int strm_full(strm_t * strm);
 int strm_expects_response(strm_t *strm);
 int strm_flush_needed( strm_t * strm );
-int req_strm_has_data(strm_t * strm);
-int rsp_strm_has_data(const strm_t * strm);
+//int req_strm_has_data(strm_t * strm);
+//int rsp_strm_has_data(const strm_t * strm);
 
 // compilation problems with if conn_t is included
 rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t *pConn);

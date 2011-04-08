@@ -68,6 +68,7 @@ int strm_expects_response(strm_t *strm)
         case CUDA_MEMCPY_2D_TO_ARRAY_D2D:
         case CUDA_GET_DEVICE_COUNT:
         case CUDA_GET_DEVICE_PROPERTIES:
+        case CUDA_GET_DEVICE:
         case CUDA_THREAD_SYNCHRONIZE:
         //case CUDA_SETUP_ARGUMENT:
              return 1;
@@ -77,6 +78,7 @@ int strm_expects_response(strm_t *strm)
         // CUDA_SETUP_ARGUMENT
         // CUDA_CONFIGURE_CALL
         // CUDA_LAUNCH
+        // CUDA_SET_DEVICE
         default:
         	break;
     }
@@ -108,7 +110,7 @@ int strm_flush_needed( strm_t * strm )
 	return (UNKNOWN == r ? 0 : 1);
 }
 
-int req_strm_has_data(strm_t * strm)
+/*int req_strm_has_data(strm_t * strm)
 {
     int ret_val = 0;
     rpkt_t * last_pkt = NULL;
@@ -148,7 +150,7 @@ int req_strm_has_data(strm_t * strm)
     }
 
     return ret_val;
-}
+} */
 
 /**
  * Checks method needs to transfer some  data in response.
@@ -159,7 +161,7 @@ int req_strm_has_data(strm_t * strm)
  *           to be transferred in response
  *         1 Otherwise (the data are required to be transferred)
  */
-int rsp_strm_has_data(const strm_t * strm)
+/*int rsp_strm_has_data(const strm_t * strm)
 {
     int n = strm->hdr.num_cuda_pkts;
     int method_id = strm->rpkts[n-1].method_id;
@@ -177,7 +179,7 @@ int rsp_strm_has_data(const strm_t * strm)
     }
 
     return 0;
-}
+}*/
 
 
 
@@ -203,6 +205,14 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 
 	case CUDA_GET_DEVICE_PROPERTIES:
 		nvbackCudaGetDeviceProperties_srv(rpkt, pConn);
+		break;
+
+	case CUDA_GET_DEVICE:
+		nvbackCudaGetDevice_srv(rpkt, pConn);
+		break;
+
+	case CUDA_SET_DEVICE:
+		nvbackCudaSetDevice_srv(rpkt, pConn);
 		break;
 
 	case CUDA_FREE:
@@ -241,7 +251,7 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 		break;
 
 	default:
-		printd(DBG_ERROR, "%s: Error: Unknown method ID %d\n", __FUNCTION__, rpkt->method_id);
+		printd(DBG_ERROR, "%s: __ERROR__: Unknown method ID %d\n", __FUNCTION__, rpkt->method_id);
 		rpkt->flags = CUDA_error;
 		break;
 	}

@@ -25,6 +25,7 @@ typedef enum METHOD_ID {
     CUDA_LAUNCH,
     CUDA_GET_DEVICE_COUNT,
     CUDA_GET_DEVICE_PROPERTIES,
+    CUDA_GET_DEVICE, 	// added by MS
     CUDA_SET_DEVICE,
     CUDA_CONFIGURE_CALL,
     // For calls that require more than one page to be pinned, the
