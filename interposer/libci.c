@@ -141,7 +141,7 @@ int l_setMetThrReq(cuda_packet_t ** const pPacket, const uint16_t methodId){
 
 int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
 		const uint16_t methodId, const char* pSignature){
-	printf(">>>>>>>>>> Implemented >>>>>>>>>>: %s (method id = %lu)\n", pSignature, methodId);
+	printf(">>>>>>>>>> Implemented >>>>>>>>>>: %s (id = %d)\n", pSignature, methodId);
 
 	// Now make a packet and send
 	if ((*pPacket = callocCudaPacket(pSignature, &cuda_err)) == NULL) {
@@ -763,12 +763,11 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size,
 	pPacket->args[2].argi = offset; // for driver; Offset in argument stack to push new arg
 
 	// send the packet
-	if (nvbackCudaSetupArgument_rpc(pPacket) != OK) {
-		printd(DBG_ERROR, "%s.%d: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
-		// @todo some cleaning or setting cuda_err
-		cuda_err = cudaErrorUnknown;
+	if (nvbackCudaSetupArgument_rpc(pPacket) == OK) {
+		cuda_err = cudaSuccess;
 	} else {
-		cuda_err = pPacket->ret_ex_val.err;
+		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		cuda_err = cudaErrorUnknown;
 	}
 
 	free(pPacket);

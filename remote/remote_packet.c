@@ -68,8 +68,7 @@ int strm_expects_response(strm_t *strm)
         case CUDA_GET_DEVICE_COUNT:
         case CUDA_GET_DEVICE_PROPERTIES:
         case CUDA_THREAD_SYNCHRONIZE:
-        // CUDA_SETUP_ARGUMENT uncommented
-        case CUDA_SETUP_ARGUMENT:
+        //case CUDA_SETUP_ARGUMENT:
         // CUDA_CONFIGURE_CALL added by me
         case CUDA_CONFIGURE_CALL:
         // CUDA_LAUNCH added by me
@@ -78,6 +77,9 @@ int strm_expects_response(strm_t *strm)
              break;
         // asynchronous calls that return to the client immediately
         // CUDA_FREE
+        // CUDA_SETUP_ARGUMENT
+        // CUDA_CONFIGURE_CALL
+        // CUDA_LAUNCH
         default:
         	break;
     }

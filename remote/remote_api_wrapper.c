@@ -297,7 +297,8 @@ int nvbackCudaSetupArgument_rpc(cuda_packet_t *packet){
 
 	l_do_cuda_rpc(packet, (void *)packet->args[0].argp, packet->args[1].argi, NULL, 0);
 
-	return (packet->ret_ex_val.err == 0) ? OK : ERROR;
+	// asynchronous call
+	return OK;
 }
 
 int nvbackCudaConfigureCall_rpc(cuda_packet_t *packet){
