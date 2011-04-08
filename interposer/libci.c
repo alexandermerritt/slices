@@ -819,12 +819,12 @@ cudaError_t cudaLaunch(const char *entry) {
 
 	printf("%s, entry: %s\n", __FUNCTION__, entry);
 	// send the packet
-	if (nvbackCudaLaunch_rpc(pPacket) != OK) {
+	if (nvbackCudaLaunch_rpc(pPacket) == OK) {
+		cuda_err = cudaSuccess;
+	} else {
 		printd(DBG_ERROR, "%s.%d: __ERROR__: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
-	} else {
-		cuda_err = pPacket->ret_ex_val.err;
 	}
 
 	free(pPacket);

@@ -317,7 +317,8 @@ int nvbackCudaLaunch_rpc(cuda_packet_t * packet){
 
 	l_do_cuda_rpc(packet,  NULL, 0, NULL, 0);
 
-	return (packet->ret_ex_val.err == 0) ? OK : ERROR;
+	// asynchronous call
+	return OK;
 }
 
 int nvbackCudaMemcpy_rpc(cuda_packet_t *packet){
