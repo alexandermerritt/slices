@@ -377,6 +377,26 @@ int nvbackCudaMemcpy_rpc(cuda_packet_t *packet){
 	return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
 
+int nvbackCudaThreadSynchronize_rpc(cuda_packet_t *packet){
+    printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+            packet->ret_ex_val.err, packet->method_id);
+
+    l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
+
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
+int nvbackCudaThreadExit_rpc(cuda_packet_t * packet){
+	printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+	            packet->ret_ex_val.err, packet->method_id);
+
+	l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
+	// error value in packet->ret_ex_val.err
+	// let's assume this is an asynchronous call, don't care about the packet->ret_ex_val.err
+
+	return OK;
+}
+
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet) {
 	printd(DBG_DEBUG, "%s: CUDA_ERROR=%u before RPC on method %d\n", __FUNCTION__,
 			packet->ret_ex_val.err, packet->method_id);
@@ -591,6 +611,23 @@ int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
 
 	return (packet->ret_ex_val.err == cudaSuccess)? OK : ERROR;
 }
+
+int nvbackCudaThreadSynchronize_srv(cuda_packet_t *packet, conn_t * pConn){
+        packet->ret_ex_val.err = cudaThreadSynchronize();
+
+    printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+
+    return (packet->ret_ex_val.err == cudaSuccess)? OK : ERROR;
+}
+
+int nvbackCudaThreadExit_srv(cuda_packet_t *packet, conn_t * pConn){
+	packet->ret_ex_val.err = cudaThreadExit();
+
+    printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+
+    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+}
+
 
 /**
  * in this function we do not return in the handle the

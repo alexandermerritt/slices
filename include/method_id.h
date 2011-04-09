@@ -35,6 +35,7 @@ typedef enum METHOD_ID {
     // for which all this was arranged
     FE_BE_PIN_PAGES,
     CUDA_THREAD_SYNCHRONIZE,
+    CUDA_THREAD_EXIT,
     CUDA_MEMSET,
     CUDA_UNBIND_TEXTURE,
     CUDA_BIND_TEXTURE_TO_ARRAY,

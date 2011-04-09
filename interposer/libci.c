@@ -169,7 +169,28 @@ int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
 
 
 cudaError_t cudaThreadExit(void) {
-	typedef cudaError_t (* pFuncType)(void);
+
+	cuda_packet_t * pPacket;
+
+	if (l_remoteInitMetThrReq(&pPacket, CUDA_THREAD_EXIT, __FUNCTION__)
+			== ERROR) {
+		return cuda_err;
+	}
+
+	// send the packet
+	if (nvbackCudaThreadExit_rpc(pPacket) == OK) {
+		printd(DBG_INFO, "%s: __OK__ (asynchronous)\n", __FUNCTION__);
+		cuda_err = pPacket->ret_ex_val.err;
+	} else {
+		printd(DBG_ERROR, "%s: __ERROR__ Return from asynchronous rpc with the wrong return value.\n", __FUNCTION__);
+		cuda_err = cudaErrorUnknown;
+	}
+
+	free(pPacket);
+
+	return cuda_err;
+
+/*	typedef cudaError_t (* pFuncType)(void);
 	static pFuncType pFunc = NULL;
 
 	if (!pFunc) {
@@ -181,9 +202,31 @@ cudaError_t cudaThreadExit(void) {
 
 	l_printFuncSig(__FUNCTION__);
 
-	return (pFunc());
+	return (pFunc()); */
 }
 cudaError_t cudaThreadSynchronize(void) {
+
+	cuda_packet_t * pPacket;
+
+	if( l_remoteInitMetThrReq(&pPacket, CUDA_THREAD_SYNCHRONIZE, __FUNCTION__) == ERROR){
+		return cuda_err;
+	}
+
+	// send the packet
+	if(nvbackCudaThreadSynchronize_rpc(pPacket) == OK ){
+		printd(DBG_INFO, "%s: __OK__ ; return from RPC \n", __FUNCTION__);
+		cuda_err = pPacket->ret_ex_val.err;
+	} else {
+		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		cuda_err = cudaErrorUnknown;
+	}
+
+	free(pPacket);
+
+	return cuda_err;
+
+
+	/*
 	typedef cudaError_t (* pFuncType)(void);
 	static pFuncType pFunc = NULL;
 
@@ -196,7 +239,7 @@ cudaError_t cudaThreadSynchronize(void) {
 
 	l_printFuncSig(__FUNCTION__);
 
-	return (pFunc());
+	return (pFunc()); */
 }
 cudaError_t cudaThreadSetLimit(enum cudaLimit limit, size_t value) {
 	typedef cudaError_t (* pFuncType)(enum cudaLimit limit, size_t value);

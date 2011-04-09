@@ -238,6 +238,14 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 		nvbackCudaMemcpy_srv(rpkt, pConn);
 		break;
 
+	case CUDA_THREAD_SYNCHRONIZE:
+		nvbackCudaThreadSynchronize_srv(rpkt, pConn);
+		break;
+
+	case CUDA_THREAD_EXIT:
+		nvbackCudaThreadExit_srv(rpkt, pConn);
+		break;
+
 	case __CUDA_REGISTER_FAT_BINARY:
 		__nvback_cudaRegisterFatBinary_srv(rpkt, pConn);
 		break;

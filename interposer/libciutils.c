@@ -2113,10 +2113,12 @@ char * methodIdToString(const int method_id){
 	case CUDA_LAUNCH: fname = "cudaLaunch"; break;
 	case CUDA_GET_DEVICE_COUNT: fname = "cudaGetDeviceCount"; break;
 	case CUDA_GET_DEVICE_PROPERTIES: fname = "cudaGetDeviceProperties"; break;
+	case CUDA_GET_DEVICE: fname = "cudaGetDevice"; break;
 	case CUDA_SET_DEVICE: fname = "cudaSetDevice"; break;
 	case CUDA_CONFIGURE_CALL: fname = "cudaConfigureCall"; break;
 	case FE_BE_PIN_PAGES: fname = "feBePinPages"; break;
 	case CUDA_THREAD_SYNCHRONIZE: fname = "cudaThreadSynchronize"; break;
+	case CUDA_THREAD_EXIT: fname = "cudaThreadExit"; break;
 	case CUDA_MEMSET: fname = "cudaMemset"; break;
 	case CUDA_UNBIND_TEXTURE: fname = "cudaUnbindTexture"; break;
 	case CUDA_BIND_TEXTURE_TO_ARRAY: fname = "cudaBindTextureToArray"; break;
