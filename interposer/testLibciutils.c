@@ -83,6 +83,7 @@ extern int freeFatBinary(__cudaFatCudaBinary *fatCubin);
 // misc
 // ------------------
 extern char * methodIdToString(const int method_id);
+extern inline char * freeBuffer(char * pBuffer);
 
 /* The suite initialization function.
  * Opens the temporary file used by the tests.
@@ -1265,6 +1266,15 @@ void test_methodIdToString(void){
 	}
 }
 
+void test_freeBuffer(void){
+	char * buffer=NULL;
+
+	buffer = malloc(10);
+	CU_ASSERT_PTR_NOT_NULL(buffer);
+	buffer = freeBuffer(buffer);
+	CU_ASSERT_PTR_NULL(buffer);
+}
+
 /* The main() function for setting up and running the tests.
  * Returns a CUE_SUCCESS on successful running, another
  * CUnit error code on failure.
@@ -1342,7 +1352,8 @@ int main()
    	   return CU_get_error();
    }
 
-   if ((NULL == CU_add_test(pSuiteMisc, "test_methodIdToString", test_methodIdToString))
+   if ((NULL == CU_add_test(pSuiteMisc, "test_methodIdToString", test_methodIdToString)) ||
+	   (NULL == CU_add_test(pSuiteMisc, "test_freeBuffer", test_freeBuffer))
       )
    {
 	   CU_cleanup_registry();

@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "libciutils.h"
+#include <assert.h>
 
 
 /**
@@ -37,17 +38,64 @@ int conn_sendCudaPktHdr(conn_t * pConn, const uint32_t num_cuda_pkts, const int
 	// send request header (including data size) for the batch of remote packets
 	// 1 is the normal put exit
 	if (1 != put(pConn, pHdr, sizeof(strm_hdr_t))) {
-		printd(DBG_DEBUG, "%s.%d: Problems with sending the request header.\n",
-				__FUNCTION__, __LINE__);
+		printd(DBG_DEBUG, "%s: __ERROR__ Problems with sending the request header.\n",
+				__FUNCTION__);
 		return ERROR;
 	}
 
-	printd(DBG_DEBUG, "%s.%d: Header sent: pkt_num %d, extra buffer size: %d.\n",
-			__FUNCTION__, __LINE__, pHdr->num_cuda_pkts, pHdr->data_size);
+	printd(DBG_DEBUG, "%s: Header sent: pkt_num %d, extra buffer size: %d.\n",
+			__FUNCTION__, pHdr->num_cuda_pkts, pHdr->data_size);
 
 	return OK;
 }
 
+/**
+ * returns the lesser value from two
+ */
+inline int l_lesser(int a, int b){
+	return a > b ? b : a;
+}
+/**
+ * Sends the buffer over the network, the buffer is send in packets
+ * each of size myconn->buffer or less (the last one)
+ *
+ * @param pConn The connection over which we send the buffer and which
+ *               temporary buffer we use
+ * @param pBuffer The pointer to the buffer we want send over the network
+ * @param buf_size The size of the buffer to be sent over the network
+ * @return OK if everything went ok
+ *         ERROR if we have an error
+ */
+int conn_sendBuffer(conn_t * pConn, void * pSrc, int src_size){
+
+	int min;
+	int i=0;
+
+	assert( pSrc && src_size );
+
+	while( src_size > 0 ){
+		// copy  the data to the pConn->request_data_buffer
+		// get the lesser value
+		min = l_lesser( TOTAL_XFER_MAX, src_size);
+
+		if( 1 != put(pConn, pSrc, min) ){
+			return ERROR;
+		}
+		printd(DBG_DEBUG, "Buffer sent (%d bytes).\n", min);
+
+		src_size -= min;
+		pSrc += min;
+		i++;
+	}
+
+	printd(DBG_DEBUG, "Transferred %d request buffers\n", i);
+
+	return OK;
+}
+
+int conn_recvBuffer(conn_t * pConn, void * pSrc, int src_size){
+
+}
 /**
  * Allocates the memory for the connection;
  * @return myconn The allocated place for myconn

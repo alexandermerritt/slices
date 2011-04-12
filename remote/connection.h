@@ -74,6 +74,15 @@ typedef struct connection
     // reservation/unreservation they can become allocated and deallocated for use.
     char request_data_buffer[TOTAL_XFER_MAX];
     char response_data_buffer[TOTAL_XFER_MAX];
+
+    // the pointers held the  dynamically allocated memory required by the
+    // extra buffer for requests or responses, respectively
+    // @todo they should eventually should substitute the request_data_buffer
+    // and response_data_buffer
+    char * pReqBuffer;
+    char * pRspBuffer;
+
+    // sizes of the request and response buffers, respectively
     int request_data_size;
     int response_data_size;
 
@@ -91,6 +100,18 @@ typedef struct connection
  */
 int conn_sendCudaPktHdr(conn_t * pConn, const uint32_t num_cuda_pkts, const int
 		buf_size);
+/**
+ * Sends the buffer over the network, the buffer is send in packets
+ * each of size myconn->buffer or less (the last one)
+ *
+ * @param pConn The connection over which we send the buffer and which
+ *               temporary buffer we use
+ * @param pBuffer The pointer to the buffer we want send over the network
+ * @param buf_size The size of the buffer to be sent over the network
+ * @return OK if everything went ok
+ *         ERROR if we have an error
+ */
+int conn_sendBuffer(conn_t * pConn, void * pBuffer, int buf_size);
 
 /**
  * Allocates the memory for the connection;

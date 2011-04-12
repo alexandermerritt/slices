@@ -129,9 +129,22 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 	pRpkts = myconn.strm.rpkts;
 
 	//pRpkts[0].ret_ex_val.data_unit = sizeof(rpkt_t);
+	// @todo check since this might be a redundancy since
+	// this is set in
+	// conn_sendCudaPktHdr(&myconn, 1, reqbuf_size)
 	pHdr->num_cuda_pkts = 1;
+	pHdr->data_size = reqbuf_size;
 
-	//if( req_strm_has_data(&myconn.strm) ){
+	if(reqbuf_size > 0 ){
+		// @todo I changed the order in this section compared to the original
+		// version; this indicates an offset for easy use
+		pRpkts[0].ret_ex_val.data_unit = pHdr->data_size;
+	} else {
+		// this is an offset - to indicate there is no offset at all
+		pRpkts[0].ret_ex_val.data_unit = -1;
+	}
+
+/*	//if( req_strm_has_data(&myconn.strm) ){
 	if( reqbuf_size > 0) {
 		assert(reqbuf && reqbuf_size);
 		assert(reqbuf_size <= TOTAL_XFER_MAX);
@@ -141,16 +154,13 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 		pHdr->data_size = reqbuf_size;
 
 		// @todo I changed the order in this section compared to the original
-		// version; actually I do not understand why it is done and
-		// I guess it indicates that the packet will come with extra request
-		// buffer
-		// store the size of the request buffer
+		// version; this indicates an offset for easy use
 		pRpkts[0].ret_ex_val.data_unit = pHdr->data_size;
 	} else {
-		// i guess it means that we will not send an request buffer
+		// this is an offset
 		pRpkts[0].ret_ex_val.data_unit = -1;
 	}
-
+*/
 	if ( conn_sendCudaPktHdr(&myconn, 1, reqbuf_size) == ERROR ){
 		return l_cleanUpConn(&myconn, ERROR);
 	}
@@ -165,12 +175,12 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 	}
 
 	// now send the extra request buffer if any
-	if( pHdr->data_size > 0 ){
+	if( reqbuf_size > 0 ){
 		assert(reqbuf && reqbuf_size);
-		if(1 != put(&myconn, myconn.request_data_buffer, pHdr->data_size)) {
+		if(1 != put(&myconn, (char* ) reqbuf, reqbuf_size)) {
 			return l_cleanUpConn(&myconn, ERROR);
 		}
-		printd(DBG_DEBUG, "Request buffer sent (%d bytes).\n", pHdr->data_size);
+		printd(DBG_DEBUG, "Request buffer sent (%d bytes).\n", reqbuf_size);
 	}
 
 	// now check if we have some extra response data, i.e.
@@ -194,8 +204,8 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 		return l_cleanUpConn(&myconn, ERROR);
 	}
 
-	printd(DBG_DEBUG, "%s.%d: received response header. Expecting %d packets and extra response size of %u in response batch\n",
-			__FUNCTION__, __LINE__, pHdr->num_cuda_pkts, pHdr->data_size);
+	printd(DBG_DEBUG, "%s: received response header. Expecting %d packets and extra response size of %u in response batch\n",
+			__FUNCTION__, pHdr->num_cuda_pkts, pHdr->data_size);
 
 	assert(pHdr->num_cuda_pkts == 1);
 
@@ -204,15 +214,15 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 		return l_cleanUpConn(&myconn, ERROR);
 	 }
 
-	printd(DBG_DEBUG, "%s.%d: Received response batch. %d packets\n",
-			__FUNCTION__, __LINE__, pHdr->num_cuda_pkts);
+	printd(DBG_DEBUG, "%s: Received response batch. %d packets\n",
+			__FUNCTION__, pHdr->num_cuda_pkts);
 
 	//copy back the received response packet to given request packet
 	memcpy(packet, &pRpkts[0], rpkt_size);
 
 	if(packet->method_id == __CUDA_REGISTER_FAT_BINARY) {
-		printd(DBG_DEBUG, "%s.%d: FAT CUBIN HANDLE: registered %p.\n",
-				__FUNCTION__, __LINE__, packet->ret_ex_val.handle);
+		printd(DBG_DEBUG, "%s: FAT CUBIN HANDLE: registered %p.\n",
+				__FUNCTION__, packet->ret_ex_val.handle);
 	}
 
 	// check if we need to receive an extra buffer of response
@@ -222,7 +232,7 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 		// actually pHdr->data_size should be equal to rspbuf_size
 		assert((int) pHdr->data_size <= rspbuf_size );
 
-		// ok, get the data, data will be stored in the rsp_buf
+		// ok, get the data, data will be stored in the rspbuf
 		// first receive the header
 		if(1 != get(&myconn, rspbuf, (int) pHdr->data_size)) {
 			return l_cleanUpConn(&myconn, ERROR);
@@ -440,15 +450,21 @@ int nvbackCudaGetDeviceCount_srv(cuda_packet_t *packet, conn_t * pConn){
     packet->ret_ex_val.err = cudaGetDeviceCount(&devCount);
     packet->args[0].argi = devCount;
 
-    printd(DBG_DEBUG, "%s.%d: CUDA_ERROR=%d for method id=%d after calling method\n",
-    		__FUNCTION__, __LINE__, packet->ret_ex_val.err, packet->method_id);
+    printd(DBG_DEBUG, "%s: CUDA_ERROR=%d for method id=%d after calling method\n",
+    		__FUNCTION__, packet->ret_ex_val.err, packet->method_id);
     return OK;
 }
 
 int nvbackCudaGetDeviceProperties_srv(cuda_packet_t *packet, conn_t * pConn){
-	struct cudaDeviceProp * prop = (struct cudaDeviceProp *)pConn->response_data_buffer;
+
+	struct cudaDeviceProp * prop = NULL;
 
     pConn->response_data_size = sizeof(struct cudaDeviceProp);
+    pConn->pRspBuffer = malloc(pConn->response_data_size);
+    if( mallocCheck(pConn->pRspBuffer, __FUNCTION__, NULL ) == ERROR){
+    	return ERROR;
+    }
+	prop = (struct cudaDeviceProp *)pConn->pRspBuffer;
 
     packet->ret_ex_val.err = cudaGetDeviceProperties(prop, packet->args[1].argi);
 
@@ -517,12 +533,12 @@ int nvbackCudaSetupArgument_srv(cuda_packet_t *packet, conn_t *pConn){
 	// but since we do not use batching it doesn't make no sense here
 	// and may contribute to some bugs
 	//void *arg = (void*) ((char *)pConn->request_data_buffer + packet->ret_ex_val.data_unit);
-	void *arg = (void*) ((char *)pConn->request_data_buffer);
+	void *arg = (void*) ((char *)pConn->pReqBuffer);
 	packet->ret_ex_val.err = cudaSetupArgument( arg,
 	            packet->args[1].argi,
 	            packet->args[2].argi);
     printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
-    return (packet->ret_ex_val.err == 0)? OK : ERROR;
+    return (packet->ret_ex_val.err == cudaSuccess)? OK : ERROR;
 }
 
 int nvbackCudaConfigureCall_srv(cuda_packet_t *packet, conn_t *pConn){
@@ -565,7 +581,7 @@ int nvbackCudaLaunch_srv(cuda_packet_t * packet, conn_t * pConn){
 
 	printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 
-	return (packet->ret_ex_val.err == 0)? OK : ERROR;
+	return (packet->ret_ex_val.err == cudaSuccess)? OK : ERROR;
 }
 
 int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
@@ -588,12 +604,18 @@ int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
 		assert(myconn->request_data_size == packet->args[2].argi);
 		// originally this packet->ret_ex_val.data_unit is 30
 		//packet->args[1].argui = (uint64_t)((char *)myconn->request_data_buffer + packet->ret_ex_val.data_unit);
-		packet->args[1].argui = (uint64_t)((char *)myconn->request_data_buffer);
+		packet->args[1].argui = (uint64_t)((char *)myconn->pReqBuffer);
 		break;
 		//case cudaMemcpyDeviceToHost:
 	case CUDA_MEMCPY_D2H:
-		packet->args[0].argui = (uint64_t)myconn->response_data_buffer;
 		myconn->response_data_size = packet->args[2].argi;
+		assert(myconn->pRspBuffer == NULL);
+		myconn->pRspBuffer = malloc(myconn->response_data_size);
+		if( mallocCheck(myconn->pRspBuffer, __FUNCTION__, NULL) == ERROR){
+			return ERROR;
+		}
+		packet->args[0].argui = (uint64_t)myconn->pRspBuffer;
+
 		//memset(myconn->response_data_buffer, 0, TOTAL_XFER_MAX);
 		break;
 		//case cudaMemcpyDeviceToHost:
@@ -613,7 +635,7 @@ int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * myconn){
 }
 
 int nvbackCudaThreadSynchronize_srv(cuda_packet_t *packet, conn_t * pConn){
-        packet->ret_ex_val.err = cudaThreadSynchronize();
+    packet->ret_ex_val.err = cudaThreadSynchronize();
 
     printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 
@@ -646,7 +668,7 @@ int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn){
 	if( mallocCheck(fatcubin_info_srv.fatCubin, __FUNCTION__, NULL ) == ERROR ){
 		exit(ERROR);
 	}
-	if( unpackFatBinary(fatcubin_info_srv.fatCubin, myconn->request_data_buffer) == ERROR ){
+	if( unpackFatBinary(fatcubin_info_srv.fatCubin, myconn->pReqBuffer) == ERROR ){
 		printd(DBG_ERROR, "%s: __ERROR__ Problems with unpacking fat binary\n",__FUNCTION__);
 		exit(ERROR);
 	} else {
@@ -678,7 +700,7 @@ int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
 			exit(ERROR);
 	}
 
-	if(	unpackRegFuncArgs(pA, myconn->request_data_buffer) == ERROR ){
+	if(	unpackRegFuncArgs(pA, myconn->pReqBuffer) == ERROR ){
 		printd(DBG_ERROR, "%s: __ERROR__: Problems with unpacking arguments in function register\n", __FUNCTION__);
 		exit(ERROR);
 	}

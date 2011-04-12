@@ -37,6 +37,17 @@ int mallocCheck(const void * const p, const char * const pFuncName,
 }
 
 /**
+ * releases the buffer
+ *
+ * @param pBuffer the buffer to be released
+ * @return NULL (always)
+ */
+inline char * freeBuffer(char * pBuffer){
+	free(pBuffer);
+	return NULL;
+}
+
+/**
  * cleans the structure, frees the allocated memory, sets values to zeros,
  * nulls, etc; intended to be used in __unregisterCudaFatBinary
  */
