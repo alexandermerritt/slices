@@ -144,23 +144,6 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 		pRpkts[0].ret_ex_val.data_unit = -1;
 	}
 
-/*	//if( req_strm_has_data(&myconn.strm) ){
-	if( reqbuf_size > 0) {
-		assert(reqbuf && reqbuf_size);
-		assert(reqbuf_size <= TOTAL_XFER_MAX);
-		memcpy(myconn.request_data_buffer, reqbuf, reqbuf_size);
-		printd(DBG_DEBUG, "pkts[0].ret_ex_val.data_unit = %u\n",
-				pRpkts[0].ret_ex_val.data_unit);
-		pHdr->data_size = reqbuf_size;
-
-		// @todo I changed the order in this section compared to the original
-		// version; this indicates an offset for easy use
-		pRpkts[0].ret_ex_val.data_unit = pHdr->data_size;
-	} else {
-		// this is an offset
-		pRpkts[0].ret_ex_val.data_unit = -1;
-	}
-*/
 	if ( conn_sendCudaPktHdr(&myconn, 1, reqbuf_size) == ERROR ){
 		return l_cleanUpConn(&myconn, ERROR);
 	}
