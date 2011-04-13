@@ -1,0 +1,9 @@
+- 2011-04-12
+  remove double INIPARSER from the build systems
+
+    You need to update two SConstruct files:
+    
+    @todo this must be a smarter way to do that
+    interposer/SConstruct
+    backend/SConstruct
+    
