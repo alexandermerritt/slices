@@ -30,24 +30,20 @@
 #include "connection.h"
 
 #include "fatcubininfo.h"   // for fatcubin_info_t
+#include "iniparser.h"
 
-//! Right now the host where we are connecting to (where clients, ie, *_rpc connects
-//! to
-#ifndef REMOTE_HOSTNAME
-#	define REMOTE_HOSTNAME "cuda2.cc.gt.atl.ga.us"
-#endif
+// stores the config parameters
+#include "config.h"
 
+
+
+
+//! This will be storing the name of the hsot
+static char REMOTE_HOSTNAME[HOSTNAME_STRLEN];
 
 //! open the connection forever; if you open and then close the
 //! connection the program stops to work, so you have to make it static
 static conn_t myconn;
-
-// @todo maybe this is stupid to maintain to separate fatcubin_info
-// structures but I believe it is not; since there is a lot of guessing
-// that's why I am doing this as two separate variables
-
-//! stores information about the fatcubin_info on the client side
-//static fatcubin_info_t fatcubin_info_rpc;
 
 //! stores information about the fatcubin_info on the server side
 //static fatcubin_info_t fatcubin_info_srv;
@@ -70,7 +66,7 @@ extern void __cudaUnregisterFatBinary(void** fatCubinHandle);
  * @param pConn (inout) The connection to be closed; changed to NULL
  * @param exit_code (in) What will be returned
  * @return exit_code indicates if we want this function to indicate the erroneous
- *        behaviour or not @see l_do_cuda_rpc
+ *        behavior or not @see l_do_cuda_rpc
  *
  * @todo check with passing pointers to functions
  */
@@ -81,6 +77,31 @@ int l_cleanUpConn(conn_t * pConn, const int exit_code){
 
 	return exit_code;
 }
+
+/**
+ * Returns the remote host or NULL if the remote host
+ */
+inline char * l_getRemoteHost(void){
+
+	dictionary * d;
+	char * s;
+
+	d = iniparser_load(KIDRON_INI);
+	if(NULL == d){
+		printd(DBG_ERROR, "Can't parse the config file. Quitting ... ");
+		exit(ERROR);
+	}
+	s = iniparser_getstring(d, "network:remote", NULL);
+
+	// complain if the name is to long
+	assert(strlen(s) < HOSTNAME_STRLEN - 1);
+	strcpy(REMOTE_HOSTNAME, s);
+	iniparser_freedict(d);
+
+	printd(DBG_INFO, "%s\n", REMOTE_HOSTNAME);
+	return REMOTE_HOSTNAME;
+}
+
 /**
  * executes the cuda call over the network
  * This is the entire protocol of sending and receiving requests.
@@ -120,7 +141,9 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 	// if you close and open the connection, the program exits; a kind of
 	// singleton
 	if( 0 == myconn.valid){
-		conn_connect(&myconn, REMOTE_HOSTNAME);
+		if( conn_connect(&myconn, l_getRemoteHost()) == -1 )
+			exit(ERROR);
+		printd(DBG_INFO, "Connection to host: %s\n", REMOTE_HOSTNAME);
 		myconn.valid = 1;
 	}
 

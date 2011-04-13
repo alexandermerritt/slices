@@ -14,15 +14,19 @@
 # create the construction environment for building those
 import os
 
+INIPARSER = '/home/magg/src/iniparser/'
 
-envBackend = Environment(LIBS    = ['pthread', 'rt', 'dl', 'cudart'],
-				  LIBPATH = ['/opt/cuda/lib64'],
+envBackend = Environment(LIBS    = ['pthread', 'rt', 'dl', 'cudart', 'iniparser' ],
+				  LIBPATH = ['/opt/cuda/lib64',
+				             INIPARSER
+				             ],
 				  CPPPATH = ['.',
 				  			 '../remote',
 				  			 '../include',  
 				  			 '../interposer', 
 				  			 '../backend',
-				  			 '/opt/cuda/include'],
+				  			 '/opt/cuda/include',
+				  			 INIPARSER + 'src'],
                   CCFLAGS = '-g -Wall -Wextra')
 			 
 envBackend.Program('backend', [

@@ -16,6 +16,8 @@
 #include <assert.h>
 
 #include "method_id.h"   // for method identifiers
+#include "config.h"		 // for the KIDRON_INI
+#include "iniparser.h"   // for dictionary, iniparser_load, etc
 
 
 /**
@@ -45,6 +47,34 @@ int mallocCheck(const void * const p, const char * const pFuncName,
 inline char * freeBuffer(char * pBuffer){
 	free(pBuffer);
 	return NULL;
+}
+
+/**
+ * Reads the interposer:local value from the KIDRON_INI file and returns
+ * the numerical value
+ *
+ * @return 1 - Local GPU will be invoked (means interposer:local is yes)
+ *         0 - remote GPU will be invoked (means interposer:local is set no)
+ */
+inline int l_getLocalFromConfig(void){
+
+	dictionary * d;
+	int b;
+
+	d = iniparser_load(KIDRON_INI);
+	if(NULL == d){
+		printd(DBG_ERROR, "Can't parse the config file. Quitting ... ");
+		exit(ERROR);
+	}
+	b = iniparser_getboolean(d, "interposer:local", -1);
+
+	iniparser_freedict(d);
+	if( b == 1 )
+		printd(DBG_INFO, "Local GPU will be invoked\n");
+	else
+		printd(DBG_INFO, "Remote GPU will be invoked\n");
+
+	return b;
 }
 
 /**
@@ -573,6 +603,30 @@ void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
 	printd(DBG_DEBUG, "wSize: %p\n", wSize);
 }
 
+
+/**
+ * Prints the device properties
+ */
+int l_printCudaDeviceProp(const struct cudaDeviceProp * const pProp){
+	printd(DBG_INFO, "\nDevice \"%s\"\n",  pProp->name);
+	printd(DBG_INFO, "  CUDA Capability Major/Minor version number:    %d.%d\n", pProp->major, pProp->minor);
+	printd(DBG_INFO, "  Total amount of global memory:                 %llu bytes\n", (unsigned long long) pProp->totalGlobalMem);
+	printd(DBG_INFO, "  Multiprocessors: %d (MP) \n", pProp->multiProcessorCount);
+    printd(DBG_INFO, "  Total amount of constant memory:               %lu bytes\n", pProp->totalConstMem);
+    printd(DBG_INFO, "  Total amount of shared memory per block:       %lu bytes\n", pProp->sharedMemPerBlock);
+    printd(DBG_INFO, "  Total number of registers available per block: %d\n", pProp->regsPerBlock);
+    printd(DBG_INFO, "  Warp size:                                     %d\n", pProp->warpSize);
+    printd(DBG_INFO, "  Maximum number of threads per block:           %d\n", pProp->maxThreadsPerBlock);
+    printd(DBG_INFO, "  Maximum sizes of each dimension of a block:    %d x %d x %d\n",
+           pProp->maxThreadsDim[0],
+           pProp->maxThreadsDim[1],
+           pProp->maxThreadsDim[2]);
+    printd(DBG_INFO, "  Maximum sizes of each dimension of a grid:     %d x %d x %d\n",
+           pProp->maxGridSize[0],
+           pProp->maxGridSize[1],
+           pProp->maxGridSize[2]);
+    return OK;
+}
 
 // counts the new_marker; changes curr_marker and new_marker
 /*#define GET_LOCAL_POINTER(curr_marker, size, new_marker, dtype) { \

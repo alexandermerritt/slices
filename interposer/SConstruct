@@ -22,15 +22,17 @@ envRemote = Environment(LIBS    = ['pthread'],
 
 #envRemote.Object('../network/remote_api_wrapper.o', ['../network/remote_api_wrapper.c'])		
 
+INIPARSER = '/home/magg/src/iniparser/'
 
-interposerEnv = Environment(LIBS = ['rt', 'dl'],
-					  LIBPATH = ['/opt/cuda/lib64'],
+interposerEnv = Environment(LIBS = ['rt', 'dl', 'iniparser'],
+					  LIBPATH = ['/opt/cuda/lib64', INIPARSER],
 					  CPPPATH = [
 					  '.',
 					  '/opt/cuda/include', 
 					  '../include', 
 					  '../remote',
-					  '../backend'],					  
+					  '../backend',
+					  INIPARSER + 'src'],					  
 					  CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
 
 # create a regular library

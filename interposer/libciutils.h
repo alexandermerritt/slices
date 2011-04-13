@@ -68,6 +68,7 @@ void l_printFatBinary(__cudaFatCudaBinary * pFatBin);
 void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
+int l_printCudaDeviceProp(const struct cudaDeviceProp * const pProp);
 
 /**
  * cleans the structure, frees the allocated memory, sets values to zeros,
@@ -82,5 +83,15 @@ int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo);
  *         NULL if a method id has not been found
  */
 char * methodIdToString(const int method_id);
+
+/**
+ * Reads the interposer:local value from the KIDRON_INI file and returns
+ * the numerical value
+ *
+ * @return 1 - Local GPU will be invoked (means interposer:local is yes)
+ *         0 - remote GPU will be invoked (means interposer:local is set no)
+ */
+inline int l_getLocalFromConfig(void);
+
 
 #endif /* CITUILS_H_ */

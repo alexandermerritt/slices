@@ -63,10 +63,6 @@ static cudaError_t cudaErrorDL = cudaErrorUnknown;
 //! Maintain the last error for cudaGetLastError()
 static cudaError_t cuda_err = 0;
 
-//! Right now the host where we are connecting to
-const char * SERVER_HOSTNAME = "cuda2.cc.gt.atl.ga.us";
-//const char * SERVER_HOSTNAME = "prost.cc.gt.atl.ga.us";
-
 #define MAX_REGISTERED_VARS 10
 // \todo Clean it up later. Just need to make sure MemcpySymbol does jazz
 // only when a variable has been registered
@@ -76,6 +72,7 @@ static int num_registered_vars = 0;
 //! stores information about the fatcubin_info on the client side
 static fatcubin_info_t fatcubin_info_rpc;
 
+static int LOCAL_EXEC;
 
 /**
  * @brief Handles errors caused by dlsym()
@@ -391,30 +388,6 @@ cudaError_t cudaGetDeviceCount(int *count) {
 	}
 
 	return (pFunc(count)); */
-}
-
-/**
- * Prints the device properties
- */
-int l_printCudaDeviceProp(const struct cudaDeviceProp * const pProp){
-	printd(DBG_INFO, "\nDevice \"%s\"\n",  pProp->name);
-	printd(DBG_INFO, "  CUDA Capability Major/Minor version number:    %d.%d\n", pProp->major, pProp->minor);
-	printd(DBG_INFO, "  Total amount of global memory:                 %llu bytes\n", (unsigned long long) pProp->totalGlobalMem);
-	printd(DBG_INFO, "  Multiprocessors: %d (MP) \n", pProp->multiProcessorCount);
-    printd(DBG_INFO, "  Total amount of constant memory:               %lu bytes\n", pProp->totalConstMem);
-    printd(DBG_INFO, "  Total amount of shared memory per block:       %lu bytes\n", pProp->sharedMemPerBlock);
-    printd(DBG_INFO, "  Total number of registers available per block: %d\n", pProp->regsPerBlock);
-    printd(DBG_INFO, "  Warp size:                                     %d\n", pProp->warpSize);
-    printd(DBG_INFO, "  Maximum number of threads per block:           %d\n", pProp->maxThreadsPerBlock);
-    printd(DBG_INFO, "  Maximum sizes of each dimension of a block:    %d x %d x %d\n",
-           pProp->maxThreadsDim[0],
-           pProp->maxThreadsDim[1],
-           pProp->maxThreadsDim[2]);
-    printd(DBG_INFO, "  Maximum sizes of each dimension of a grid:     %d x %d x %d\n",
-           pProp->maxGridSize[0],
-           pProp->maxGridSize[1],
-           pProp->maxGridSize[2]);
-    return OK;
 }
 
 cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
@@ -2178,7 +2151,15 @@ void** pFatBinaryHandle = NULL;
  * @return cuda_err set to cudaErrorMemoryAllocation if I cannot calloc the packet
  *
  */
+void** l__cudaRegisterFatBinary(void* fatC){
+
+}
+
 void** __cudaRegisterFatBinary(void* fatC) {
+
+	LOCAL_EXEC = l_getLocalFromConfig();
+	printd(DBG_DEBUG, "LOCAL_EXEC=%d (1-local, 0-remote)\n", LOCAL_EXEC);
+
 	cuda_packet_t * pPacket;
 	// here we will store the number of entries to spare counting again and again
 	// @todo might be unimportant
