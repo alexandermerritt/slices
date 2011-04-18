@@ -76,6 +76,15 @@ extern char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
 	int *pSize);
 extern int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket);
 
+// -----  RegVar
+extern int l_getSize_regVar(void **fatCubinHandle, char *hostVar, char *deviceAddress,
+		const char *deviceName, int ext, int vsize,int constant, int global);
+extern char * packRegVar( void **fatCubinHandle, char *hostVar,
+		char *deviceAddress, const char *deviceName, int ext, int vsize,
+		int constant, int global, int * pSize );
+extern int unpackRegVar(reg_var_args_t * pRegVar, char *pPacket);
+
+
 extern int freeRegFunc(reg_func_args_t *args);
 extern int freeFatBinary(__cudaFatCudaBinary *fatCubin);
 
@@ -1078,6 +1087,30 @@ void test_l_getSize_regFuncArgs(void){
 	CU_ASSERT_EQUAL(size, expected);
 }
 
+void test_l_getSize_regVar(void){
+	int size;
+	int expected;
+	// what fields are expected
+	int core_expected = sizeof(void*) // pointer
+			+ 3* sizeof(size_pkt_field_t)	// three headers for strings (length field)
+			+ sizeof(void*) // one for storing a pointer to the string
+			+ 4*sizeof(int); // ext, vsize, constant, global
+
+	// 1.
+	size = l_getSize_regVar((void**)0x14b1d490, "", "d_OptionData", "d_OptionData", 0,
+			40960, 1, 0);
+	expected = strlen("")
+				+ strlen("d_OptionData")
+				+ strlen("d_OptionData")
+				+ core_expected;
+	CU_ASSERT_EQUAL(size, expected);
+
+	// 2. null things
+	size = l_getSize_regVar(NULL, NULL, NULL, NULL, 1, 2, 3, 13);
+	expected = core_expected;
+	CU_ASSERT_EQUAL(size, expected);
+}
+
 void test_l_packUnpackUint3Ptr(void){
 	char arr[100];
 	int offset;
@@ -1245,6 +1278,37 @@ void test_freeFatBinary(void){
 	// @todo to be implemented
 }
 
+void test_l_packUnpackRegVar(void){
+	reg_var_args_t a;
+	char * pack;
+	char * str1 = "hey";
+	char * str2 = "h";
+	const char * str3 = "a";
+
+	int size;
+	int all_size;
+	void ** v = (void**) &pack;
+
+	pack = packRegVar(v,str1, str2, str3, 1, 2, 3, 4, &size );
+	all_size = sizeof(void*)
+				   + sizeof(size_pkt_field_t) + strlen(str1)
+				   + sizeof(void*)
+				   + sizeof(size_pkt_field_t) + strlen(str2)
+				   + sizeof(size_pkt_field_t) + strlen(str3)
+				   + sizeof(int) * 4;
+	CU_ASSERT_EQUAL(size, all_size);
+	CU_ASSERT_EQUAL(unpackRegVar(&a, pack), OK);
+	CU_ASSERT_PTR_EQUAL(a.fatCubinHandle, v);
+	CU_ASSERT_NSTRING_EQUAL(a.hostVar, str1, strlen(str1));
+	CU_ASSERT_PTR_EQUAL(a.dom0HostAddr, str1);
+	CU_ASSERT_NSTRING_EQUAL(a.deviceAddress, str2, strlen(str2));
+	CU_ASSERT_NSTRING_EQUAL(a.deviceName, str3, strlen(str3));
+	CU_ASSERT_EQUAL(a.ext, 1);
+	CU_ASSERT_EQUAL(a.size, 2);
+	CU_ASSERT_EQUAL(a.constant, 3);
+	CU_ASSERT_EQUAL(a.global, 4);
+}
+
 
 // -------------------------
 // misc
@@ -1284,6 +1348,7 @@ int main()
    CU_pSuite pSuite = NULL;
    CU_pSuite pSuitePack = NULL;
    CU_pSuite pSuiteRegFuncArgs = NULL;
+   CU_pSuite pSuiteRegVar = NULL;
    CU_pSuite pSuiteMisc = NULL;
 
    /* initialize the CUnit test registry */
@@ -1330,7 +1395,7 @@ int main()
    }
 
    pSuiteRegFuncArgs = CU_add_suite("RegFuncArgs Test_Suite", NULL, NULL);
-   if(NULL == pSuitePack){
+   if(NULL == pSuiteRegFuncArgs){
 	   CU_cleanup_registry();
 	   return CU_get_error();
    }
@@ -1345,6 +1410,20 @@ int main()
       CU_cleanup_registry();
       return CU_get_error();
    }
+
+   pSuiteRegVar = CU_add_suite("RegVar Test_Suite", NULL, NULL);
+   if(NULL == pSuiteRegVar){
+	   CU_cleanup_registry();
+	   return CU_get_error();
+   }
+   /* add the tests to the suite */
+   if ((NULL == CU_add_test(pSuiteRegVar, "test of test_l_getSize_regVar", test_l_getSize_regVar)) ||
+	   (NULL == CU_add_test(pSuiteRegVar, "test of test_l_packUnpackRegVar", test_l_packUnpackRegVar))
+   ){
+      CU_cleanup_registry();
+      return CU_get_error();
+   }
+
 
    pSuiteMisc = CU_add_suite("Misc Test_Suite", NULL, NULL);
    if(NULL == pSuitePack){

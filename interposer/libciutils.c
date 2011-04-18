@@ -86,9 +86,9 @@ int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo){
 
 	// we assume that the pFatCInfo is not a null pointer
 	assert(NULL != pFatCInfo);
-	/*	for (i = 0; i < dfi->num_reg_vars; ++i)
-		        freeRegVar(dfi->variables[i]);
-		for (i = 0; i < dfi->num_reg_texs; ++i)
+	for (i = 0; i < pFatCInfo->num_reg_vars; ++i)
+		freeRegVar(pFatCInfo->variables[i]);
+	/*	for (i = 0; i < dfi->num_reg_texs; ++i)
 					freeRegTex(dfi->textures[i]); */
 	for (i = 0; i < pFatCInfo->num_reg_fns; ++i)
 		freeRegFunc(pFatCInfo->reg_fns[i]);
@@ -603,6 +603,19 @@ void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
 	printd(DBG_DEBUG, "wSize: %p\n", wSize);
 }
 
+void l_printRegVar(void **fatCubinHandle, char *hostVar,
+		char *deviceAddress, const char *deviceName, int ext, int vsize,
+		int constant, int global){
+	printd(DBG_DEBUG, "\t REG VAR:\n");
+	printd(DBG_DEBUG, "fatCubinHandle: %p\n", fatCubinHandle);
+	printd(DBG_DEBUG, "hostVar: %p, (%s)\n", hostVar, hostVar);
+	printd(DBG_DEBUG, "deviceAddress: %s\n", deviceAddress);
+	printd(DBG_DEBUG, "deviceName: %s\n", deviceName);
+	printd(DBG_DEBUG, "ext: %d\n", ext);
+	printd(DBG_DEBUG, "vsize: %d\n", vsize);
+	printd(DBG_DEBUG, "constant: %d\n", constant);
+	printd(DBG_DEBUG, "global: %d\n", global);
+}
 
 /**
  * Prints the device properties
@@ -1603,7 +1616,7 @@ int l_getSize_regFuncArgs(void** fatCubinHandle, const char* hostFun,
 
 	int size = 0;
 
-	size = sizeof(fatCubinHandle); 						// fatCubinHandle
+	size = sizeof(fatCubinHandle); 					// fatCubinHandle
 	size += l_getStringPktSize(hostFun);
 	// for storing the local pointer to hostFun; this pointer is
 	// translated and compared with a remote pointer when cudaLaunch is
@@ -1611,12 +1624,40 @@ int l_getSize_regFuncArgs(void** fatCubinHandle, const char* hostFun,
 	size += sizeof(char*);
 	size += l_getStringPktSize(deviceFun);
 	size += l_getStringPktSize(deviceName);
-	size += sizeof(thread_limit);		 				// thread_limit
-	size += l_getUint3PtrPktSize(tid);  				// pointer to tid + tid
+	size += sizeof(thread_limit);		 			// thread_limit
+	size += l_getUint3PtrPktSize(tid);  			// pointer to tid + tid
 	size += l_getUint3PtrPktSize(bid);				// pointer to bid + bid
-	size += l_getDim3PtrPktSize(bDim);					// bDim
+	size += l_getDim3PtrPktSize(bDim);				// bDim
 	size += l_getDim3PtrPktSize(gDim); 				// gDim
-	size += l_getIntPtrPktSize(wSize);		// wSize
+	size += l_getIntPtrPktSize(wSize);				// wSize
+
+	return size;
+}
+
+/**
+ * counts the size of memory to store all those arguments and transfer it over
+ * the network
+ *
+ * @return total size of bytes required to create a packet from all those arguments
+ */
+int l_getSize_regVar(void **fatCubinHandle, char *hostVar, char *deviceAddress,
+		const char *deviceName, int ext, int vsize,int constant, int global){
+	int size = 0;
+
+	size = sizeof(fatCubinHandle);
+	size += l_getStringPktSize(hostVar);
+	// for storing the local pointer to hostVar; this pointer is
+	// translated and compared with a remote pointer when cudaLaunch is
+	// invoked; the translation is taken care on the server side - this
+	// is the explanation from l_getSize_regFuncArgs - I hope it holds here
+	// as well
+	size += sizeof(char*);
+	size += l_getStringPktSize(deviceAddress);
+	size += l_getStringPktSize(deviceName);
+	size += sizeof(ext);
+	size += sizeof(vsize);
+	size += sizeof(constant);
+	size += sizeof(global);
 
 	return size;
 }
@@ -1956,7 +1997,6 @@ int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
 	int offset = 0;
 
 	void *** v = (void***) pPacket;
-
 	printf("Start: pPacket = %p, offset = %d\n",  pPacket, offset);
 	pRegFuncArgs->fatCubinHandle = v[0];
 	pPacket += sizeof(void*);
@@ -1967,7 +2007,6 @@ int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
 	// you should change the implementation of l_packStr/l_unpackStr
 	// to differentiate the NULL and the ERROR in the offset
 	pRegFuncArgs->hostFun  = l_unpackStr(pPacket, &offset);
-	//offset += 75;
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
 	printf("hostFun: pPacket = %p, offset = %d\n",  pPacket, offset);
 
@@ -1976,15 +2015,11 @@ int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
 	pPacket += sizeof(char*);
 	printf("hostFEaddr: pPacket = %p, offset = %d\n",  pPacket, offset);
 
-	pRegFuncArgs->deviceFun =
-			//"_Z12square_arrayPfi";
-			l_unpackStr(pPacket, &offset);
+	pRegFuncArgs->deviceFun = l_unpackStr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
 	printf("deviceFun: pPacket = %p, offset = %d\n",  pPacket, offset);
 
-	pRegFuncArgs->deviceName =
-			//"_Z12square_arrayPfi";
-			l_unpackStr(pPacket, &offset);
+	pRegFuncArgs->deviceName = l_unpackStr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
 	printf("deviceName: pPacket = %p, offset = %d\n",  pPacket, offset);
 
@@ -2016,13 +2051,116 @@ int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
 	return OK;
 }
 
+char * packRegVar( void **fatCubinHandle, char *hostVar,
+		char *deviceAddress, const char *deviceName, int ext, int vsize,
+		int constant, int global, int * pSize ){
+	// where we are
+	int offset = 0;
+	char * pPack; // for the contiguous space with packed arguments up
+	char * pPackStart; // the beginning
+
+	*pSize = l_getSize_regVar(fatCubinHandle, hostVar, deviceAddress,
+			deviceName, ext, vsize, constant, global);
+
+	pPack = malloc(*pSize);
+	if (mallocCheck(pPack, __FUNCTION__, NULL) == ERROR)
+		return NULL;
+
+	// remember the beginning of the packet
+	pPackStart = pPack;
+
+	void *** p = (void ***) pPack;
+	p[0] = fatCubinHandle;
+	pPack += sizeof(void*);
+	printf("Handle:  pPack = %p, offset = %d\n",  pPack, offset);
+
+	offset = l_packStr(pPack, hostVar);
+	if( ERROR == offset ) return NULL; else pPack += offset;
+	printf("hostVar: pPack = %p, offset = %d\n",  pPack, offset);
+
+	// pack the value of the pointer
+	const char ** c = (const char**) pPack;
+	c[0] = hostVar;
+	pPack += sizeof(char*);
+	printf("hostFEaddr: pPack = %p, offset = %d\n",  pPack, offset);
+
+
+	offset = l_packStr(pPack, deviceAddress);
+	if( ERROR == offset ) return NULL; else pPack += offset;
+	printf("deviceName: pPack = %p, offset = %d\n",  pPack, offset);
+
+	offset = l_packStr(pPack, deviceName);
+	if( ERROR == offset ) return NULL; else pPack += offset;
+	printf("deviceName: pPack = %p, offset = %d\n",  pPack, offset);
+
+	int * pInt = (int*) pPack;
+	pInt[0] = ext;
+	pPack += sizeof(int);
+	printf("ext: pPack = %p, offset = %d\n",  pPack, offset);
+
+	pInt[1] = vsize;
+	pPack += sizeof(int);
+	printf("vsize: pPack = %p, offset = %d\n",  pPack, offset);
+
+	pInt[2] = constant;
+	pPack += sizeof(int);
+	printf("constant: pPack = %p, offset = %d\n",  pPack, offset);
+
+	pInt[3] = global;
+	pPack += sizeof(int);
+	printf("global: pPack = %p, offset = %d\n",  pPack, offset);
+
+	return pPackStart;
+}
+
+int unpackRegVar(reg_var_args_t * pRegVar, char *pPacket){
+	int offset = 0;
+
+	void *** v = (void***) pPacket;
+	printf("Start: pPacket = %p, offset = %d\n",  pPacket, offset);
+	pRegVar->fatCubinHandle = v[0];
+	pPacket += sizeof(void*);
+	printf("Handle: pPacket = %p, offset = %d\n",  pPacket, offset);
+
+	// @todo it should be done better with NULL and with communicating
+	// an error - right now it doesn't have an effect
+	// you should change the implementation of l_packStr/l_unpackStr
+	// to differentiate the NULL and the ERROR in the offset
+	pRegVar->hostVar  = l_unpackStr(pPacket, &offset);
+	if( ERROR == offset ) return ERROR; else pPacket += offset;
+	printf("hostVar: pPacket = %p, offset = %d\n",  pPacket, offset);
+
+	char** c = (char **) pPacket;
+	pRegVar->dom0HostAddr = c[0];
+	pPacket += sizeof(char*);
+	printf("dom0HostAddr: pPacket = %p, offset = %d\n",  pPacket, offset);
+
+	pRegVar->deviceAddress = l_unpackStr(pPacket, &offset);
+	if( ERROR == offset ) return ERROR; else pPacket += offset;
+	printf("deviceAddress: pPacket = %p, offset = %d\n",  pPacket, offset);
+
+	pRegVar->deviceName = l_unpackStr(pPacket, &offset);
+	if( ERROR == offset ) return ERROR; else pPacket += offset;
+	printf("deviceName: pPacket = %p, offset = %d\n",  pPacket, offset);
+
+	int * pI = (int *) pPacket;
+	pRegVar->ext = pI[0];
+	pRegVar->size = pI[1];
+	pRegVar->constant = pI[2];
+	pRegVar->global = pI[3];
+
+	printf("ext, size, constant, global: %d, %d, %d, %d\n",
+			pRegVar->ext, pRegVar->size, pRegVar->constant, pRegVar->global);
+
+	return OK;
+}
 
 // -------------------------------------
 // frees functions
 // -------------------------------------
 
 /**
- * copied from local nvidia_backed/local_api_wrapper.c
+ * copied from local nvidia_backend/local_api_wrapper.c
  */
 int freeRegFunc(reg_func_args_t *args){
 	if (args == NULL)
@@ -2044,6 +2182,19 @@ int freeRegFunc(reg_func_args_t *args){
 		free(args->gDim);
 	if (args->wSize != NULL)
 		free(args->wSize);
+	free(args);
+
+	return OK;
+}
+
+int freeRegVar(reg_var_args_t *args){
+	if (args == NULL)
+		return;
+
+	if (args->deviceAddress != NULL)
+		free(args->deviceAddress);
+	if (args->dom0HostAddr != NULL)
+		free(args->dom0HostAddr);
 	free(args);
 
 	return OK;

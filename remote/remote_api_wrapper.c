@@ -55,7 +55,9 @@ extern void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
 extern void __cudaUnregisterFatBinary(void** fatCubinHandle);
-
+extern void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
+		char *deviceAddress, const char *deviceName, int ext, int vsize,
+		int constant, int global);
 
 ///////////////////
 // RPC CALL UTILS//
@@ -413,6 +415,48 @@ int nvbackCudaThreadExit_rpc(cuda_packet_t * packet){
 	return OK;
 }
 
+int nvbackCudaMemcpyToSymbol_rpc(cuda_packet_t * packet){
+    printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+            packet->ret_ex_val.err, packet->method_id);
+
+    switch((enum cudaMemcpyKind)packet->args[3].argi)
+    {
+        case cudaMemcpyHostToDevice:
+            l_do_cuda_rpc(packet, (void *)packet->args[1].argui, packet->args[2].arr_argi[0], NULL, 0);
+            break;
+        case cudaMemcpyDeviceToDevice:
+            // TODO:
+            l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
+            break;
+        default:
+            printd(DBG_ERROR, "Error: unsupported memcpy direction: %ld\n", packet->args[3].argi);
+            break;
+    }
+
+    return OK;
+}
+
+int nvbackCudaMemcpyFromSymbol_rpc(cuda_packet_t * packet){
+    printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+            packet->ret_ex_val.err, packet->method_id);
+
+    switch((enum cudaMemcpyKind)packet->args[3].argi)
+    {
+        case cudaMemcpyHostToDevice:
+            l_do_cuda_rpc(packet, (void *)packet->args[1].argui, packet->args[2].arr_argi[0], NULL, 0);
+            break;
+        case cudaMemcpyDeviceToDevice:
+            // TODO:
+            l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
+            break;
+        default:
+            printd(DBG_ERROR, "Error: unsupported memcpy direction: %ld\n", packet->args[3].argi);
+            break;
+    }
+
+    return OK;
+}
+
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet) {
 	printd(DBG_DEBUG, "%s: CUDA_ERROR=%u before RPC on method %d\n", __FUNCTION__,
 			packet->ret_ex_val.err, packet->method_id);
@@ -431,6 +475,15 @@ int __nvback_cudaRegisterFunction_rpc(cuda_packet_t *packet) {
 				packet->ret_ex_val.err, packet->method_id);
 	l_do_cuda_rpc(packet, (void *) packet->args[0].argui, packet->args[1].argi,
 				NULL, 0);
+
+	return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
+}
+
+int __nvback_cudaRegisterVar_rpc(cuda_packet_t * packet){
+	printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+	            packet->ret_ex_val.err, packet->method_id);
+	l_do_cuda_rpc(packet, (void *) packet->args[0].argui, packet->args[1].argi,
+					NULL, 0);
 
 	return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
@@ -656,6 +709,85 @@ int nvbackCudaThreadExit_srv(cuda_packet_t *packet, conn_t * pConn){
     return (packet->ret_ex_val.err == 0)? OK : ERROR;
 }
 
+int nvbackCudaMemcpyToSymbol_srv(cuda_packet_t *packet, conn_t * pConn){
+	int i;
+	packet->ret_ex_val.err = cudaErrorInvalidSymbol;
+
+	switch ((enum cudaMemcpyKind) packet->args[3].argi) {
+	case cudaMemcpyHostToDevice:
+		assert((unsigned int)myconn.request_data_size == packet->args[2].arr_argi[0]);
+		packet->args[1].argui
+						= (uint64_t) ((char *) myconn.pReqBuffer);
+
+		//packet->args[1].argui
+		//		= (uint64_t) ((char *) myconn->request_data_buffer
+		//				+ packet->ret_ex_val.data_unit);
+		break;
+	case cudaMemcpyDeviceToDevice:
+		// TODO: define new method id CUDA_MEMCPY_TO_SYMBOL_D2D
+		printd(DBG_WARNING, "Warning: CUDA_MEMCPY_H2H not supported\n");
+		break;
+	default:
+		break;
+	}
+
+	for (i = 0; i < fatcubin_info_srv.num_reg_vars; ++i) {
+		if ((fatcubin_info_srv.variables[i] != NULL) && (fatcubin_info_srv.variables[i]->hostVar
+				== packet->args[0].argcp)) {
+			printd(DBG_DEBUG, "var old:new = %p:%s\n", packet->args[0].argcp, fatcubin_info_srv.variables[i]->dom0HostAddr);
+
+			packet->ret_ex_val.err = cudaMemcpyToSymbol(
+					fatcubin_info_srv.variables[i]->dom0HostAddr, // symbol
+					(void *) packet->args[1].argui, // src
+					packet->args[2].arr_argi[0], // count
+					packet->args[2].arr_argi[1], // offset
+					packet->args[3].argi); // kind
+		}
+	}
+
+	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+	return packet->ret_ex_val.err == cudaSuccess ? OK : ERROR;
+}
+
+int nvbackCudaMemcpyFromSymbol_srv(cuda_packet_t *packet, conn_t * pConn){
+	int i;
+	packet->ret_ex_val.err = cudaErrorInvalidSymbol;
+
+	switch ((enum cudaMemcpyKind) packet->args[3].argi) {
+	case cudaMemcpyHostToDevice:
+		assert((unsigned int)myconn.request_data_size == packet->args[2].arr_argi[0]);
+		packet->args[1].argui
+						= (uint64_t) ((char *) myconn.pReqBuffer);
+
+		//packet->args[1].argui
+		//		= (uint64_t) ((char *) myconn->request_data_buffer
+		//				+ packet->ret_ex_val.data_unit);
+		break;
+	case cudaMemcpyDeviceToDevice:
+		// TODO: define new method id CUDA_MEMCPY_TO_SYMBOL_D2D
+		printd(DBG_WARNING, "Warning: CUDA_MEMCPY_H2H not supported\n");
+		break;
+	default:
+		break;
+	}
+
+	for (i = 0; i < fatcubin_info_srv.num_reg_vars; ++i) {
+		if ((fatcubin_info_srv.variables[i] != NULL) && (fatcubin_info_srv.variables[i]->hostVar
+				== packet->args[0].argcp)) {
+			printd(DBG_DEBUG, "var old:new = %p:%s\n", packet->args[0].argcp, fatcubin_info_srv.variables[i]->dom0HostAddr);
+
+			packet->ret_ex_val.err = cudaMemcpyFromSymbol(
+					(void *) packet->args[1].argui, // dst
+					fatcubin_info_srv.variables[i]->dom0HostAddr, // symbol
+					packet->args[2].arr_argi[0], // count
+					packet->args[2].arr_argi[1], // offset
+					packet->args[3].argi); // kind
+		}
+	}
+
+	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+	return packet->ret_ex_val.err == cudaSuccess ? OK : ERROR;
+}
 
 /**
  * in this function we do not return in the handle the
@@ -736,7 +868,45 @@ int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
 	return OK;
 }
 
-int __nvback_cudaUnregisterFatBinary_srv(cuda_packet_t *packet, conn_t  * myconn){
+int __nvback_cudaRegisterVar_srv(cuda_packet_t * packet, conn_t * myconn){
+	reg_var_args_t * pA = malloc(sizeof(reg_var_args_t));
+
+	if( mallocCheck(pA, __FUNCTION__, NULL ) == ERROR ){
+		exit(ERROR);
+	}
+
+	if(	unpackRegVar(pA, myconn->pReqBuffer) == ERROR ){
+		printd(DBG_ERROR, "%s: __ERROR__: Problems with unpacking arguments in function register\n", __FUNCTION__);
+		exit(ERROR);
+	}
+
+	printd(DBG_DEBUG, "%s:FATCUBIN HANDLE: received=%p, expected=%p",__FUNCTION__,
+			pA->fatCubinHandle, fatcubin_info_srv.fatCubinHandle);
+
+	assert(pA->fatCubinHandle == fatcubin_info_srv.fatCubinHandle);
+
+	l_printRegVar(pA->fatCubinHandle, pA->hostVar, pA->deviceAddress,
+				(const char *)pA->deviceName, pA->ext,
+				pA->size, pA->constant, pA->global);
+
+	__cudaRegisterVar(pA->fatCubinHandle, pA->hostVar, pA->deviceAddress,
+			(const char *)pA->deviceName, pA->ext,
+			pA->size, pA->constant, pA->global);
+
+	// warn us if we want to write outbounds; fatcubin_info_srv.num_reg_fns
+	// should indicate the first free slot you can write in an array
+	assert(fatcubin_info_srv.num_reg_vars < MAX_REGISTERED_VARS);
+	fatcubin_info_srv.variables[fatcubin_info_srv.num_reg_vars] = pA;
+	fatcubin_info_srv.num_reg_vars++;
+
+	packet->ret_ex_val.err = cudaSuccess;
+	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+
+	return OK;
+}
+
+
+int __nvback_cudaUnregisterFatBinary_srv(cuda_packet_t *packet, conn_t  * pConn){
 
 	if( fatcubin_info_srv.fatCubinHandle == NULL ){
 		// I do not check what happens if you try to unregister NULL binary

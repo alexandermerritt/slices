@@ -57,9 +57,15 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
         int *pSize);
 int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket);
 
+char * packRegVar( void **fatCubinHandle, char *hostVar,
+		char *deviceAddress, const char *deviceName, int ext, int vsize,
+		int constant, int global, int * pSize );
+int unpackRegVar(reg_var_args_t * pRegVar, char *pPacket);
+
 
 int freeRegFunc(reg_func_args_t *args);
 int freeFatBinary(__cudaFatCudaBinary *fatCubin);
+int freeRegVar(reg_var_args_t *args);
 
 cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCudaError);
 
@@ -68,6 +74,9 @@ void l_printFatBinary(__cudaFatCudaBinary * pFatBin);
 void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
+void l_printRegVar(void **fatCubinHandle, char *hostVar,
+		char *deviceAddress, const char *deviceName, int ext, int vsize,
+		int constant, int global);
 int l_printCudaDeviceProp(const struct cudaDeviceProp * const pProp);
 
 /**

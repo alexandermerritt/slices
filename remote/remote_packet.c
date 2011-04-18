@@ -238,6 +238,14 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 		nvbackCudaMemcpy_srv(rpkt, pConn);
 		break;
 
+	case CUDA_MEMCPY_TO_SYMBOL:
+		nvbackCudaMemcpyToSymbol_srv(rpkt, pConn);
+		break;
+
+	case CUDA_MEMCPY_FROM_SYMBOL:
+		nvbackCudaMemcpyFromSymbol_srv(rpkt, pConn);
+		break;
+
 	case CUDA_THREAD_SYNCHRONIZE:
 		nvbackCudaThreadSynchronize_srv(rpkt, pConn);
 		break;
@@ -252,6 +260,10 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 
 	case __CUDA_REGISTER_FUNCTION:
 		__nvback_cudaRegisterFunction_srv(rpkt, pConn);
+		break;
+
+	case __CUDA_REGISTER_VARIABLE:
+		__nvback_cudaRegisterVar_srv(rpkt, pConn);
 		break;
 
 	case __CUDA_UNREGISTER_FAT_BINARY:
