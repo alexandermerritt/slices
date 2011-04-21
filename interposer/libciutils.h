@@ -12,6 +12,7 @@
 #include <__cudaFatFormat.h>
 #include "packetheader.h"
 #include "fatcubininfo.h"
+#include <glib.h>		// GArray
 
 /**
  * For storing the number of records  for particular structures
@@ -78,6 +79,7 @@ void l_printRegVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global);
 int l_printCudaDeviceProp(const struct cudaDeviceProp * const pProp);
+int printFatCIArray(GArray * fcia);
 
 /**
  * cleans the structure, frees the allocated memory, sets values to zeros,
@@ -102,5 +104,34 @@ char * methodIdToString(const int method_id);
  */
 inline int l_getLocalFromConfig(void);
 
+
+/**
+ * returns an index in fatCubinInfoArr to the fatcubin_info_t corresponding to
+ * a provided fatCubinHandle. If there is a few the same fatCubinHandles
+ * the first found is returned (I guess it should never happen)
+ *
+ * @todo check for uniqueness of the fatCubinHandle
+ *
+ * @param fatCubinInfoArr the pointer to the array
+ * @param fatCubinHandle against which handle do we compare entries in fatCubinInfoArr
+ * @return index of the entry holding the fatCubinHandle
+ *         -1 if no entry equal to fatCubinHandle can be found
+ */
+inline int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle);
+
+/**
+ * returns the the pointer to the fatcubin_info_t corresponding to
+ * a fatCubinHandle. If there is a few the same fatCubinHandles
+ * the first found is returned
+ *
+ * @todo check for uniqueness of the fatCubinHandle
+ *
+ * @param fatCubinHandle against which handle do we compare entries in fatCubinInfoArr
+ * @param fatCubinInfoArr the pointer to the array
+ * @return pointer to  the entry holding the fatCubinHandle
+ *         NULL if no entry equal to fatCubinHandle can be found or fatCubinInfoArr
+ *         is lost
+ */
+inline fatcubin_info_t * g_fcia_elem(GArray * fatCubinInfoArr, void ** fatCubinHandle);
 
 #endif /* CITUILS_H_ */

@@ -24,15 +24,20 @@ envRemote = Environment(LIBS    = ['pthread'],
 
 INIPARSER = '/home/magg/src/iniparser/'
 
-interposerEnv = Environment(LIBS = ['rt', 'dl', 'iniparser'],
-					  LIBPATH = ['/opt/cuda/lib64', INIPARSER],
+# for glib options run: glib-config --cflags  for glib1.2 
+# glib2 lacks this thing
+
+interposerEnv = Environment(LIBS = ['rt', 'dl', 'iniparser', 'glib-2.0'],
+					  LIBPATH = ['/opt/cuda/lib64', INIPARSER, '/lib64'],
 					  CPPPATH = [
 					  '.',
 					  '/opt/cuda/include', 
 					  '../include', 
 					  '../remote',
 					  '../backend',
-					  INIPARSER + 'src'],					  
+					  INIPARSER + 'src',
+					  '/usr/include/glib-2.0',
+					  '/usr/lib64/glib-2.0/include'],					  
 					  CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
 
 # create a regular library
@@ -47,13 +52,15 @@ interposerEnv.SharedLibrary('libci.so', ['libci.c',
    									])
    									
 # building tests
-envTest = Environment(LIBS = ['cunit', 'ncurses', 'pthread'],
-					  LIBPATH= ['/opt/cunit212/lib', '.'],
+envTest = Environment(LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
+					  LIBPATH= ['/opt/cunit212/lib', '.', '/lib64'],
 					  CPPPATH= ['/opt/cunit212/include',
 					  			'/opt/cuda/include',
 					            '../include',
 					            '../remote',
-					            '../backend'],
+					            '../backend',
+					            '/usr/include/glib-2.0',
+					  			'/usr/lib64/glib-2.0/include' ],
 					  CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
 
 # libci and libciutils should be compiled earlier

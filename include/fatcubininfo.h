@@ -10,11 +10,15 @@
 #ifndef FATCUBININFO_H_
 #define FATCUBININFO_H_
 
-// @todo do not understand why such limits? is it because of hardware limitation?
-// or experimental data or what?
+//! the maximum number of fatcubins structures we support
+//! in general it should be a vector with dynamic length as
+//! all those MAX_REGISTERED_THINGS
+//#define MAX_FATCUBINS 3
+
+// @todo looks as those values are observed empirically
 
 // Maximum number of distinct kernels that will be invoked by a domain
-#define MAX_REGISTERED_CUDA_FUNCTIONS 10
+#define MAX_REGISTERED_FUNCS 10
 // Maximum number of constant/shared cuda variables
 #define MAX_REGISTERED_VARS 10
 #define MAX_REGISTERED_TEXS 10
@@ -46,7 +50,8 @@ typedef struct {
 	// searching of functions but linear shouldn't be so bad with
 	// < 10 elements
 	int num_reg_fns;
-	reg_func_args_t *reg_fns[MAX_REGISTERED_CUDA_FUNCTIONS];
+	reg_func_args_t *reg_fns[MAX_REGISTERED_FUNCS];
 } fatcubin_info_t;
+
 
 #endif /* FATCUBININFO_H_ */

@@ -20,6 +20,7 @@
 #include "iniparser.h"   // for dictionary, iniparser_load, etc
 
 
+
 /**
  * checks if the memory has been appropriately allocated
  * @todo this function should go to a separate library
@@ -86,8 +87,8 @@ int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo){
 
 	// we assume that the pFatCInfo is not a null pointer
 	assert(NULL != pFatCInfo);
-	for (i = 0; i < pFatCInfo->num_reg_vars; ++i)
-		freeRegVar(pFatCInfo->variables[i]);
+//	for (i = 0; i < pFatCInfo->num_reg_vars; ++i)
+//		freeRegVar(pFatCInfo->variables[i]);
 	/*	for (i = 0; i < dfi->num_reg_texs; ++i)
 					freeRegTex(dfi->textures[i]); */
 	for (i = 0; i < pFatCInfo->num_reg_fns; ++i)
@@ -641,21 +642,27 @@ int l_printCudaDeviceProp(const struct cudaDeviceProp * const pProp){
     return OK;
 }
 
-// counts the new_marker; changes curr_marker and new_marker
-/*#define GET_LOCAL_POINTER(curr_marker, size, new_marker, dtype) { \
-	curr_marker = (char *)((unsigned long)curr_marker + size); \
-	new_marker = dtype(curr_marker); \
-}
+/**
+ * prints the fatcubin_info array
+ */
 
-#define COPY_STRINGS(nFat,fat,str,cur,l) { \
-	strcpy(nFat->str, fat->str); \
-	l = (strlen(fat->str) + 1) * sizeof(char); \
-	cur[l - sizeof(char)] = 0; \
-}
+int printFatCIArray(GArray * fcia){
+	guint i;
 
-#define OFFSET_PTR_MEMB(ptr,memb,base,dtype) { \
-	ptr->memb = dtype((unsigned long)ptr->memb - (unsigned long)base); \
-}*/
+	if( NULL == fcia)
+		return OK;
+
+	printd(DBG_INFO, "\n -------- FatCubin_info array: length = %u -----------\n", fcia->len);
+
+	for (i = 0; i < fcia->len; i++) {
+		fatcubin_info_t * p =
+				&g_array_index(fcia, fatcubin_info_t, i);
+
+		printd(DBG_INFO, "\t FAT Cubin Handle: %p, Fat Cubin: %p", p->fatCubinHandle, p->fatCubin);
+	}
+
+	return OK;
+}
 
 
 /**
@@ -722,7 +729,6 @@ inline char * l_unpackStr(const char *pSrc, int * pOffset){
 	// read the length
 	size_pkt_field_t * p = (size_pkt_field_t *) pSrc;
 	length = p[0];
-	//memcpy(&length, pSrc, sizeof(size_pkt_field_t));
 	pSrc += sizeof(size_pkt_field_t);
 	*pOffset = sizeof(size_pkt_field_t);
 
@@ -2189,7 +2195,7 @@ int freeRegFunc(reg_func_args_t *args){
 
 int freeRegVar(reg_var_args_t *args){
 	if (args == NULL)
-		return;
+		return OK;
 
 	if (args->deviceAddress != NULL)
 		free(args->deviceAddress);
@@ -2340,6 +2346,7 @@ char * methodIdToString(const int method_id){
 	case CUDA_BIND_TEXTURE_TO_ARRAY: fname = "cudaBindTextureToArray"; break;
 	case CUDA_FREE_HOST: fname = "cudaFreeHost"; break;
 	case CUDA_MEMCPY_TO_SYMBOL: fname = "cudaMemcpyToSymbpl"; break;
+	case CUDA_MEMCPY_FROM_SYMBOL: fname = "cudaMemcpyFromSymbol"; break;
 	case CUDA_MALLOC_ARRAY: fname = "cudaMallocArray"; break;
 	case CUDA_FREE_ARRAY: fname = "cudaFreeArray"; break;
 	case CUDA_MEMCPY_TO_ARRAY_D2D: fname = "cudaMemcpyToArrayD2D"; break;
@@ -2357,4 +2364,64 @@ char * methodIdToString(const int method_id){
 	}
 
 	return fname;
+}
+
+// ---------------------------------------------
+// glib helper functions
+// ---------------------------------------------
+
+
+/**
+ * returns the the pointer to the fatcubin_info_t corresponding to
+ * a fatCubinHandle. If there is a few the same fatCubinHandles
+ * the first found is returned
+ *
+ * infix fcia stays for F_atC_ubin_I_nfo A_rray
+ *
+ * @todo check for uniqueness of the fatCubinHandle
+ *
+ * @param fatCubinInfoArr the pointer to the array
+ * @param fatCubinHandle against which handle do we compare entries in fatCubinInfoArr
+ *
+ * @return index of the entry holding the fatCubinHandle
+ *         -1 if no entry equal to fatCubinHandle can be found or the fatCubinInfoArr
+ *            is NULL
+ */
+inline int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle) {
+	fatcubin_info_t * e = NULL;
+	int index = -1;
+	unsigned int i;
+
+	if (NULL == fatCubinInfoArr)
+		return -1;
+
+	for (i = 0; i < fatCubinInfoArr->len; i++) {
+		e = &g_array_index( fatCubinInfoArr, fatcubin_info_t, i);
+		if (e->fatCubinHandle == fatCubinHandle) {
+			// we have found it
+			index = (int) i;
+			break;
+		}
+	}
+
+	return index;
+}
+
+/**
+ * returns the the pointer to the fatcubin_info_t corresponding to
+ * a fatCubinHandle. If there is a few the same fatCubinHandles
+ * the first found is returned; invokes @see g_find_fatci
+ *
+ * @todo check for uniqueness of the fatCubinHandle
+ *
+ * @param fatCubinHandle against which handle do we compare entries in fatCubinInfoArr
+ * @param fatCubinInfoArr the pointer to the array
+ * @return pointer to  the entry holding the fatCubinHandle
+ *         NULL if no entry equal to fatCubinHandle can be found or fatCubinInfoArr
+ *         is lost
+ */
+inline fatcubin_info_t * g_fcia_elem(GArray * fatCubinInfoArr, void ** fatCubinHandle){
+	int idx = g_fcia_idx(fatCubinInfoArr, fatCubinHandle);
+
+	return (-1 == idx ? NULL : &g_array_index(fatCubinInfoArr, fatcubin_info_t, idx));
 }

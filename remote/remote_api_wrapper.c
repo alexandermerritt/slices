@@ -35,7 +35,7 @@
 // stores the config parameters
 #include "config.h"
 
-
+#include <glib.h>
 
 
 //! This will be storing the name of the hsot
@@ -45,9 +45,11 @@ static char REMOTE_HOSTNAME[HOSTNAME_STRLEN];
 //! connection the program stops to work, so you have to make it static
 static conn_t myconn;
 
-//! stores information about the fatcubin_info on the server side
-//static fatcubin_info_t fatcubin_info_srv;
-static fatcubin_info_t fatcubin_info_srv;
+
+//! the dynamic array for storing info about registered fatcubins
+//! this array is stored on the server side
+static GArray * fatCInfoArr = NULL;
+
 
 // the original function we eventually want to invoke
 extern void** __cudaRegisterFatBinary(void* fatC);
@@ -616,26 +618,38 @@ int nvbackCudaConfigureCall_srv(cuda_packet_t *packet, conn_t *pConn){
 }
 
 int nvbackCudaLaunch_srv(cuda_packet_t * packet, conn_t * pConn){
-	int i;
+	unsigned int i;
+	int j;
 	const char *arg;
+	int found = 0;
 
 	// this is entry for the cudaLaunch
 	arg = (const char *)packet->args[0].argcp;
 
-	printf("%s: entry: fatcubin_info_srv.num_reg_fns=%d\n", __FUNCTION__, fatcubin_info_srv.num_reg_fns);
-	printf("%s: entry: hostFEaddr=%p, arg=%p\n", __FUNCTION__, fatcubin_info_srv.reg_fns[0]->hostFEaddr,
-			arg);
-
 	packet->ret_ex_val.err = cudaErrorLaunchFailure;
 
-	for(i = 0; i < fatcubin_info_srv.num_reg_fns; ++i){
-	  if (fatcubin_info_srv.reg_fns[i] != NULL && fatcubin_info_srv.reg_fns[i]->hostFEaddr == arg){
-	      printd(DBG_DEBUG, "%s: function %p:%s\n", __FUNCTION__,
-	    		  fatcubin_info_srv.reg_fns[i]->hostFEaddr,
-	    		  fatcubin_info_srv.reg_fns[i]->hostFun);
-	      packet->ret_ex_val.err = cudaLaunch(fatcubin_info_srv.reg_fns[i]->hostFun);
-	      break;
-	  }
+	// in the CUDA Runtime API, globals in two modules must not have the same name
+	// I guess the same applies to functions; that's why I am implementing this
+	// as there function names are unique across .cu or .ptx modules
+
+	for (i = 0; i < fatCInfoArr->len; i++) {
+		fatcubin_info_t * p =
+				&g_array_index(fatCInfoArr, fatcubin_info_t, i);
+		assert( p != NULL );
+		// now iterate per chosen fatcubin registered structure
+		for (j = 0; j < p->num_reg_fns; j++) {
+			if (p->reg_fns[j] != NULL
+					&& p->reg_fns[j]->hostFEaddr == arg) {
+				printd(DBG_DEBUG, "%s: function %p:%s\n", __FUNCTION__,
+						p->reg_fns[j]->hostFEaddr,
+						p->reg_fns[j]->hostFun);
+				packet->ret_ex_val.err = cudaLaunch(p->reg_fns[j]->hostFun);
+				found = 1;
+				break;
+			}
+		}
+		if(found == 1)
+			break;
 	}
 
 	printd(DBG_DEBUG, "CUDA_ERROR=%d for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
@@ -713,7 +727,7 @@ int nvbackCudaMemcpyToSymbol_srv(cuda_packet_t *packet, conn_t * pConn){
 	int i;
 	packet->ret_ex_val.err = cudaErrorInvalidSymbol;
 
-	switch ((enum cudaMemcpyKind) packet->args[3].argi) {
+/*	switch ((enum cudaMemcpyKind) packet->args[3].argi) {
 	case cudaMemcpyHostToDevice:
 		assert((unsigned int)myconn.request_data_size == packet->args[2].arr_argi[0]);
 		packet->args[1].argui
@@ -744,7 +758,7 @@ int nvbackCudaMemcpyToSymbol_srv(cuda_packet_t *packet, conn_t * pConn){
 					packet->args[3].argi); // kind
 		}
 	}
-
+*/
 	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 	return packet->ret_ex_val.err == cudaSuccess ? OK : ERROR;
 }
@@ -753,7 +767,7 @@ int nvbackCudaMemcpyFromSymbol_srv(cuda_packet_t *packet, conn_t * pConn){
 	int i;
 	packet->ret_ex_val.err = cudaErrorInvalidSymbol;
 
-	switch ((enum cudaMemcpyKind) packet->args[3].argi) {
+/*	switch ((enum cudaMemcpyKind) packet->args[3].argi) {
 	case cudaMemcpyHostToDevice:
 		assert((unsigned int)myconn.request_data_size == packet->args[2].arr_argi[0]);
 		packet->args[1].argui
@@ -784,7 +798,7 @@ int nvbackCudaMemcpyFromSymbol_srv(cuda_packet_t *packet, conn_t * pConn){
 					packet->args[3].argi); // kind
 		}
 	}
-
+*/
 	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 	return packet->ret_ex_val.err == cudaSuccess ? OK : ERROR;
 }
@@ -796,43 +810,56 @@ int nvbackCudaMemcpyFromSymbol_srv(cuda_packet_t *packet, conn_t * pConn){
  */
 int __nvback_cudaRegisterFatBinary_srv(cuda_packet_t *packet, conn_t * myconn){
 
-	// non NULL value indicates that the unregister function has not been
-	// invoked
-	assert( NULL == fatcubin_info_srv.fatCubin );
-	fatcubin_info_srv.fatCubin = malloc(sizeof(__cudaFatCudaBinary));
+	// this will held the new structure for fatcubin_info_srv
+	fatcubin_info_t * pFatCInfo = NULL;
 
-	//void ** pFatCHandle;
+	// NULL value indicates that we need to create an array of cudaRegisterFatBinaries
+	// it is because each .cu file has a register fat binary
+	if( NULL == fatCInfoArr )
+		// NULL value indicates that this is the first fat binary to be registered
+		fatCInfoArr = g_array_new(FALSE, FALSE, sizeof(fatcubin_info_t));
 
-	if( mallocCheck(fatcubin_info_srv.fatCubin, __FUNCTION__, NULL ) == ERROR ){
+	pFatCInfo = malloc(sizeof(fatcubin_info_t));
+
+
+	if( mallocCheck(pFatCInfo, __FUNCTION__, NULL ) == ERROR )
 		exit(ERROR);
-	}
-	if( unpackFatBinary(fatcubin_info_srv.fatCubin, myconn->pReqBuffer) == ERROR ){
+
+	pFatCInfo->fatCubin =  malloc(sizeof(__cudaFatCudaBinary));
+
+	if( mallocCheck(pFatCInfo->fatCubin, __FUNCTION__, NULL ) == ERROR )
+		exit(ERROR);
+
+	if( unpackFatBinary(pFatCInfo->fatCubin, myconn->pReqBuffer) == ERROR ){
 		printd(DBG_ERROR, "%s: __ERROR__ Problems with unpacking fat binary\n",__FUNCTION__);
 		exit(ERROR);
 	} else {
 		printd(DBG_ERROR, "%s: __OK__ No problem with unpacking fat binary\n",__FUNCTION__);
-		l_printFatBinary(fatcubin_info_srv.fatCubin);
+		l_printFatBinary(pFatCInfo->fatCubin);
 	}
 
-	// not NULL value may indicate that the fatcubin_info structure has not
-	// been nicely cleaned
-	assert( NULL == fatcubin_info_srv.fatCubinHandle );
-	printd(DBG_DEBUG, "%s: FATCUBIN HANDLE: before %p\n", __FUNCTION__, fatcubin_info_srv.fatCubinHandle);
-	printd(DBG_DEBUG, "%s: FATCUBIN: before %p\n", __FUNCTION__, fatcubin_info_srv.fatCubin);
-
 	// start to build the structure
-    fatcubin_info_srv.fatCubinHandle = __cudaRegisterFatBinary(fatcubin_info_srv.fatCubin);
+    pFatCInfo->fatCubinHandle = __cudaRegisterFatBinary(pFatCInfo->fatCubin);
 
-    packet->args[1].argp = fatcubin_info_srv.fatCubin;
-    packet->ret_ex_val.handle = fatcubin_info_srv.fatCubinHandle;
+    // remember, this macro requires appending value (not a pointer to a value)
+    // the second thing you need to remember, it looks that the place
+    // where you put this call can make a difference, since it looks as
+    // it makes a copy of that value, so if you do not have the right thing
+    // you are
+    g_array_append_val(fatCInfoArr, *pFatCInfo);
 
-    printd(DBG_DEBUG, "%s: FATCUBIN HANDLE: registered %p\n", __FUNCTION__, fatcubin_info_srv.fatCubinHandle);
-    printd(DBG_DEBUG, "%s: FATCUBIN: registered %p\n", __FUNCTION__, fatcubin_info_srv.fatCubin);
+    packet->args[1].argp = pFatCInfo->fatCubin;
+    packet->ret_ex_val.handle = pFatCInfo->fatCubinHandle;
+
+    printd(DBG_DEBUG, "%s: FATCUBIN HANDLE: registered %p\n", __FUNCTION__, pFatCInfo->fatCubinHandle);
+    printd(DBG_DEBUG, "%s: FATCUBIN: registered %p\n", __FUNCTION__, pFatCInfo->fatCubin);
     return OK;
 }
 
 int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
 	reg_func_args_t * pA = malloc(sizeof(reg_func_args_t));
+	fatcubin_info_t * pFcI = NULL;
+	int fcidx;
 
 	if( mallocCheck(pA, __FUNCTION__, NULL ) == ERROR ){
 			exit(ERROR);
@@ -843,10 +870,21 @@ int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
 		exit(ERROR);
 	}
 
-	printd(DBG_DEBUG, "%s:FATCUBIN HANDLE: received=%p, expected=%p",__FUNCTION__,
-			pA->fatCubinHandle, fatcubin_info_srv.fatCubinHandle);
+	printFatCIArray(fatCInfoArr);
 
-	assert(pA->fatCubinHandle == fatcubin_info_srv.fatCubinHandle);
+	// find the fatCubinHandle in our array
+	pFcI = g_fcia_elem(fatCInfoArr, pA->fatCubinHandle);
+
+	if( NULL == pFcI ){
+		printd(DBG_ERROR, "%s: __ERROR__: Not such fat cubin handler %p\n",
+				__FUNCTION__, pA->fatCubinHandle);
+		exit(ERROR);
+	}
+
+	printd(DBG_DEBUG, "%s:FATCUBIN HANDLE: received=%p, found=%p",__FUNCTION__,
+			pA->fatCubinHandle, pFcI->fatCubinHandle);
+
+	assert(pA->fatCubinHandle == pFcI->fatCubinHandle);
 
 	l_printRegFunArgs(pA->fatCubinHandle, (const char *)pA->hostFun, pA->deviceFun,
 			(const char *)pA->deviceName, pA->thread_limit,
@@ -858,9 +896,9 @@ int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn){
 
 	// warn us if we want to write outbounds; fatcubin_info_srv.num_reg_fns
 	// should indicate the first free slot you can write in an array
-	assert(fatcubin_info_srv.num_reg_fns < MAX_REGISTERED_CUDA_FUNCTIONS);
-	fatcubin_info_srv.reg_fns[fatcubin_info_srv.num_reg_fns] = pA;
-	fatcubin_info_srv.num_reg_fns++;
+	assert(pFcI->num_reg_fns < MAX_REGISTERED_FUNCS);
+	pFcI->reg_fns[pFcI->num_reg_fns] = pA;
+	pFcI->num_reg_fns++;
 
 	packet->ret_ex_val.err = cudaSuccess;
 	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
@@ -880,7 +918,7 @@ int __nvback_cudaRegisterVar_srv(cuda_packet_t * packet, conn_t * myconn){
 		exit(ERROR);
 	}
 
-	printd(DBG_DEBUG, "%s:FATCUBIN HANDLE: received=%p, expected=%p",__FUNCTION__,
+/*	printd(DBG_DEBUG, "%s:FATCUBIN HANDLE: received=%p, expected=%p",__FUNCTION__,
 			pA->fatCubinHandle, fatcubin_info_srv.fatCubinHandle);
 
 	assert(pA->fatCubinHandle == fatcubin_info_srv.fatCubinHandle);
@@ -898,7 +936,7 @@ int __nvback_cudaRegisterVar_srv(cuda_packet_t * packet, conn_t * myconn){
 	assert(fatcubin_info_srv.num_reg_vars < MAX_REGISTERED_VARS);
 	fatcubin_info_srv.variables[fatcubin_info_srv.num_reg_vars] = pA;
 	fatcubin_info_srv.num_reg_vars++;
-
+*/
 	packet->ret_ex_val.err = cudaSuccess;
 	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 
@@ -908,17 +946,24 @@ int __nvback_cudaRegisterVar_srv(cuda_packet_t * packet, conn_t * myconn){
 
 int __nvback_cudaUnregisterFatBinary_srv(cuda_packet_t *packet, conn_t  * pConn){
 
-	if( fatcubin_info_srv.fatCubinHandle == NULL ){
-		// I do not check what happens if you try to unregister NULL binary
-		// but maybe something will happen or needs to happen that's why invoking
-		__cudaUnregisterFatBinary(fatcubin_info_srv.fatCubinHandle);
-		packet->ret_ex_val.err = cudaSuccess;
-		printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
-		return ERROR;
-	}
-	__cudaUnregisterFatBinary(fatcubin_info_srv.fatCubinHandle);
+	// get the handle
+	void ** pFCHandle = packet->args[0].argdp;
+	// will hold the pointer to the fatcubin_info_t from the array
+	fatcubin_info_t * pFCI;
+	int pFCIdx;
 
-	cleanFatCubinInfo(&fatcubin_info_srv);
+	printFatCIArray(fatCInfoArr);
+	printd(DBG_DEBUG, "The FAT cubing handle we've got: %p\n", pFCHandle);
+
+	// find the handle in our table
+	pFCI = g_fcia_elem(fatCInfoArr, pFCHandle);
+	assert(pFCI != NULL);
+
+	__cudaUnregisterFatBinary(pFCI->fatCubinHandle);
+
+	cleanFatCubinInfo(pFCI);
+	// and remove it from our array
+	g_array_remove_index_fast(fatCInfoArr, pFCIdx);
 
 	packet->ret_ex_val.err = cudaSuccess;
 	printd(DBG_DEBUG, "CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);

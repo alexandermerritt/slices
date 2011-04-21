@@ -53,7 +53,21 @@
     @todo this must be a smarter way to do that
     interposer/SConstruct
     backend/SConstruct
+ e. glib 
+ 
+ 	- glib 2.0 - currently used (you need a devel package and a lib package)
+ 	  -- includes: -I/usr/include/glib-2.0
+				   -I/usr/lib64/glib-2.0/include
+	  -- path to libraries 
+	      -L /lib64 (likely it is set by default)
+ 	  -- link with -lglib-2.0
+    - it shouldn't be issues with glib 1.2 (I also used glib-1.2 in early
+      stages and it worked).
+      -- for options to set in build files run
+      glib-config --cflags 
+      -- for the linker you need to link with -lglib
     
+   
  
  2. Building
  

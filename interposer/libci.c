@@ -2404,6 +2404,7 @@ void** r__cudaRegisterFatBinary(void* fatC){
 	cache_num_entries_t entries_cached = {0, 0, 0, 0, 0, 0, 0};
 	// the size of the packet for cubin
 	int fb_size;
+	void ** fatCubinHandle = NULL;
 
 	// In original version of the code we created a kind of a structure
 	// in a contiguous thing
@@ -2455,22 +2456,24 @@ void** r__cudaRegisterFatBinary(void* fatC){
 		cuda_err = cudaErrorUnknown;
 	} else {
 		// get the response, get the fat cubin handle
-		fatcubin_info_rpc.fatCubin = pSrcFatC;
-		fatcubin_info_rpc.fatCubinHandle = pPacket->ret_ex_val.handle;
+		fatCubinHandle = pPacket->ret_ex_val.handle;
+		//fatcubin_info_rpc.fatCubin = pSrcFatC;
+		//fatcubin_info_rpc.fatCubinHandle = pPacket->ret_ex_val.handle;
 
 		// @todo maybe I am wrong with this assert, maybe it should
 		// be what is got from rpc call: args[1].argp which is
 		// the fatCubin of the remote server
 		// actually I think it doesn't matter, since to unregister
 		// you need a handler
-		assert(fatC == fatcubin_info_rpc.fatCubin);
-		printd(DBG_INFO, "fatcubin_info_rpc.fatCubinHandle = %p\n", fatcubin_info_rpc.fatCubinHandle);
-		printd(DBG_INFO, "fatcubin_info_rpc.fatCubin = %p\n", fatcubin_info_rpc.fatCubin);
+	//	assert(fatC == fatcubin_info_rpc.fatCubin);
+
+		printd(DBG_INFO, "Returned fatCubinHandle = %p\n", pPacket->ret_ex_val.handle);
+	//	printd(DBG_INFO, "fatcubin_info_rpc.fatCubin = %p\n", fatcubin_info_rpc.fatCubin);
 	}
 
 	free(pPacket);
 
-	return fatcubin_info_rpc.fatCubinHandle;
+	return fatCubinHandle;
 }
 
 void** l__cudaRegisterFatBinary(void* fatC) {
@@ -2512,7 +2515,7 @@ void r__cudaUnregisterFatBinary(void** fatCubinHandle) {
 	}
 
 	// update packet
-	pPacket->args[0].argdp = fatcubin_info_rpc.fatCubinHandle;
+	pPacket->args[0].argdp = fatCubinHandle;
 
 	if (__nvback_cudaUnregisterFatBinary_rpc(pPacket) != OK) {
 		printd(DBG_ERROR, "%s.%d: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
@@ -2702,6 +2705,13 @@ void r__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 	return;
 }
 
+/**
+ * Andrew Kerr: "his function establishes a mapping between global variables
+ * defined in .ptx or .cu modules and host-side variables. In PTX, global
+ * variables have module scope and can be globally referenced by module and
+ * variable name. In the CUDA Runtime API, globals in two modules must not have
+ * the same name."
+ */
 void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global) {

@@ -887,6 +887,38 @@ void test_l_packUnpackDep(){
 	CU_ASSERT( u.dependends->imported[2].name == NULL);
 
 	CU_ASSERT_PTR_EQUAL(u.dependends->dependends, NULL); */
+
+
+	free(u.key);
+	free(u.ident);
+	free(u.usageMode);
+
+	free(u.ptx->gpuProfileName);
+	free(u.ptx->ptx);
+	free(u.ptx);
+
+	free(u.cubin->gpuProfileName);
+	free(u.cubin->cubin);
+	free(u.cubin);
+
+	free(u.debug->gpuProfileName);
+	free(u.debug->debug);
+	free(u.debug);
+
+	free(u.elf->gpuProfileName);
+	free(u.elf->elf);
+	free(u.elf);
+
+	free(u.exported[0].name);
+	free(u.exported[1].name);
+	free(u.exported);
+
+	free(u.imported[1].name);
+	free(u.imported[0].name);
+	free(u.imported);
+
+	free(pPacket);
+
 }
 
 void test_packunpack(void){
@@ -999,7 +1031,7 @@ void test_packunpack(void){
 	// dependends
 	CU_ASSERT(NULL == u.dependends);
 
-/*	hopefully system will clean up the memory mess after us
+	//cleaning the memory mess
  	free(u.key);
 	free(u.ident);
 	free(u.usageMode);
@@ -1020,11 +1052,14 @@ void test_packunpack(void){
 	free(u.elf->elf);
 	free(u.elf);
 
-	free(u.exported->name);
+	free(u.exported[0].name);
 	free(u.exported[1].name);
+	free(u.exported);
 
-	free(u.imported->name);
-	free(u.imported[1].name); */
+	free(u.imported[1].name);
+	free(u.imported[0].name);
+	free(u.imported);
+
 
 	free(pPacket);
 }
@@ -1145,6 +1180,8 @@ void test_l_packUnpackUint3Ptr(void){
 	CU_ASSERT_EQUAL(pU->x, 1);
 	CU_ASSERT_EQUAL(pU->y, 13);
 	CU_ASSERT_EQUAL(pU->z, 5);
+
+	free(pU);
 }
 
 void test_l_packUnpackDim3Ptr(void){
@@ -1181,6 +1218,8 @@ void test_l_packUnpackDim3Ptr(void){
 	CU_ASSERT_EQUAL(pU->x, 1);
 	CU_ASSERT_EQUAL(pU->y, 13);
 	CU_ASSERT_EQUAL(pU->z, 5);
+
+	free(pU);
 }
 
 void test_l_packUnpackIntPtr(void){
@@ -1268,6 +1307,17 @@ void test_l_packUnpackRegFuncArgs(void){
    CU_ASSERT_EQUAL(a.gDim->y, d2.y );
    CU_ASSERT_EQUAL(a.gDim->z, d2.z );
    CU_ASSERT_EQUAL(*a.wSize, wsize)
+
+   free(a.hostFun);
+   free(a.deviceFun);
+   free(a.deviceName);
+   free(a.tid);
+   free(a.bid);
+   free(a.bDim);
+   free(a.gDim);
+   free(a.wSize);
+
+   free(pack);
 }
 
 void test_freeRegFunc(void){
@@ -1307,6 +1357,11 @@ void test_l_packUnpackRegVar(void){
 	CU_ASSERT_EQUAL(a.size, 2);
 	CU_ASSERT_EQUAL(a.constant, 3);
 	CU_ASSERT_EQUAL(a.global, 4);
+
+	free(a.hostVar);
+	free(a.deviceAddress);
+	free(a.deviceName);
+	free(pack);
 }
 
 
@@ -1338,6 +1393,125 @@ void test_freeBuffer(void){
 	buffer = freeBuffer(buffer);
 	CU_ASSERT_PTR_NULL(buffer);
 }
+
+void test_g_fcia_idx(void){
+	GArray * pFcArr = g_array_new(FALSE, FALSE, sizeof(fatcubin_info_t));
+
+	fatcubin_info_t p1, p2;
+	fatcubin_info_t *p;
+	void ** pV1 = (void**) 0x2;
+	void ** pV2 = (void**) 0x3;
+	void ** pV3 = (void**) 0x4;
+
+	CU_ASSERT_PTR_NOT_NULL(pFcArr);
+
+	p1.fatCubinHandle = pV1;
+	p1.num_reg_fns = 3;
+	g_array_append_val(pFcArr, p1);
+
+	CU_ASSERT_EQUAL(pFcArr->len, 1);
+
+	p2.fatCubinHandle = pV2;
+	p2.num_reg_fns = 2;
+	g_array_append_val(pFcArr, p2);
+	CU_ASSERT_EQUAL(pFcArr->len, 2);
+
+	int idx = -2;
+	// 0. check what happens with NULL array
+	idx = g_fcia_idx(NULL, pV3);
+	CU_ASSERT_EQUAL(idx, -1);
+
+	// 1. now not null array and not existing fatcubin
+	idx = -2;
+	idx = g_fcia_idx(pFcArr, pV3);
+	CU_ASSERT_EQUAL(idx, -1);
+
+	// 2. now not null array and NULL pointer to find (not existing)
+	idx = -2;
+	idx = g_fcia_idx(pFcArr, NULL);
+	CU_ASSERT_EQUAL(idx, -1);
+
+	// 3. now try to find the existing value
+	idx = -2;
+	idx = g_fcia_idx(pFcArr, pV1);
+	CU_ASSERT_NOT_EQUAL(idx, -1);
+	p = &g_array_index(pFcArr, fatcubin_info_t, idx);
+	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV1);
+	CU_ASSERT_EQUAL(p->num_reg_fns, 3);
+
+
+	// 4. another value
+	idx = -2;
+	idx = g_fcia_idx(pFcArr, pV2);
+	CU_ASSERT_NOT_EQUAL(idx, -1);
+	p = &g_array_index(pFcArr, fatcubin_info_t, idx);
+	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV2);
+	CU_ASSERT_EQUAL(p->num_reg_fns, 2);
+
+
+	// it should free the elements as well
+
+	g_array_free(pFcArr, TRUE);
+
+}
+
+void test_g_fcia_elem(void){
+/*	GArray * pFcArr = g_array_new(FALSE, FALSE, sizeof(fatcubin_info_t));
+	void ** pV1 = (void **) 0x1;
+	void ** pV2 = (void **) 0x2;
+	void ** pV3 = (void **) 0x3;
+	fatcubin_info_t * p = NULL;
+
+	CU_ASSERT_PTR_NOT_NULL(pFcArr);
+
+	// feed our array
+	fatcubin_info_t * pFatCInfo1 = malloc(sizeof(fatcubin_info_t));
+	CU_ASSERT_PTR_NOT_NULL(pFatCInfo1);
+	pFatCInfo1->fatCubinHandle = pV1;
+	pFatCInfo1->num_reg_fns = 3;
+	g_array_append_val(pFcArr, *pFatCInfo1);
+
+	CU_ASSERT_EQUAL(pFcArr->len, 1);
+
+	fatcubin_info_t * pFatCInfo2 = malloc(sizeof(fatcubin_info_t));
+	CU_ASSERT_PTR_NOT_NULL(pFatCInfo2);
+	pFatCInfo2->fatCubinHandle = pV2;
+	pFatCInfo2->num_reg_fns = 2;
+	g_array_append_val(pFcArr, *pFatCInfo2);
+	CU_ASSERT_EQUAL(pFcArr->len, 2);
+
+
+	// 0. check what happens with NULL array
+	p = g_fcia_elem(NULL, pV3);
+	CU_ASSERT_PTR_NULL(p);
+
+	// 1. now not null array and not existing fatcubin
+	p = NULL;
+	p = g_fcia_elem(pFcArr, pV3);
+	CU_ASSERT_PTR_NULL(p);
+
+	// 2. now not null array and NULL pointer to find (not existing)
+	p = g_fcia_elem(pFcArr, NULL);
+	CU_ASSERT_PTR_NULL(p);
+
+	// 3. now try to find the existing value
+	p = g_fcia_elem(pFcArr, pV1);
+	CU_ASSERT_PTR_NOT_NULL(p);
+	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV1);
+	CU_ASSERT_EQUAL(p->num_reg_fns, 3);
+
+	// 4. another existing
+	p = g_fcia_elem(pFcArr, pV2);
+	CU_ASSERT_PTR_NOT_NULL(p);
+	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV2);
+	CU_ASSERT_EQUAL(p->num_reg_fns, 2);
+
+	free(pFatCInfo1);
+	free(pFatCInfo2);
+	// it should free the elements as well
+	g_array_free(pFcArr, TRUE); */
+}
+
 
 /* The main() function for setting up and running the tests.
  * Returns a CUE_SUCCESS on successful running, another
@@ -1417,7 +1591,8 @@ int main()
 	   return CU_get_error();
    }
    /* add the tests to the suite */
-   if ((NULL == CU_add_test(pSuiteRegVar, "test of test_l_getSize_regVar", test_l_getSize_regVar)) ||
+   if (
+	   (NULL == CU_add_test(pSuiteRegVar, "test of test_l_getSize_regVar", test_l_getSize_regVar)) ||
 	   (NULL == CU_add_test(pSuiteRegVar, "test of test_l_packUnpackRegVar", test_l_packUnpackRegVar))
    ){
       CU_cleanup_registry();
@@ -1432,7 +1607,9 @@ int main()
    }
 
    if ((NULL == CU_add_test(pSuiteMisc, "test_methodIdToString", test_methodIdToString)) ||
-	   (NULL == CU_add_test(pSuiteMisc, "test_freeBuffer", test_freeBuffer))
+	   (NULL == CU_add_test(pSuiteMisc, "test_freeBuffer", test_freeBuffer)) ||
+	   (NULL == CU_add_test(pSuiteMisc, "test_g_fcia_idx", test_g_fcia_idx)) ||
+	   (NULL == CU_add_test(pSuiteMisc, "test_g_fcia_elem", test_g_fcia_elem))
       )
    {
 	   CU_cleanup_registry();

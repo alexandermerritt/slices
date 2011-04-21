@@ -16,17 +16,18 @@ import os
 
 INIPARSER = '/home/magg/src/iniparser/'
 
-envBackend = Environment(LIBS    = ['pthread', 'rt', 'dl', 'cudart', 'iniparser' ],
+envBackend = Environment(LIBS    = ['pthread', 'rt', 'dl', 'cudart', 'iniparser', 'glib-2.0' ],
 				  LIBPATH = ['/opt/cuda/lib64',
-				             INIPARSER
-				             ],
+				             INIPARSER ],
 				  CPPPATH = ['.',
 				  			 '../remote',
-				  			 '../include',  
+				  			 '../include',   
 				  			 '../interposer', 
 				  			 '../backend',
 				  			 '/opt/cuda/include',
-				  			 INIPARSER + 'src'],
+				  			 INIPARSER + 'src',
+				  			 '/usr/include/glib-2.0',
+					  		 '/usr/lib64/glib-2.0/include'],
                   CCFLAGS = '-g -Wall -Wextra')
 			 
 envBackend.Program('backend', [
