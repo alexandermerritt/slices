@@ -1456,7 +1456,7 @@ void test_g_fcia_idx(void){
 }
 
 void test_g_fcia_elem(void){
-/*	GArray * pFcArr = g_array_new(FALSE, FALSE, sizeof(fatcubin_info_t));
+	GArray * pFcArr = g_array_new(FALSE, FALSE, sizeof(fatcubin_info_t));
 	void ** pV1 = (void **) 0x1;
 	void ** pV2 = (void **) 0x2;
 	void ** pV3 = (void **) 0x3;
@@ -1509,7 +1509,7 @@ void test_g_fcia_elem(void){
 	free(pFatCInfo1);
 	free(pFatCInfo2);
 	// it should free the elements as well
-	g_array_free(pFcArr, TRUE); */
+	g_array_free(pFcArr, TRUE);
 }
 
 

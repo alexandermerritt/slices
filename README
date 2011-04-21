@@ -154,4 +154,8 @@ side. Just the client, i.e., the interposer library (libci.c).
        /home/magg/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/BlackScholes
        
  
- 
+ 4. running tests
+ # you mind need to setup the cunit lib:
+ # export LD_LIBRARY_PATH=/opt/cunit212/lib/:$LD_LIBRARY_PATH
+ [magg@prost interposer]$ 
+   valgrind --leak-check=yes --track-origins=yes ./testLibciutils

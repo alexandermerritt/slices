@@ -69,5 +69,5 @@ envTest.Program('testLibci', ['testLibci.c',
 							])
 							
 envTest.Program('testLibciutils', ['testLibciutils.c', 
-							  'libci.so' 
+							'libci.so' 
 							])
