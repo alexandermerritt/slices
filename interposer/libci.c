@@ -83,6 +83,7 @@ static GHashTable * regHostVarsTab = NULL;
 
 static int LOCAL_EXEC=1;  // by default local
 
+
 /**
  * @brief Handles errors caused by dlsym()
  * @return true no error - everything ok, otherwise the false
@@ -187,10 +188,10 @@ cudaError_t rcudaThreadExit(void) {
 
 	// send the packet
 	if (nvbackCudaThreadExit_rpc(pPacket) == OK) {
-		printd(DBG_INFO, "%s: __OK__ (asynchronous)\n", __FUNCTION__);
+		p_info("__OK__ (asynchronous)\n");
 		cuda_err = pPacket->ret_ex_val.err;
 	} else {
-		printd(DBG_ERROR, "%s: __ERROR__ Return from asynchronous rpc with the wrong return value.\n", __FUNCTION__);
+		p_warn("__ERROR__ Return from asynchronous rpc with the wrong return value.\n");
 		cuda_err = cudaErrorUnknown;
 	}
 
@@ -230,10 +231,10 @@ cudaError_t rcudaThreadSynchronize(void){
 
 	// send the packet
 	if(nvbackCudaThreadSynchronize_rpc(pPacket) == OK ){
-		printd(DBG_INFO, "%s: __OK__ ; return from RPC \n", __FUNCTION__);
+		p_info( "__OK__ ; return from RPC \n");
 		cuda_err = pPacket->ret_ex_val.err;
 	} else {
-		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		p_warn("__ERROR__ Return from rpc with the wrong return value.\n");
 		cuda_err = cudaErrorUnknown;
 	}
 
@@ -395,13 +396,13 @@ cudaError_t rcudaGetDeviceCount(int *count) {
 
 	// send the packet
 	if (nvbackCudaGetDeviceCount_rpc(pPacket) == OK) {
-		printd(DBG_INFO, "%s: __OK__ the number of devices is %ld. Got from the RPC call\n", __FUNCTION__,
+		p_info(" __OK__ the number of devices is %ld. Got from the RPC call\n",
 				pPacket->args[0].argi);
 		// remember the count number what we get from the remote device
 		*count = pPacket->args[0].argi;
 		cuda_err = pPacket->ret_ex_val.err;
 	} else {
-		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		p_warn( "__ERROR__ Return from rpc with the wrong return value.\n");
 		cuda_err = cudaErrorUnknown;
 	}
 
@@ -456,7 +457,7 @@ cudaError_t rcudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 		l_printCudaDeviceProp(prop);
 		cuda_err = pPacket->ret_ex_val.err;
 	} else {
-		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		p_warn( "__ERROR__ Return from rpc with the wrong return value.\n");
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	}
@@ -901,7 +902,7 @@ cudaError_t rcudaSetupArgument(const void *arg, size_t size, size_t offset) {
 	if (nvbackCudaSetupArgument_rpc(pPacket) == OK) {
 		cuda_err = cudaSuccess;
 	} else {
-		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		p_warn( "__ERROR__ Return from rpc with the wrong return value.\n");
 		cuda_err = cudaErrorUnknown;
 	}
 
@@ -967,7 +968,7 @@ cudaError_t rcudaLaunch(const char *entry) {
 	if (nvbackCudaLaunch_rpc(pPacket) == OK) {
 		cuda_err = cudaSuccess;
 	} else {
-		printd(DBG_ERROR, "%s.%d: __ERROR__: Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		p_warn("__ERROR__: Return from rpc with the wrong return value.\n");
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	}

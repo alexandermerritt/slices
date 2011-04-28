@@ -993,7 +993,7 @@ int __nvback_cudaUnregisterFatBinary_srv(cuda_packet_t *packet, conn_t * pConn) 
 	int pFCIdx;
 
 	printFatCIArray(fatCInfoArr);
-	g_debug( "The FAT cubing handle we've got: %p\n", pFCHandle);
+	p_debug( "The FAT cubin handle we've got: %p\n", pFCHandle);
 
 	// find the handle in our table and an index
 	pFCI = g_fcia_elidx(fatCInfoArr, pFCHandle, &pFCIdx);
