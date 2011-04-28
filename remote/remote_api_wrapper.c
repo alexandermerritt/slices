@@ -89,8 +89,7 @@ inline char * l_getRemoteHost(void) {
 
 	d = iniparser_load(KIDRON_INI);
 	if (NULL == d) {
-		printd(DBG_ERROR, "Can't parse the config file. Quitting ... ");
-		exit(ERROR);
+		p_error( "Can't parse the config file. Quitting ... ");
 	}
 	s = iniparser_getstring(d, "network:remote", NULL);
 
@@ -99,7 +98,7 @@ inline char * l_getRemoteHost(void) {
 	strcpy(REMOTE_HOSTNAME, s);
 	iniparser_freedict(d);
 
-	printd(DBG_INFO, "%s\n", REMOTE_HOSTNAME);
+	p_debug( "%s\n", REMOTE_HOSTNAME);
 	return REMOTE_HOSTNAME;
 }
 
@@ -291,7 +290,7 @@ int nvbackCudaGetDevice_rpc(cuda_packet_t * pPacket) {
 }
 
 int nvbackCudaSetDevice_rpc(cuda_packet_t *packet) {
-	g_debug( "CUDA_ERROR=%d before RPC on method %d\n",
+	p_debug( "CUDA_ERROR=%d before RPC on method %d\n",
 			packet->ret_ex_val.err, packet->method_id);
 
 	l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
@@ -303,7 +302,7 @@ int nvbackCudaSetDevice_rpc(cuda_packet_t *packet) {
 
 int nvbackCudaFree_rpc(cuda_packet_t *packet) {
 
-	g_debug( "CUDA_ERROR=%d before RPC on method %d\n",
+	p_debug( "CUDA_ERROR=%d before RPC on method %d\n",
 			packet->ret_ex_val.err, packet->method_id);
 
 	l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
@@ -313,14 +312,14 @@ int nvbackCudaFree_rpc(cuda_packet_t *packet) {
 
 int nvbackCudaMalloc_rpc(cuda_packet_t *packet) {
 
-	g_debug( "CUDA_ERROR=%d before RPC on method %d\n",
+	p_debug( "CUDA_ERROR=%d before RPC on method %d\n",
 			packet->ret_ex_val.err, packet->method_id);
 	// clear the packet, we are also sending the size of
 	// the memory to allocate
 	//packet->args[0].argp = NULL;
 	l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
 
-	g_debug("%s: devPtr is %p",__FUNCTION__, packet->args[0].argp);
+	p_debug("%s: devPtr is %p",__FUNCTION__, packet->args[0].argp);
 
 	return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
@@ -347,7 +346,7 @@ int nvbackCudaConfigureCall_rpc(cuda_packet_t *packet) {
 
 int nvbackCudaLaunch_rpc(cuda_packet_t * packet) {
 
-	printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+	p_debug( "CUDA_ERROR=%d before RPC on method %d\n",
 			packet->ret_ex_val.err, packet->method_id);
 
 	l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
@@ -397,7 +396,7 @@ int nvbackCudaMemcpy_rpc(cuda_packet_t *packet) {
 }
 
 int nvbackCudaThreadSynchronize_rpc(cuda_packet_t *packet) {
-	printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+	p_debug( "CUDA_ERROR=%d before RPC on method %d\n",
 			packet->ret_ex_val.err, packet->method_id);
 
 	l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
@@ -406,7 +405,7 @@ int nvbackCudaThreadSynchronize_rpc(cuda_packet_t *packet) {
 }
 
 int nvbackCudaThreadExit_rpc(cuda_packet_t * packet) {
-	printd(DBG_DEBUG, "CUDA_ERROR=%d before RPC on method %d\n",
+	p_debug( "CUDA_ERROR=%d before RPC on method %d\n",
 			packet->ret_ex_val.err, packet->method_id);
 
 	l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
@@ -1008,7 +1007,7 @@ int __nvback_cudaUnregisterFatBinary_srv(cuda_packet_t *packet, conn_t * pConn) 
 	g_array_remove_index_fast(fatCInfoArr, pFCIdx);
 
 	packet->ret_ex_val.err = cudaSuccess;
-	g_debug("CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
+	p_debug("CUDA_ERROR=%u for method id=%d\n", packet->ret_ex_val.err, packet->method_id);
 
 	return OK;
 }
