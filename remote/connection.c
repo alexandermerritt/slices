@@ -38,13 +38,12 @@ int conn_sendCudaPktHdr(conn_t * pConn, const uint32_t num_cuda_pkts, const int
 	// send request header (including data size) for the batch of remote packets
 	// 1 is the normal put exit
 	if (1 != put(pConn, pHdr, sizeof(strm_hdr_t))) {
-		printd(DBG_DEBUG, "%s: __ERROR__ Problems with sending the request header.\n",
-				__FUNCTION__);
+		p_debug( "Problems with sending the request header.\n");
 		return ERROR;
 	}
 
-	printd(DBG_DEBUG, "%s: Header sent: pkt_num %d, extra buffer size: %d.\n",
-			__FUNCTION__, pHdr->num_cuda_pkts, pHdr->data_size);
+	p_debug("Header sent: pkt_num %d, extra buffer size: %d.\n",
+			pHdr->num_cuda_pkts, pHdr->data_size);
 
 	return OK;
 }

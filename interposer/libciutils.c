@@ -87,8 +87,8 @@ int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo){
 
 	// we assume that the pFatCInfo is not a null pointer
 	assert(NULL != pFatCInfo);
-//	for (i = 0; i < pFatCInfo->num_reg_vars; ++i)
-//		freeRegVar(pFatCInfo->variables[i]);
+	for (i = 0; i < pFatCInfo->num_reg_vars; ++i)
+		freeRegVar(pFatCInfo->variables[i]);
 	/*	for (i = 0; i < dfi->num_reg_texs; ++i)
 					freeRegTex(dfi->textures[i]); */
 	for (i = 0; i < pFatCInfo->num_reg_fns; ++i)
@@ -111,6 +111,24 @@ int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo){
 	return OK;
 }
 
+/**
+ * removes the handler and associated array of pointers from the table
+ * @param regHostVarsTab The pointer to the table of host vars
+ * @param fatCubinHandle The handler to be removed
+ * @return OK
+ */
+int g_vars_remove(GHashTable * regHostVarsTab, void** fatCubinHandle){
+	// @todo do it nicer
+	if( nullDebugChkpt(regHostVarsTab, __FUNCTION__, "regHostVarsTab") == TRUE
+		|| nullDebugChkpt(fatCubinHandle, __FUNCTION__, "fatCubinHandle") == TRUE)
+		return OK;
+
+	GPtrArray * varArr = g_hash_table_lookup(regHostVarsTab, fatCubinHandle);
+	g_ptr_array_free(varArr, FALSE);
+	g_hash_table_remove(regHostVarsTab, fatCubinHandle);
+
+	return OK;
+}
 /**
  * returns the size of the packet for the string
  * |string_length|string|
@@ -584,7 +602,7 @@ void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize){
 	printd(DBG_DEBUG, "\t REG FUN ARGS:\n");
 	printd(DBG_DEBUG, "fatCubinHandle: %p\n", fatCubinHandle);
-	printd(DBG_DEBUG, "hostFun: %s\n", hostFun);
+	printd(DBG_DEBUG, "hostFun: %p\n", hostFun);
 	printd(DBG_DEBUG, "deviceFun: %s\n", deviceFun);
 	printd(DBG_DEBUG, "deviceName: %s\n", deviceName);
 	printd(DBG_DEBUG, "thread_limit: %d\n", thread_limit);
@@ -607,15 +625,16 @@ void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
 void l_printRegVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global){
-	printd(DBG_DEBUG, "\t REG VAR:\n");
-	printd(DBG_DEBUG, "fatCubinHandle: %p\n", fatCubinHandle);
-	printd(DBG_DEBUG, "hostVar: %p, (%s)\n", hostVar, hostVar);
-	printd(DBG_DEBUG, "deviceAddress: %s\n", deviceAddress);
-	printd(DBG_DEBUG, "deviceName: %s\n", deviceName);
-	printd(DBG_DEBUG, "ext: %d\n", ext);
-	printd(DBG_DEBUG, "vsize: %d\n", vsize);
-	printd(DBG_DEBUG, "constant: %d\n", constant);
-	printd(DBG_DEBUG, "global: %d\n", global);
+	p_debug( "\t REG VAR:\n");
+	p_debug( "fatCubinHandle: %p\n", fatCubinHandle);
+	//p_debug( "hostVar: %p, (%s)\n", hostVar, hostVar);
+	p_debug( "hostVar: %p\n", hostVar);
+	p_debug( "deviceAddress: %s\n", deviceAddress);
+	p_debug( "deviceName: %s\n", deviceName);
+	p_debug( "ext: %d\n", ext);
+	p_debug( "vsize: %d\n", vsize);
+	p_debug( "constant: %d\n", constant);
+	p_debug( "global: %d\n", global);
 }
 
 /**
@@ -664,6 +683,31 @@ int printFatCIArray(GArray * fcia){
 	return OK;
 }
 
+/**
+ * prints the hash table of handlers and vars
+ */
+void  l_printGPtrArr(gpointer key, gpointer value, gpointer user_data){
+
+	GPtrArray* varArr = (GPtrArray*) value;
+	guint i;
+
+	p_debug("FatCubinHandler=%p: [\n", key);
+
+//	g_ptr_array_foreach(varArr, (GFunc)printf, NULL);
+	for(i = 0; i < varArr->len; i++){
+		p_debug("%p\n", g_ptr_array_index(varArr, i));
+	}
+	p_debug("]\n");
+}
+
+int printRegVarTab(GHashTable * tab){
+
+
+	if( tab != NULL )
+		g_hash_table_foreach(tab,l_printGPtrArr, NULL );
+
+	return OK;
+}
 
 /**
  * writes the string with the information about its
@@ -1651,13 +1695,15 @@ int l_getSize_regVar(void **fatCubinHandle, char *hostVar, char *deviceAddress,
 	int size = 0;
 
 	size = sizeof(fatCubinHandle);
-	size += l_getStringPktSize(hostVar);
+	// @todo so far I assume that hostVar is a pointer not a string as such
+	//size += l_getStringPktSize(hostVar);
 	// for storing the local pointer to hostVar; this pointer is
 	// translated and compared with a remote pointer when cudaLaunch is
 	// invoked; the translation is taken care on the server side - this
 	// is the explanation from l_getSize_regFuncArgs - I hope it holds here
-	// as well
-	size += sizeof(char*);
+	// as well; on the server side during registering variables we will
+	// provide a remoteHost
+	size += sizeof(hostVar);
 	size += l_getStringPktSize(deviceAddress);
 	size += l_getStringPktSize(deviceName);
 	size += sizeof(ext);
@@ -1936,56 +1982,44 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
 
 	// remember the beginning of the packet
 	pPackStart = pPack;
-	printf("Start:  pPack = %p, offset = %d\n", pPack, offset);
 
 	void *** p = (void ***) pPack;
 	p[0] = fatCubinHandle;
 	pPack += sizeof(void*);
-	printf("Handle:  pPack = %p, offset = %d\n",  pPack, offset);
 
 
 	offset = l_packStr(pPack, hostFun);
 	if( ERROR == offset ) return NULL; else pPack += offset;
-	printf("hostFun: pPack = %p, offset = %d\n",  pPack, offset);
 
 	// pack the value of the pointer
 	const char ** c = (const char**) pPack;
 	c[0] = hostFun;
 	pPack += sizeof(char*);
-	printf("hostFEaddr: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packStr(pPack, deviceFun);
 	if( ERROR == offset ) return NULL; else pPack += offset;
-	printf("deviceFun: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packStr(pPack, deviceName);
 	if( ERROR == offset ) return NULL; else pPack += offset;
-	printf("deviceName: pPack = %p, offset = %d\n",  pPack, offset);
 
 	int * pInt = (int*) pPack;
 	pInt[0] = thread_limit;
 	pPack += sizeof(int);
-	printf("thread_limit: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packUint3Ptr(pPack, tid);
 	if( ERROR == offset ) return NULL; else pPack += offset;
-	printf("tid: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packUint3Ptr(pPack, bid);
 	if( ERROR == offset ) return NULL; else pPack += offset;
-	printf("bid: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packDim3Ptr(pPack, bDim);
 	if( ERROR == offset ) return NULL; else pPack += offset;
-	printf("bDim: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packDim3Ptr(pPack, gDim);
 	if( ERROR == offset ) return NULL; else pPack += offset;
-	printf("gDim: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packIntPtr(pPack, wSize);
 	if( ERROR == offset ) return NULL; else pPack += offset;
-	printf("wSize: pPack = %p, offset = %d\n",  pPack, offset);
 
 	return pPackStart;
 }
@@ -2014,45 +2048,35 @@ int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
 	// to differentiate the NULL and the ERROR in the offset
 	pRegFuncArgs->hostFun  = l_unpackStr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
-	printf("hostFun: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	char** c = (char **) pPacket;
 	pRegFuncArgs->hostFEaddr = c[0];
 	pPacket += sizeof(char*);
-	printf("hostFEaddr: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->deviceFun = l_unpackStr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
-	printf("deviceFun: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->deviceName = l_unpackStr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
-	printf("deviceName: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	int * pI = (int *) pPacket;
 	pRegFuncArgs->thread_limit = pI[0];
 	pPacket += sizeof(int);
-	printf("thread_limit: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->tid = l_unpackUint3Ptr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
-	printf("tid: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->bid = l_unpackUint3Ptr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
-	printf("bid: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->bDim = l_unpackDim3Ptr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
-	printf("bDim: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->gDim = l_unpackDim3Ptr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
-	printf("gDim: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegFuncArgs->wSize = l_unpackIntPtr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
-	printf("wSize: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	return OK;
 }
@@ -2069,6 +2093,7 @@ char * packRegVar( void **fatCubinHandle, char *hostVar,
 			deviceName, ext, vsize, constant, global);
 
 	pPack = malloc(*pSize);
+
 	if (mallocCheck(pPack, __FUNCTION__, NULL) == ERROR)
 		return NULL;
 
@@ -2078,43 +2103,37 @@ char * packRegVar( void **fatCubinHandle, char *hostVar,
 	void *** p = (void ***) pPack;
 	p[0] = fatCubinHandle;
 	pPack += sizeof(void*);
-	printf("Handle:  pPack = %p, offset = %d\n",  pPack, offset);
 
-	offset = l_packStr(pPack, hostVar);
-	if( ERROR == offset ) return NULL; else pPack += offset;
-	printf("hostVar: pPack = %p, offset = %d\n",  pPack, offset);
+	// @todo experiments show that this is a pointer, not a string so
+	// I will follow it
+//	offset = l_packStr(pPack, hostVar);
+//	if( ERROR == offset ) return NULL; else pPack += offset;
 
 	// pack the value of the pointer
 	const char ** c = (const char**) pPack;
 	c[0] = hostVar;
 	pPack += sizeof(char*);
-	printf("hostFEaddr: pPack = %p, offset = %d\n",  pPack, offset);
 
-
+	// This variable actually is just the address of deviceName variable. But
+	// the adjustment is done in Dom0
 	offset = l_packStr(pPack, deviceAddress);
 	if( ERROR == offset ) return NULL; else pPack += offset;
-	printf("deviceName: pPack = %p, offset = %d\n",  pPack, offset);
 
 	offset = l_packStr(pPack, deviceName);
 	if( ERROR == offset ) return NULL; else pPack += offset;
-	printf("deviceName: pPack = %p, offset = %d\n",  pPack, offset);
 
 	int * pInt = (int*) pPack;
 	pInt[0] = ext;
 	pPack += sizeof(int);
-	printf("ext: pPack = %p, offset = %d\n",  pPack, offset);
 
 	pInt[1] = vsize;
 	pPack += sizeof(int);
-	printf("vsize: pPack = %p, offset = %d\n",  pPack, offset);
 
 	pInt[2] = constant;
 	pPack += sizeof(int);
-	printf("constant: pPack = %p, offset = %d\n",  pPack, offset);
 
 	pInt[3] = global;
 	pPack += sizeof(int);
-	printf("global: pPack = %p, offset = %d\n",  pPack, offset);
 
 	return pPackStart;
 }
@@ -2123,40 +2142,52 @@ int unpackRegVar(reg_var_args_t * pRegVar, char *pPacket){
 	int offset = 0;
 
 	void *** v = (void***) pPacket;
-	printf("Start: pPacket = %p, offset = %d\n",  pPacket, offset);
 	pRegVar->fatCubinHandle = v[0];
 	pPacket += sizeof(void*);
-	printf("Handle: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	// @todo it should be done better with NULL and with communicating
 	// an error - right now it doesn't have an effect
 	// you should change the implementation of l_packStr/l_unpackStr
 	// to differentiate the NULL and the ERROR in the offset
-	pRegVar->hostVar  = l_unpackStr(pPacket, &offset);
-	if( ERROR == offset ) return ERROR; else pPacket += offset;
-	printf("hostVar: pPacket = %p, offset = %d\n",  pPacket, offset);
+	// actually this part is tricky; since from experiments it looks
+	// that hostVar is only a pointer to some place in host memory
+	// so this function will return a NULL, as no string has been sent
+	// Since in this packet I also send the value of the pointer so
+	// I need to check if this unpacked is a pointer or a string
+	// if this is a Null value then it is pointer that has been sent
+	// via following bytes
+	//pRegVar->hostVar  = l_unpackStr(pPacket, &offset);
+	//if( ERROR == offset ) return ERROR; else pPacket += offset;
 
+
+	// @todo I assume that hostVar holds a pointer
 	char** c = (char **) pPacket;
-	pRegVar->dom0HostAddr = c[0];
+	pRegVar->hostVar = c[0];
 	pPacket += sizeof(char*);
-	printf("dom0HostAddr: pPacket = %p, offset = %d\n",  pPacket, offset);
+
+	// this will keep a real host address on this (remote side)
+	// this should be set by the __cudaRegisterVar()
+	// it looks that hostVar will be a char (following GViM implementation)
+	// copyRegVarArgs from local_api_wrapper.c
+	// for some reason this can't be null, (the registerVar executed
+	// remotely should set this
+	// value somehow, but is doesn't set it up when initially it is set to NULL
+	// it looks as this values is not changed by the registerVar
+	// so I do not know, anyway following the original implementation.
+	pRegVar->dom0HostAddr = (char *) malloc(sizeof(char));
+
 
 	pRegVar->deviceAddress = l_unpackStr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
-	printf("deviceAddress: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	pRegVar->deviceName = l_unpackStr(pPacket, &offset);
 	if( ERROR == offset ) return ERROR; else pPacket += offset;
-	printf("deviceName: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	int * pI = (int *) pPacket;
 	pRegVar->ext = pI[0];
 	pRegVar->size = pI[1];
 	pRegVar->constant = pI[2];
 	pRegVar->global = pI[3];
-
-	printf("ext, size, constant, global: %d, %d, %d, %d\n",
-			pRegVar->ext, pRegVar->size, pRegVar->constant, pRegVar->global);
 
 	return OK;
 }
@@ -2197,10 +2228,9 @@ int freeRegVar(reg_var_args_t *args){
 	if (args == NULL)
 		return OK;
 
-	if (args->deviceAddress != NULL)
-		free(args->deviceAddress);
-	if (args->dom0HostAddr != NULL)
-		free(args->dom0HostAddr);
+	free(args->deviceName);
+	free(args->deviceAddress);
+	free(args->dom0HostAddr);
 	free(args);
 
 	return OK;
@@ -2309,7 +2339,7 @@ int freeFatBinary(__cudaFatCudaBinary *fatCubin){
 }
 
 // ---------------------------
-//
+// misc
 // ---------------------------
 /**
  * Translates method id to string
@@ -2345,7 +2375,7 @@ char * methodIdToString(const int method_id){
 	case CUDA_UNBIND_TEXTURE: fname = "cudaUnbindTexture"; break;
 	case CUDA_BIND_TEXTURE_TO_ARRAY: fname = "cudaBindTextureToArray"; break;
 	case CUDA_FREE_HOST: fname = "cudaFreeHost"; break;
-	case CUDA_MEMCPY_TO_SYMBOL: fname = "cudaMemcpyToSymbpl"; break;
+	case CUDA_MEMCPY_TO_SYMBOL: fname = "cudaMemcpyToSymbol"; break;
 	case CUDA_MEMCPY_FROM_SYMBOL: fname = "cudaMemcpyFromSymbol"; break;
 	case CUDA_MALLOC_ARRAY: fname = "cudaMallocArray"; break;
 	case CUDA_FREE_ARRAY: fname = "cudaFreeArray"; break;
@@ -2366,6 +2396,51 @@ char * methodIdToString(const int method_id){
 	return fname;
 }
 
+/**
+ * check if the pointer is null and if yes then exit
+ *
+ * @param p pointer to be checked
+ * @param message the message that needs to be displayed when error occurs
+ */
+inline void nullExitChkpt(void *p, char * message){
+	if(NULL == p)
+		g_error(message);
+}
+
+/**
+ * check if the pointer is null and if yes then exit
+ *
+ * @param p pointer to be checked
+ * @param func The name of the function checking the pointer
+ * @param message the message that needs to be displayed when error occurs
+ * @return TRUE print the message and indicate that the pointer
+ *              is null
+ *         FALSE the pointer is not null and the message is
+ *               not displayed
+ */
+inline gboolean nullDebugChkpt(const void * p, const char * func, char * message){
+	if( NULL == p ){
+		g_debug("%s: The pointer is NULL. %s ", func, message);
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/**
+ * checks if the pointer is null and if yes then exits
+ * Displays memory info
+ *
+ * @param p pointer to be checked
+ * @param message the message the needs to be displayed when error occurs
+ */
+inline void nullExitChkptMalloc(void *p, char * message){
+	if(NULL == p){
+		if( NULL == message)
+			g_error("Problems with memory allocation.\n");
+		else
+			g_error("Problems with memory allocation. %s\n", message);
+	}
+}
 // ---------------------------------------------
 // glib helper functions
 // ---------------------------------------------
@@ -2407,6 +2482,27 @@ inline int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle) {
 	return index;
 }
 
+
+/**
+ * returns the the pointer to the fatcubin_info_t corresponding to
+ * a fatCubinHandle and an index . If there is a few the same fatCubinHandles
+ * the first found is returned; invokes @see g_find_fatci
+ *
+ * @todo check for uniqueness of the fatCubinHandle
+ *
+ * @param fatCubinHandle against which handle do we compare entries in fatCubinInfoArr
+ * @param fatCubinInfoArr the pointer to the array
+ * @param pIndex (out) The return value of the index; -1 if not found
+ * @return pointer to  the entry holding the fatCubinHandle
+ *         NULL if no entry equal to fatCubinHandle can be found or fatCubinInfoArr
+ *         is lost
+ */
+inline fatcubin_info_t * g_fcia_elidx(GArray * fatCubinInfoArr, void ** fatCubinHandle, int * pIndex){
+	*pIndex = g_fcia_idx(fatCubinInfoArr, fatCubinHandle);
+
+	return (-1 == *pIndex ? NULL : &g_array_index(fatCubinInfoArr, fatcubin_info_t, *pIndex));
+}
+
 /**
  * returns the the pointer to the fatcubin_info_t corresponding to
  * a fatCubinHandle. If there is a few the same fatCubinHandles
@@ -2421,7 +2517,126 @@ inline int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle) {
  *         is lost
  */
 inline fatcubin_info_t * g_fcia_elem(GArray * fatCubinInfoArr, void ** fatCubinHandle){
-	int idx = g_fcia_idx(fatCubinInfoArr, fatCubinHandle);
 
-	return (-1 == idx ? NULL : &g_array_index(fatCubinInfoArr, fatcubin_info_t, idx));
+	int idx;
+
+	return g_fcia_elidx(fatCubinInfoArr, fatCubinHandle, &idx);
+}
+
+/**
+ * it looks for hostVar in the fatCubinInfoArr
+ *
+ * @param fatCubinInfoArr (in) The array we are searching through
+ * @param hostVar (in) The original value as originally issued on the client side
+ *                we assume this is a pointer - the client sends not the name
+ *                but the pointer
+ * @param pIndex (out) The index in fatcubin_info_t->variables where
+ *          you found this; if not found then it is set to -1
+ * @return pointer to the fatcubin_info_t containing the hostVar
+ *         NULL  if the hostVar has not been found
+ */
+fatcubin_info_t * g_fcia_host_var(GArray * fatCubinInfoArr, char * hostVar, int * pIndex) {
+	guint i;
+	int j;
+	fatcubin_info_t *fci = NULL;
+
+	*pIndex = -1;
+
+	if( fatCubinInfoArr == NULL )
+		return NULL;
+
+	for (i = 0; i < fatCubinInfoArr->len; i++) {
+		fatcubin_info_t * p = &g_array_index(fatCubinInfoArr, fatcubin_info_t, i);
+		assert( p != NULL );
+		// now iterate through chosen fatcubin registered structure
+		for (j = 0; j < p->num_reg_vars; j++) {
+			if (p->variables[j] != NULL && p->variables[j]->hostVar == hostVar) {
+				fci = p;
+				*pIndex = j;
+				break;
+			}
+		}
+	}
+
+	return fci;
+}
+
+// -------------------------------
+// dealing with regVarsHashTable
+// -------------------------------
+/**
+ * it inserts the hostVar to the regHostVarsTab; if the handler doesn't exist
+ * it will be created
+ * @param regHostVarsTab The table that will be updated
+ * @param fcHandle The key
+ * @param hostVar the variable that will be stored
+ *
+ * @return NULL it means that fcHandle is NULL
+ *         the value corresponding to fcHandle in regHostVarsTab where the hostVar
+ *         has been inserted
+ */
+inline GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle, char * hostVar){
+
+	// the array that holds or will hold the hostVar
+	GPtrArray *varArr = NULL;
+
+	if( NULL == fcHandle || NULL == hostVar){
+		g_debug("%s: FatCubinHandler or hostVar is NULL We do not insert NULL fatCubinHandler \n",
+				__FUNCTION__);
+		return NULL;
+	}
+
+	if( (varArr = g_hash_table_lookup(regHostVarsTab, fcHandle)) == NULL ){
+		// we need to initiate a new array for hostVariable before we insert the
+		// variable; and preallocate expected max registered vars
+		varArr = g_ptr_array_new() ;
+		g_hash_table_insert(regHostVarsTab, fcHandle, varArr);
+	}
+
+	g_ptr_array_add (varArr, (gpointer)hostVar);
+
+	return varArr;
+}
+
+
+/**
+ * predicate used by @see g_vars_find()
+ *
+ * @param key
+ * @param value
+ * @param user_data the hostVar we are looking for (char*)
+ *
+ * @return TRUE if the hostVar has been found
+ *         FALSE if the hostVar has not been found
+ */
+gboolean l_g_vars_find(gpointer key, gpointer value, gpointer user_data) {
+	guint i ;
+	GPtrArray * varArr = (GPtrArray*)value;
+
+	for( i = 0; i < varArr->len; i++){
+		if( g_ptr_array_index(varArr, i) == user_data)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/**
+ * checks if the regHostVarsTab contains specified hostVar pointer
+ *
+ * @param regHostVarsTab The table to be search of registered
+ *        host variables
+ * @param hostVar For what variable we are looking for
+ * @return TRUE if the hostVar has been found
+ *         FALSE if the the hostVar hasn't been found
+ */
+inline gboolean g_vars_find(GHashTable * regHostVarsTab, const char * hostVar){
+
+	if( nullDebugChkpt(regHostVarsTab,  __FUNCTION__, "regHostVarsTab" ) == TRUE)
+		return FALSE;
+
+	if( nullDebugChkpt( hostVar, __FUNCTION__, "hostVar") == TRUE)
+		return FALSE;
+
+	return (g_hash_table_find(regHostVarsTab, (GHRFunc)l_g_vars_find, (gpointer) hostVar) == NULL) ? FALSE: TRUE;
 }

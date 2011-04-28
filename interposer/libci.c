@@ -56,6 +56,8 @@
 #include "libciutils.h"
 #include <assert.h>
 
+#include <glib.h>		// for GHashTable
+
 
 //! to indicate the error with the dynamic loaded library
 static cudaError_t cudaErrorDL = cudaErrorUnknown;
@@ -66,11 +68,18 @@ static cudaError_t cuda_err = 0;
 #define MAX_REGISTERED_VARS 10
 // \todo Clean it up later. Just need to make sure MemcpySymbol does jazz
 // only when a variable has been registered
-char *reg_host_vars[MAX_REGISTERED_VARS];
-static int num_registered_vars = 0;
+//char *reg_host_vars[MAX_REGISTERED_VARS];
+//static int num_registered_vars = 0;
 
 //! stores information about the fatcubin_info on the client side
-static fatcubin_info_t fatcubin_info_rpc;
+//static fatcubin_info_t fatcubin_info_rpc;
+
+
+//! the dynamic hashtable for storing info about registered vars
+//! this array is stored on the client side
+static GHashTable * regHostVarsTab = NULL;
+
+
 
 static int LOCAL_EXEC=1;  // by default local
 
@@ -510,7 +519,9 @@ cudaError_t rcudaSetDevice(int device) {
 
 	// send the packet
 	if (nvbackCudaSetDevice_rpc(pPacket) == OK) {
-		cuda_err = pPacket->ret_ex_val.err;
+		//cuda_err = pPacket->ret_ex_val.err;
+		// let's assume this is an asynchronous call
+		cuda_err = cudaSuccess;
 	} else {
 		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
 		cuda_err = cudaErrorUnknown;
@@ -1558,30 +1569,42 @@ cudaError_t rcudaMemcpyToSymbol(const char *symbol, const void *src,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 				__dv(cudaMemcpyHostToDevice)) {
 	int i;
-	char found = 0;
+//	char found = 0;
 	cuda_packet_t *pPacket;
 
-	for (i = 0; i < num_registered_vars; ++i) {
-		if (reg_host_vars[i] == symbol) {
-			found = 1;
-			break;
-		}
+	// symbol might be a pointer or a name of variable (see CUDA API)
+	// can either be a variable that resides in global or constant memory space,
+	// or it can be a character string, naming a variable that resides in global
+	// or constant memory space
+	// we use a trick to find out if symbol is a pointer or
+	// a string; since all pointers are registered during
+	// the __cudaRegisterVar and we store those register
+	// pointers in regHostVarsTab; so if we assume that our
+	// symbol is a pointer is should be stored in regHostVarsTab;
+	// if it is not, then our assumption is wrong and symbol is a string
+	// a name of the variable
+
+	if (g_vars_find(regHostVarsTab, symbol) == FALSE) {
+		// @todo right now just exit
+		p_error("Discovered that symbol is a name. Not implemented. Exiting ...");
 	}
-	if (found == 0) {
-		// \todo assuming symbol to be a ptr for now and not a name!
-		void *addr = (void *)((unsigned long)symbol + offset);
-		// @todo check if this is the right
-		// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-		// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-		return rcudaMemcpy(addr, src, count, kind);
-	}
+
+
+	// \todo assuming symbol to be a ptr for now and not a name!
+//	void *addr = (void *)((unsigned long)symbol + offset);
+//   p_debug("Delegating a call to rcudaMemcpy!!!\n");
+
+//    return rcudaMemcpy(addr, src, count, kind);
+
+
+	// the below part is for the string names
 
 	// you need to setup a method id individually
 	if( l_remoteInitMetThrReq(&pPacket, CUDA_MEMCPY_TO_SYMBOL,__FUNCTION__) == ERROR){
 		return cuda_err;
 	}
 
-	pPacket->args[0].argcp = (char*)symbol;
+	pPacket->args[0].argcp = (char*)symbol;  // host to device
 	pPacket->args[1].argp = (void *)src;
 	pPacket->args[2].arr_argi[0] = count;
 	pPacket->args[2].arr_argi[1] = offset;
@@ -1590,11 +1613,10 @@ cudaError_t rcudaMemcpyToSymbol(const char *symbol, const void *src,
 
 	// send the packet
 	if(nvbackCudaMemcpyToSymbol_rpc(pPacket) == OK ){
-		printd(DBG_DEBUG, "%s: __OK__ Return from RPC.\n", __FUNCTION__);
+		p_debug( "__OK__: Return from RPC.\n");
 		cuda_err = pPacket->ret_ex_val.err;
 	} else {
-		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
-		// @todo some cleaning or setting cuda_err
+		p_warn("__ERROR__: Return from rpc with the wrong return value.\n");
 		cuda_err = cudaErrorUnknown;
 	}
 
@@ -1623,19 +1645,24 @@ cudaError_t lcudaMemcpyToSymbol(const char *symbol, const void *src,
 	return (pFunc(symbol, src, count, offset, kind));
 }
 
-
 cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 				__dv(cudaMemcpyHostToDevice)) {
 
-	printf("symbol = %p, src = %p, count = %ld, offset = %ld, kind = %u\n",
-			symbol, src, count, offset, kind);
+	p_debug("symbol = %p, src = %p, count = %ld, offset = %ld, kind = %u\n",
+			 symbol, src, count, offset, kind);
 
+	p_critical("symbol = %p\n", symbol);
 	if( 1 == LOCAL_EXEC )
 		return lcudaMemcpyToSymbol(symbol, src, count, offset, kind);
 	else
 		return rcudaMemcpyToSymbol(symbol, src, count, offset, kind);
 }
+
+// forward declaration
+cudaError_t cudaGetSymbolAddress(void **devPtr, const char *symbol);
+
+cudaError_t cudaGetSymbolSize(size_t *size, const char *symbol);
 
 // @todo new implementation; absent in pegasus
 cudaError_t rcudaMemcpyFromSymbol(void *dst, const char *symbol,
@@ -1645,26 +1672,29 @@ cudaError_t rcudaMemcpyFromSymbol(void *dst, const char *symbol,
 	char found = 0;
 	cuda_packet_t *pPacket;
 
+
 	// symbol might be a pointer or a name of variable (see CUDA API)
 	// can either be a variable that resides in global or constant memory space,
 	// or it can be a character string, naming a variable that resides in global
 	// or constant memory space
-	for (i = 0; i < num_registered_vars; ++i) {
-		if (reg_host_vars[i] == symbol) {
-			found = 1;
-			break;
-		}
+	// we use a trick to find out if symbol is a pointer or
+	// a string; since all pointers are registered during
+	// the __cudaRegisterVar and we store those register
+	// pointers in regHostVarsTab; so if we assume that our
+	// symbol is a pointer is should be stored in regHostVarsTab;
+	// if it is not, then our assumption is wrong and symbol is a string
+	// a name of the variable
+
+	if( g_vars_find(regHostVarsTab, symbol) == FALSE){
+		// @todo right now just exit
+		p_error("Discovered that symbol is a name. Not implemented. Exiting ...\n");
 	}
-	if (found == 0) {
-		// \todo assuming symbol to be a ptr for now and not a name!
-		void *addr = (void *)((unsigned long)symbol + offset);
-		// @todo check if this is the right
-		// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-		// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-		return rcudaMemcpy(dst, addr, count, kind);
-		// or return rcudaMemcpy(addr, dst, count, kind);
-		// maybe kind manages the correct direction
-	}
+
+//	void *addr = (void *)((unsigned long)symbol + offset);
+//	p_debug("Delegating a call to rcudaMemcpy!!!\n");
+
+//	return rcudaMemcpy(dst, addr, count, kind);
+
 
 	// you need to setup a method id individually
 	if( l_remoteInitMetThrReq(&pPacket, CUDA_MEMCPY_FROM_SYMBOL, __FUNCTION__) == ERROR){
@@ -1680,10 +1710,10 @@ cudaError_t rcudaMemcpyFromSymbol(void *dst, const char *symbol,
 
 	// send the packet
 	if(nvbackCudaMemcpyFromSymbol_rpc(pPacket) == OK ){
-		printd(DBG_DEBUG, "%s: __OK__ Return from RPC.\n", __FUNCTION__);
+		p_debug( " __OK__ Return from RPC.\n");
 		cuda_err = pPacket->ret_ex_val.err;
 	} else {
-		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
+		g_warning( "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	}
@@ -1691,7 +1721,6 @@ cudaError_t rcudaMemcpyFromSymbol(void *dst, const char *symbol,
 	free(pPacket);
 
 	return cuda_err;
-
 }
 
 cudaError_t lcudaMemcpyFromSymbol(void *dst, const char *symbol,
@@ -1701,6 +1730,8 @@ cudaError_t lcudaMemcpyFromSymbol(void *dst, const char *symbol,
 			size_t count, size_t offset, enum cudaMemcpyKind kind);
 	static pFuncType pFunc = NULL;
 
+	l_printFuncSig(__FUNCTION__);
+
 	if (!pFunc) {
 		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpyFromSymbol");
 
@@ -1708,7 +1739,6 @@ cudaError_t lcudaMemcpyFromSymbol(void *dst, const char *symbol,
 			return cudaErrorDL;
 	}
 
-	l_printFuncSig(__FUNCTION__);
 
 	return (pFunc(dst, symbol, count, offset, kind));
 }
@@ -1716,8 +1746,8 @@ cudaError_t lcudaMemcpyFromSymbol(void *dst, const char *symbol,
 cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 				__dv(cudaMemcpyDeviceToHost)) {
-	printf("dst = %p, src = %p (str %s), count = %ld, offset = %ld, kind = %d\n",
-				dst, symbol, symbol, count, offset, kind);
+	p_debug("%s: dst = %p, symbol = %p (str %s), count = %ld, offset = %ld, kind = %d\n",
+			__FUNCTION__, dst, symbol, symbol, count, offset, kind);
 
 	if( 1 == LOCAL_EXEC )
 		return lcudaMemcpyFromSymbol(dst, symbol, count, offset, kind);
@@ -2418,10 +2448,7 @@ void** r__cudaRegisterFatBinary(void* fatC){
 	// the place where the packed fat binary will be stored
 	char * pPackedFat = NULL;
 
-	if (fatC == NULL) {
-		printd(DBG_ERROR, "%s: __ERROR__, Null CUDA fat binary. Have to exit\n", __FUNCTION__);
-		exit(ERROR);
-	}
+	nullExitChkpt(fatC, "NULL CUDA fat binary. Have to exit\n.");
 
 	// allocate and initialize a packet
 	if( l_remoteInitMetThrReq(&pPacket, __CUDA_REGISTER_FAT_BINARY, __FUNCTION__) == ERROR){
@@ -2429,8 +2456,8 @@ void** r__cudaRegisterFatBinary(void* fatC){
 	}
 
 	fb_size = getFatRecPktSize(pSrcFatC, &entries_cached);
-	printd(DBG_DEBUG, "%s, FatCubin size: %d\n", __FUNCTION__,fb_size);
-	l_printFatBinary(pSrcFatC);
+	p_debug( "FatCubin size: %d\n",fb_size);
+	//l_printFatBinary(pSrcFatC);
 
 	pPackedFat = (char*) malloc(fb_size);
 
@@ -2447,11 +2474,11 @@ void** r__cudaRegisterFatBinary(void* fatC){
 	pPacket->args[0].argp = pPackedFat;			// start of the request buffer
 	pPacket->args[1].argi = fb_size;			// the size of the request buffer
 
-	printd(DBG_DEBUG, "pPackedFat, pPacket->args[0].argp = %p, %ld\n",
+	p_debug( "pPackedFat, pPacket->args[0].argp = %p, %ld\n",
 			pPacket->args[0].argp, pPacket->args[1].argi);
 	// send the packet
 	if (__nvback_cudaRegisterFatBinary_rpc(pPacket) != OK) {
-		printd(DBG_ERROR, "__ERROR__: Return from rpc with the wrong return value.\n");
+		p_critical("Return from rpc with the wrong return value.\n");
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
@@ -2467,7 +2494,7 @@ void** r__cudaRegisterFatBinary(void* fatC){
 		// you need a handler
 	//	assert(fatC == fatcubin_info_rpc.fatCubin);
 
-		printd(DBG_INFO, "Returned fatCubinHandle = %p\n", pPacket->ret_ex_val.handle);
+		p_debug( "Returned fatCubinHandle = %p\n", pPacket->ret_ex_val.handle);
 	//	printd(DBG_INFO, "fatcubin_info_rpc.fatCubin = %p\n", fatcubin_info_rpc.fatCubin);
 	}
 
@@ -2497,7 +2524,7 @@ void** l__cudaRegisterFatBinary(void* fatC) {
 void** __cudaRegisterFatBinary(void* fatC) {
 
 	LOCAL_EXEC = l_getLocalFromConfig();
-	printd(DBG_DEBUG, "LOCAL_EXEC=%d (1-local, 0-remote)\n", LOCAL_EXEC);
+	p_debug( "LOCAL_EXEC=%d (1-local, 0-remote)\n", LOCAL_EXEC);
 
 	if( LOCAL_EXEC == 1 )
 		return l__cudaRegisterFatBinary(fatC);
@@ -2518,12 +2545,17 @@ void r__cudaUnregisterFatBinary(void** fatCubinHandle) {
 	pPacket->args[0].argdp = fatCubinHandle;
 
 	if (__nvback_cudaUnregisterFatBinary_rpc(pPacket) != OK) {
-		printd(DBG_ERROR, "%s.%d: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__, __LINE__);
+		p_warn("__ERROR__ Return from rpc with the wrong return value.\n");
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
-		// @todo do nothing (?)
-		printd(DBG_ERROR, "%s.%d: __OK__ Return from rpc with ok value.\n", __FUNCTION__, __LINE__);
+		p_debug("%s: __OK__ Return from rpc with ok value.\n", __FUNCTION__);
+		// remove the handler;
+		g_vars_remove(regHostVarsTab, fatCubinHandle);
+		// destroy the table if the last handler has been removed
+		if( regHostVarsTab != NULL && g_hash_table_size(regHostVarsTab)  == 0)
+			g_hash_table_destroy(regHostVarsTab);
+			regHostVarsTab = NULL;
 	}
 
 	free(pPacket);
@@ -2532,7 +2564,7 @@ void r__cudaUnregisterFatBinary(void** fatCubinHandle) {
 	//CUV_EXIT();
 
 	// local housekeeping for variables et al
-	num_registered_vars = 0;
+//	num_registered_vars = 0;
 }
 
 void l__cudaUnregisterFatBinary(void** fatCubinHandle) {
@@ -2578,8 +2610,7 @@ void r__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 			thread_limit, tid, bid, bDim, gDim, wSize, &size);
 
 	if (!p) {
-		printd(DBG_ERROR, "%s: __ERROR__ Problems with allocating the memory. Quitting ... \n", __FUNCTION__);
-		exit(ERROR);
+		g_error("%s: __ERROR__ Problems with allocating the memory. Quitting ... \n", __FUNCTION__);
 	}
 	// update packet; point to the buffer from which you will
 	// take data to send over the network
@@ -2595,7 +2626,7 @@ void r__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		// to fatcubin_info_rpc like the functions registered?
 		cuda_err = pPacket->ret_ex_val.err;
 	} else {
-		printd(DBG_ERROR, "%s: __ERROR__: Return from the RPC with an error\n", __FUNCTION__);
+		g_warning("%s: __ERROR__: Return from the RPC with an error\n", __FUNCTION__);
 		cuda_err = cudaErrorUnknown;
 	}
 
@@ -2620,7 +2651,6 @@ void l__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		if (l_handleDlError() != 0)
 			exit(-1);
 	}
-
 
 	(pFunc(fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit, tid,
 			bid, bDim, gDim, wSize));
@@ -2660,6 +2690,7 @@ void l__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 			constant, global));
 }
 
+
 void r__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global) {
@@ -2679,9 +2710,19 @@ void r__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 			vsize, constant, global, &size);
 
 	if (!p) {
-		printd(DBG_ERROR, "%s: __ERROR__ Problems with allocating the memory. Quitting ... \n", __FUNCTION__);
-		exit(ERROR);
+		g_error( "%s: __ERROR__ Problems with allocating the memory. Quitting ... \n", __FUNCTION__);
 	}
+
+	// do the trick with remembering variables to know if in cudaMemcpyFrom/To
+	// Symbol is used a pointer or a variable
+	if( NULL == regHostVarsTab ){
+		// create a hash table since it doesn't exist
+		regHostVarsTab = g_hash_table_new(g_direct_hash, g_direct_equal);
+	}
+
+	// first check if the key exists
+	assert(fatCubinHandle != NULL); 		// we assume the fatCubinHandle is not NULL
+
 	// update packet; point to the buffer from which you will
 	// take data to send over the network
 	pPacket->flags |= CUDA_Copytype;
@@ -2694,12 +2735,16 @@ void r__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		// to fatcubin_info_rpc like the functions registered?
 		cuda_err = pPacket->ret_ex_val.err;
 	} else {
-		printd(DBG_ERROR, "%s: __ERROR__: Return from the RPC with an error\n", __FUNCTION__);
+		g_warning( "%s: __ERROR__: Return from the RPC with an error\n", __FUNCTION__);
 		cuda_err = cudaErrorUnknown;
 	}
 
-	reg_host_vars[num_registered_vars] = hostVar;
-	num_registered_vars++;
+	g_vars_insert(regHostVarsTab, fatCubinHandle, hostVar);
+
+	printRegVarTab(regHostVarsTab);
+
+//	reg_host_vars[num_registered_vars] = hostVar;
+//	num_registered_vars++;
 
 	free(pPacket);
 	return;

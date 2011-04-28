@@ -81,12 +81,11 @@ void * backend_thread(){
 		if (1 != get(pConn, hdr, sizeof(strm_hdr_t))) {
 			break;
 		}
-		printd(DBG_DEBUG, "%s: received request header. Expecting  %d packets. And extra request buffer of data size %d\n",
-						__FUNCTION__,  hdr->num_cuda_pkts, hdr->data_size);
+		p_debug(" received request header. Expecting  %d packets. And extra request buffer of data size %d\n",
+				hdr->num_cuda_pkts, hdr->data_size);
 
 		if (hdr->num_cuda_pkts <= 0) {
-			printd(DBG_WARNING,
-					"%s: Received header specifying zero packets, ignoring\n", __FUNCTION__);
+			p_warn("Received header specifying zero packets, ignoring\n");
 			continue;
 		}
 
@@ -99,19 +98,16 @@ void * backend_thread(){
 		if(1 != get(pConn, rpkts, hdr->num_cuda_pkts * sizeof(rpkt_t))) {
 			break;
 		}
-		printd(DBG_INFO, "%s: Received %d packets, each of size of (%lu) bytes\n",
-				__FUNCTION__, hdr->num_cuda_pkts, sizeof(rpkt_t));
+		p_info("Received %d packets, each of size of (%lu) bytes\n",
+				hdr->num_cuda_pkts, sizeof(rpkt_t));
 
-		printd(DBG_INFO, "%s: Received method %s (method_id %d) from Thr_id: %lu.\n",
-				__FUNCTION__, methodIdToString(rpkts[0].method_id),
-				rpkts[0].method_id, rpkts[0].thr_id);
-
+		p_info( "Received method %s (method_id %d) from Thr_id: %lu.\n",
+		 methodIdToString(rpkts[0].method_id), rpkts[0].method_id, rpkts[0].thr_id);
 
 		// receiving the request buffer if any
 		if(hdr->data_size > 0){
-
-			printd(DBG_INFO, "%s: Expecting data size/Buffer: %u, %d.\n", __FUNCTION__,
-											 hdr->data_size, pConn->request_data_size);
+			p_info("Expecting data size/Buffer: %u, %d.\n",
+					hdr->data_size, pConn->request_data_size);
 			// let's assume that the expected amount of data will fit into
 			// the buffer we have (size of pConn->request_data_buffer
 
@@ -127,8 +123,7 @@ void * backend_thread(){
 				break;
 			}
 			pConn->request_data_size = hdr->data_size;
-			printd(DBG_INFO, "%sReceived request buffer (%d bytes)\n",
-					__FUNCTION__,  pConn->request_data_size);
+			p_info( "Received request buffer (%d bytes)\n", pConn->request_data_size);
 		}
 
 		// execute the request
@@ -143,30 +138,27 @@ void * backend_thread(){
 		if( strm_expects_response(&pConn->strm) ){
 
 			// send the header about response
-			printd(DBG_DEBUG, "pConn->response_data_size %d\n", pConn->response_data_size);
+			p_debug( "pConn->response_data_size %d\n", pConn->response_data_size);
 			if (conn_sendCudaPktHdr(&*pConn, 1, pConn->response_data_size) == ERROR) {
-				printd(DBG_INFO, "%s: __ERROR__ after : Sending the CUDA packet response header: Quitting ... \n",
-						__FUNCTION__);
+				p_info( "__ERROR__ after : Sending the CUDA packet response header: Quitting ... \n");
 				break;
 			}
 
 			// send the response as a simple cuda packet
 			if (1 != put(pConn, rpkts, sizeof(rpkt_t))) {
-				printd(DBG_INFO, "%s: __ERROR__ after : Sending CUDA response packet: Quitting ... \n",
-						__FUNCTION__);
+				p_info("__ERROR__ after : Sending CUDA response packet: Quitting ... \n");
 				break;
 			}
-			printd(DBG_INFO, "%s: Response Packet sent.\n", __FUNCTION__);
+			p_info("Response packet sent.\n");
 
 			// send the data if you have anything to send
 			if( pConn->response_data_size > 0 ){
 				if (1 != put(pConn, pConn->pRspBuffer, pConn->response_data_size)) {
-					printd(DBG_INFO, "%s: __ERROR__ after : Sending accompanying response buffer: Quitting ... \n",
-							__FUNCTION__);
+					p_info("__ERROR__ after: Sending accompanying response buffer: Quitting ... \n"
+							);
 					break;
 				}
-				printd(DBG_INFO, "%s: Response buffer sent (%d) bytes.\n",
-						__FUNCTION__, pConn->response_data_size);
+				p_info( "Response buffer sent (%d) bytes.\n", pConn->response_data_size);
 			}
 		}
     }
@@ -178,7 +170,6 @@ void * backend_thread(){
 
 	free(pConnListen);
 	free(pConn);
-
 
 	return NULL;
 }

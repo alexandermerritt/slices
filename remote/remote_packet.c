@@ -62,6 +62,7 @@ int strm_expects_response(strm_t *strm)
         case CUDA_MEMCPY_TO_ARRAY_D2H:
         case CUDA_MEMCPY_TO_ARRAY_D2D:
         case CUDA_MEMCPY_TO_SYMBOL:
+        case CUDA_MEMCPY_FROM_SYMBOL:
         case CUDA_MEMCPY_2D_TO_ARRAY_H2H:
         case CUDA_MEMCPY_2D_TO_ARRAY_H2D:
         case CUDA_MEMCPY_2D_TO_ARRAY_D2H:
@@ -95,7 +96,7 @@ int strm_flush_needed( strm_t * strm )
 	r = UNKNOWN;
 
 	if (!strm) {
-		printd(DBG_ERROR, "NULL argument\n");
+		p_critical("NULL argument\n");
 		return -1;
 	}
 
@@ -189,8 +190,7 @@ int strm_flush_needed( strm_t * strm )
 
 rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 {
-    printd(DBG_DEBUG, "%s: \tcalling function %s, id=%d\n", __FUNCTION__,
-    		methodIdToString(rpkt->method_id),
+    p_debug("\tcalling function %s, id=%d\n", methodIdToString(rpkt->method_id),
     		rpkt->method_id);
 
     // FIXME Use the provided function table instead of this large switch statement.

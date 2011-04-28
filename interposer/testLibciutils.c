@@ -20,6 +20,7 @@
 #include "libciutils.h"	     // for cache_num_entries_t
 #include "method_id.h"		// for ids of the cuda calls
 
+
 extern inline int l_getStringPktSize(const char const * string);
 extern int l_getSize__cudaFatPtxEntry(const __cudaFatPtxEntry * pEntry, int * pCounter);
 extern int l_getSize__cudaFatCubinEntry(const __cudaFatCubinEntry * pEntry, int * pCounter);
@@ -1127,15 +1128,14 @@ void test_l_getSize_regVar(void){
 	int expected;
 	// what fields are expected
 	int core_expected = sizeof(void*) // pointer
-			+ 3* sizeof(size_pkt_field_t)	// three headers for strings (length field)
+			+ 2* sizeof(size_pkt_field_t)	// three headers for strings (length field)
 			+ sizeof(void*) // one for storing a pointer to the string
 			+ 4*sizeof(int); // ext, vsize, constant, global
 
 	// 1.
-	size = l_getSize_regVar((void**)0x14b1d490, "", "d_OptionData", "d_OptionData", 0,
+	size = l_getSize_regVar((void**)0x14b1d490, (char*)0x134, "d_OptionData", "d_OptionData", 0,
 			40960, 1, 0);
-	expected = strlen("")
-				+ strlen("d_OptionData")
+	expected = strlen("d_OptionData")
 				+ strlen("d_OptionData")
 				+ core_expected;
 	CU_ASSERT_EQUAL(size, expected);
@@ -1320,6 +1320,10 @@ void test_l_packUnpackRegFuncArgs(void){
    free(pack);
 }
 
+void test_freeRegVar(void){
+	//@todo to be implemented
+}
+
 void test_freeRegFunc(void){
 	//@todo to be implemented
 }
@@ -1331,7 +1335,7 @@ void test_freeFatBinary(void){
 void test_l_packUnpackRegVar(void){
 	reg_var_args_t a;
 	char * pack;
-	char * str1 = "hey";
+	char * str1 = (char*) 0x123;
 	char * str2 = "h";
 	const char * str3 = "a";
 
@@ -1339,9 +1343,9 @@ void test_l_packUnpackRegVar(void){
 	int all_size;
 	void ** v = (void**) &pack;
 
+	// 0. hostVar is a real string
 	pack = packRegVar(v,str1, str2, str3, 1, 2, 3, 4, &size );
 	all_size = sizeof(void*)
-				   + sizeof(size_pkt_field_t) + strlen(str1)
 				   + sizeof(void*)
 				   + sizeof(size_pkt_field_t) + strlen(str2)
 				   + sizeof(size_pkt_field_t) + strlen(str3)
@@ -1349,8 +1353,8 @@ void test_l_packUnpackRegVar(void){
 	CU_ASSERT_EQUAL(size, all_size);
 	CU_ASSERT_EQUAL(unpackRegVar(&a, pack), OK);
 	CU_ASSERT_PTR_EQUAL(a.fatCubinHandle, v);
-	CU_ASSERT_NSTRING_EQUAL(a.hostVar, str1, strlen(str1));
-	CU_ASSERT_PTR_EQUAL(a.dom0HostAddr, str1);
+	CU_ASSERT_PTR_EQUAL(a.hostVar, 0x123);
+	CU_ASSERT_PTR_NOT_NULL(a.dom0HostAddr);
 	CU_ASSERT_NSTRING_EQUAL(a.deviceAddress, str2, strlen(str2));
 	CU_ASSERT_NSTRING_EQUAL(a.deviceName, str3, strlen(str3));
 	CU_ASSERT_EQUAL(a.ext, 1);
@@ -1358,9 +1362,10 @@ void test_l_packUnpackRegVar(void){
 	CU_ASSERT_EQUAL(a.constant, 3);
 	CU_ASSERT_EQUAL(a.global, 4);
 
-	free(a.hostVar);
 	free(a.deviceAddress);
 	free(a.deviceName);
+	free(a.dom0HostAddr);
+
 	free(pack);
 }
 
@@ -1452,7 +1457,6 @@ void test_g_fcia_idx(void){
 	// it should free the elements as well
 
 	g_array_free(pFcArr, TRUE);
-
 }
 
 void test_g_fcia_elem(void){
@@ -1512,6 +1516,275 @@ void test_g_fcia_elem(void){
 	g_array_free(pFcArr, TRUE);
 }
 
+void test_g_fcia_elidx(void){
+	GArray * pFcArr = g_array_new(FALSE, FALSE, sizeof(fatcubin_info_t));
+
+	fatcubin_info_t p1, p2;
+	fatcubin_info_t *p;
+	int idx = -2;
+	void ** pV1 = (void**) 0x2;
+	void ** pV2 = (void**) 0x3;
+	void ** pV3 = (void**) 0x4;
+
+	CU_ASSERT_PTR_NOT_NULL(pFcArr);
+
+	p1.fatCubinHandle = pV1;
+	p1.num_reg_fns = 3;
+	g_array_append_val(pFcArr, p1);
+
+	CU_ASSERT_EQUAL(pFcArr->len, 1);
+
+	p2.fatCubinHandle = pV2;
+	p2.num_reg_fns = 2;
+	g_array_append_val(pFcArr, p2);
+	CU_ASSERT_EQUAL(pFcArr->len, 2);
+
+	// 0. check what happens with NULL array
+	p = g_fcia_elidx(NULL, pV3, &idx);
+	CU_ASSERT_EQUAL(idx, -1);
+	CU_ASSERT_PTR_NULL(p);
+
+	// 1. now not null array and not existing fatcubin
+	idx = -2;
+	p = g_fcia_elidx(pFcArr, pV3, &idx);
+	CU_ASSERT_PTR_NULL(p);
+	CU_ASSERT_EQUAL(idx, -1);
+
+	// 2. now not null array and NULL pointer to find (not existing)
+	idx = -2;
+	p = g_fcia_elidx(pFcArr, NULL, &idx);
+	CU_ASSERT_EQUAL(idx, -1);
+	CU_ASSERT_PTR_NULL(p);
+
+	// 3. now try to find the existing value
+	idx = -2;
+	p = g_fcia_elidx(pFcArr, pV1, &idx);
+	CU_ASSERT_NOT_EQUAL(idx, -1);
+	p = &g_array_index(pFcArr, fatcubin_info_t, idx);
+	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV1);
+	CU_ASSERT_EQUAL(p->num_reg_fns, 3);
+
+
+	// 4. another value
+	idx = -2;
+	p = g_fcia_elidx(pFcArr, pV2, &idx);
+	CU_ASSERT_NOT_EQUAL(idx, -1);
+	p = &g_array_index(pFcArr, fatcubin_info_t, idx);
+	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV2);
+	CU_ASSERT_EQUAL(p->num_reg_fns, 2);
+
+	g_array_free(pFcArr, TRUE);
+}
+
+void test_g_fcia_host_var(void){
+	GArray * pFcArr = g_array_new(FALSE, FALSE, sizeof(fatcubin_info_t));
+
+	fatcubin_info_t p1, p2;
+	fatcubin_info_t *p;
+	int idx = -2;
+	void ** pV1 = (void**) 0x2;
+	void ** pV2 = (void**) 0x3;
+	char *hostVar1 = (char *) 0x1;
+	char *hostVar2 = (char *) 0x2;
+
+	reg_var_args_t v1, v2;
+
+
+	v1.hostVar = hostVar1;
+	v1.fatCubinHandle = pV1;
+
+	v2.hostVar = hostVar2;
+	v2.fatCubinHandle = pV1;
+
+
+	CU_ASSERT_PTR_NOT_NULL(pFcArr);
+
+	p1.fatCubinHandle = pV1;
+	p1.num_reg_fns = 3;
+	p1.num_reg_vars = 2;
+	p1.variables[0] = &v1;
+	p1.variables[1] = &v2;
+
+	g_array_append_val(pFcArr, p1);
+
+	CU_ASSERT_EQUAL(pFcArr->len, 1);
+
+	p2.fatCubinHandle = pV2;
+	p2.num_reg_fns = 2;
+	p2.num_reg_vars = 0;
+	g_array_append_val(pFcArr, p2);
+	CU_ASSERT_EQUAL(pFcArr->len, 2);
+
+	// 0a. start with NULL pFcArr
+	CU_ASSERT_PTR_NULL(g_fcia_host_var(NULL, (char*) 0x23, &idx ));
+
+	// 0b. check NULL hostVar
+	CU_ASSERT_PTR_NULL(g_fcia_host_var(pFcArr, NULL,&idx));
+
+	// 1. ask about not existing hostVar
+	CU_ASSERT_PTR_NULL(g_fcia_host_var(pFcArr, (char*) 0x13, &idx));
+
+	// 2. ask about correct values
+	p = g_fcia_host_var(pFcArr, hostVar1, &idx);
+	CU_ASSERT_PTR_NOT_NULL(p);
+	CU_ASSERT_EQUAL(p->variables[0]->hostVar,hostVar1);
+
+	p = g_fcia_host_var(pFcArr, hostVar2, &idx);
+	CU_ASSERT_PTR_NOT_NULL(p);
+	CU_ASSERT_EQUAL(p->variables[1]->hostVar, (char*)0x2);
+
+
+	g_array_free(pFcArr, TRUE);
+}
+
+void test_g_vars_insert(void){
+	GHashTable * table;
+	void ** h1 = (void**) 0x1;
+	void ** h2 = (void**) 0x13;
+	char * vars[] = { "v1", "v2", "v3"};
+
+	// create a table
+	table = g_hash_table_new(g_direct_hash, g_direct_equal);
+	CU_ASSERT_EQUAL(g_hash_table_size(table), 0);
+
+	// 0a. try to add a NULL handler
+	CU_ASSERT_PTR_NULL(g_vars_insert(table, NULL, vars[0]));
+	CU_ASSERT_EQUAL(g_hash_table_size(table), 0);
+
+	// 0a. try to add a NULL hostvar
+	CU_ASSERT_PTR_NULL(g_vars_insert(table, h1, NULL));
+	CU_ASSERT_EQUAL(g_hash_table_size(table), 0);
+
+	// 1. try to add a regular handler
+	CU_ASSERT_PTR_NOT_NULL(g_vars_insert(table, h1, vars[0]));
+	CU_ASSERT_EQUAL(g_hash_table_size(table), 1);
+
+	GPtrArray * p = NULL;
+
+	p = g_hash_table_lookup(table, h1);
+	CU_ASSERT_EQUAL(g_ptr_array_index(p, 0), vars[0]);
+
+	// 2. try to add another value
+	CU_ASSERT_PTR_NOT_NULL(g_vars_insert(table, h1, vars[1]));
+	CU_ASSERT_EQUAL(g_hash_table_size(table), 1);
+
+	p = g_hash_table_lookup(table, h1);
+	CU_ASSERT_EQUAL(g_ptr_array_index(p, 1), vars[1]);
+
+	// 3. now add a new value to a new handler
+	CU_ASSERT_PTR_NOT_NULL(g_vars_insert(table, h2, vars[1]));
+	CU_ASSERT_EQUAL(g_hash_table_size(table), 2);
+
+	p = g_hash_table_lookup(table, h2);
+	CU_ASSERT_EQUAL(g_ptr_array_index(p, 0), vars[1]);
+
+	// 3. now add a new value to a new handler
+	CU_ASSERT_PTR_NOT_NULL(g_vars_insert(table, h2, vars[2]));
+	CU_ASSERT_EQUAL(g_hash_table_size(table), 2);
+
+	p = g_hash_table_lookup(table, h2);
+	CU_ASSERT_EQUAL(g_ptr_array_index(p, 1), vars[2]);
+
+	// free the table
+	g_ptr_array_free(g_hash_table_lookup(table, h1), FALSE);
+	g_ptr_array_free(g_hash_table_lookup(table, h2), FALSE);
+	g_hash_table_destroy(table);
+}
+
+void test_g_vars_find(void){
+	GHashTable * table;
+	void ** h[] = {(void**) 0x1, (void**) 0x13 };
+	char * vars1[] = { "v1", "v2", "v3"};
+	char * vars2[] = { "a1", "a2" };
+	char * vars3[] = { "x" };
+	const int A_SIZE = 2;
+	GPtrArray * a[A_SIZE];
+	int i;
+
+	// create a table
+	table = g_hash_table_new(g_direct_hash, g_direct_equal);
+	for(i = 0; i < A_SIZE; i ++)
+		a[i] = g_ptr_array_new();
+	for(i = 0; i < 3; i ++)
+		g_ptr_array_add(a[0], vars1[i]);
+
+	CU_ASSERT_EQUAL( a[0]->len, 3);
+
+	for(i = 0; i < 2; i ++)
+		g_ptr_array_add(a[1], vars2[i]);
+
+	CU_ASSERT_EQUAL( a[1]->len, 2);
+
+	g_hash_table_insert(table, h[0], a[0]);
+	g_hash_table_insert(table, h[1], a[1]);
+
+	printRegVarTab(table);
+
+	CU_ASSERT_EQUAL(g_hash_table_size(table), 2);
+
+	// 0a. try to find something in a NULL regHostVarsTab
+	CU_ASSERT_EQUAL( g_vars_find(NULL, vars1[0] ), FALSE);
+
+	// 0b. try to find a NULL hostVar in a non-null table
+	CU_ASSERT_EQUAL( g_vars_find(table, NULL ), FALSE);
+
+	// 1. try to find something not existing
+	CU_ASSERT_EQUAL( g_vars_find(table, vars3[0] ), FALSE);
+
+	// 2. try to find all existing existing
+	for(i = 0; i < 3; i++)
+		CU_ASSERT_EQUAL( g_vars_find(table, vars1[i] ), TRUE);
+
+	for(i = 0; i < 2; i++)
+		CU_ASSERT_EQUAL( g_vars_find(table, vars2[i] ), TRUE);
+
+
+	// free the memory
+	g_ptr_array_free(a[0], FALSE);
+	g_ptr_array_free(a[1], FALSE);
+
+	g_hash_table_destroy(table);
+}
+
+void test_g_vars_remove(void){
+	GHashTable * table;
+	const int HANDLERS = 10;
+	void ** h[HANDLERS];
+	char * vars1[] = { "v1", "v2", "v3"};
+	GPtrArray * a[HANDLERS];
+	int i, j;
+
+	// create a table
+	table = g_hash_table_new(g_direct_hash, g_direct_equal);
+
+	for(i = 0; i < HANDLERS; i ++){
+		a[i] = g_ptr_array_new();
+		for(j = 0; j < 3; j ++)
+			g_ptr_array_add(a[i], vars1[j]);
+		CU_ASSERT_EQUAL( a[i]->len, 3);
+	}
+
+	for( i = 0; i < HANDLERS; i ++)
+		h[i] = (void **) GINT_TO_POINTER(i * 2 + 3);
+
+	for( i = 0; i < HANDLERS; i ++ )
+		g_hash_table_insert(table, h[i], a);
+
+	CU_ASSERT_EQUAL(g_hash_table_size(table), 10);
+
+
+	// 0a. @todo test NULL values; write now skip
+
+
+	// 1. remove all handlers
+	for( i = 0; i < HANDLERS; i++){
+		g_vars_remove(table, h[i]);
+		CU_ASSERT_EQUAL(g_hash_table_size(table), (unsigned int) HANDLERS - i - 1);
+		//CU_ASSERT_EQUAL(g_hash_table_size(table), (unsigned int) HANDLERS - i);
+	}
+
+	g_hash_table_destroy(table);
+}
 
 /* The main() function for setting up and running the tests.
  * Returns a CUE_SUCCESS on successful running, another
@@ -1523,6 +1796,7 @@ int main()
    CU_pSuite pSuitePack = NULL;
    CU_pSuite pSuiteRegFuncArgs = NULL;
    CU_pSuite pSuiteRegVar = NULL;
+   CU_pSuite pSuiteFcia = NULL;
    CU_pSuite pSuiteMisc = NULL;
 
    /* initialize the CUnit test registry */
@@ -1562,8 +1836,7 @@ int main()
 		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackSymbol", test_l_packUnpackSymbol)) ||
 		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackDep", test_l_packUnpackDep)) ||
 		(NULL == CU_add_test(pSuitePack, "test of test_packunpack", test_packunpack))
-		)
-   {
+		){
       CU_cleanup_registry();
       return CU_get_error();
    }
@@ -1579,8 +1852,7 @@ int main()
 	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_packUnpackUint3Ptr", test_l_packUnpackUint3Ptr)) ||
 	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_packUnpackDim3Ptr", test_l_packUnpackDim3Ptr)) ||
 	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_packUnpackRegFuncArgs", test_l_packUnpackRegFuncArgs))
-   )
-   {
+   ){
       CU_cleanup_registry();
       return CU_get_error();
    }
@@ -1593,10 +1865,29 @@ int main()
    /* add the tests to the suite */
    if (
 	   (NULL == CU_add_test(pSuiteRegVar, "test of test_l_getSize_regVar", test_l_getSize_regVar)) ||
-	   (NULL == CU_add_test(pSuiteRegVar, "test of test_l_packUnpackRegVar", test_l_packUnpackRegVar))
+	   (NULL == CU_add_test(pSuiteRegVar, "test of test_l_packUnpackRegVar", test_l_packUnpackRegVar)) ||
+	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_insert", test_g_vars_insert)) ||
+	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_find", test_g_vars_find)) ||
+	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_remove", test_g_vars_remove))
    ){
       CU_cleanup_registry();
       return CU_get_error();
+   }
+
+   pSuiteFcia = CU_add_suite("Fcia Test_Suite", NULL, NULL);
+   if(NULL == pSuitePack){
+   	   CU_cleanup_registry();
+   	   return CU_get_error();
+   }
+
+   if (
+	   (NULL == CU_add_test(pSuiteFcia, "test_g_fcia_idx", test_g_fcia_idx)) ||
+	   (NULL == CU_add_test(pSuiteFcia, "test_g_fcia_elem", test_g_fcia_elem)) ||
+	   (NULL == CU_add_test(pSuiteFcia, "test_g_fcia_elidx", test_g_fcia_elidx)) ||
+	   (NULL == CU_add_test(pSuiteFcia, "test_g_fcia_host_var", test_g_fcia_host_var))
+      ){
+	   CU_cleanup_registry();
+	   return CU_get_error();
    }
 
 
@@ -1607,11 +1898,8 @@ int main()
    }
 
    if ((NULL == CU_add_test(pSuiteMisc, "test_methodIdToString", test_methodIdToString)) ||
-	   (NULL == CU_add_test(pSuiteMisc, "test_freeBuffer", test_freeBuffer)) ||
-	   (NULL == CU_add_test(pSuiteMisc, "test_g_fcia_idx", test_g_fcia_idx)) ||
-	   (NULL == CU_add_test(pSuiteMisc, "test_g_fcia_elem", test_g_fcia_elem))
-      )
-   {
+	   (NULL == CU_add_test(pSuiteMisc, "test_freeBuffer", test_freeBuffer))
+      ){
 	   CU_cleanup_registry();
 	   return CU_get_error();
    }
