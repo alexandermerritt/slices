@@ -796,7 +796,7 @@ int nvbackCudaMemcpyFromSymbol_srv(cuda_packet_t *packet, conn_t * pConn) {
 	case cudaMemcpyDeviceToHost:
 		pConn->response_data_size = packet->args[2].arr_argi[0];
 		assert(pConn->pRspBuffer == NULL);
-		pConn->pRspBuffer = malloc(myconn.response_data_size);
+		pConn->pRspBuffer = malloc(pConn->response_data_size);
 		if (mallocCheck(pConn->pRspBuffer, __FUNCTION__, NULL) == ERROR) {
 			return ERROR;
 		}

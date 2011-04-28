@@ -35,9 +35,6 @@ void * backend_thread(){
 	// FIXME cuda_bridge_request_t == cuda_packet_t == rpkt_t, this is rediculous
 	strm_hdr_t *hdr         = NULL;
 	rpkt_t *rpkts           = NULL; // array of cuda packets
-//	char *reqbuf            = NULL;
-//	char *rspbuf            = NULL;
-
 
 	if( (pConnListen = conn_malloc(__FUNCTION__, NULL)) == NULL ) return NULL;
 	// this allocates memory for the strm.rpkts, i.e., the array of packets
@@ -54,20 +51,14 @@ void * backend_thread(){
 
 	// Connection-related structures
 	hdr = &pConn->strm.hdr;
-	rpkts = pConn->strm.rpkts;   // an array of packets
+	rpkts = pConn->strm.rpkts;   // an array of packets (MAX_REMOTE_BATCH_SIZE)
 	// these are buffers for extra data transferred as
-	// a request or response (in addition to cuda_packet_t
-	// e.g. extra data are returned to cudaGetDeviceProperties
-	// i.e., the structure of the
-//	reqbuf = pConn->request_data_buffer;  // an array of characters
-//	rspbuf = pConn->response_data_buffer; // an array of characters
-
 	pConn->pReqBuffer = NULL;
 	pConn->pRspBuffer = NULL;
 
     while(1) {
 
-    	printd(DBG_INFO, "------------------New RPC--------------------\n");
+    	p_debug("------------------New RPC--------------------\n");
 
 		memset(hdr, 0, sizeof(strm_hdr_t));
 		memset(rpkts, 0, MAX_REMOTE_BATCH_SIZE * sizeof(rpkt_t));
@@ -90,7 +81,7 @@ void * backend_thread(){
 		}
 
         // Receive the entire batch.
-		// first the the packets, then the extra data (reqbuf)
+		// first the packets, then the extra data (reqbuf)
 		//
 		// let's assume that we have enough space. otherwise we have a problem
 		// pConn allocates the buffers for incoming cuda packets
@@ -144,14 +135,14 @@ void * backend_thread(){
 				break;
 			}
 
-			// send the response as a simple cuda packet
+			// send the standard response (with cuda_error_t, and simple arguments etc)
 			if (1 != put(pConn, rpkts, sizeof(rpkt_t))) {
 				p_info("__ERROR__ after : Sending CUDA response packet: Quitting ... \n");
 				break;
 			}
 			p_info("Response packet sent.\n");
 
-			// send the data if you have anything to send
+			// send the extra data if you have anything to send
 			if( pConn->response_data_size > 0 ){
 				if (1 != put(pConn, pConn->pRspBuffer, pConn->response_data_size)) {
 					p_info("__ERROR__ after: Sending accompanying response buffer: Quitting ... \n"
