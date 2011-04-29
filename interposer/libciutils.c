@@ -112,24 +112,6 @@ int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo){
 }
 
 /**
- * removes the handler and associated array of pointers from the table
- * @param regHostVarsTab The pointer to the table of host vars
- * @param fatCubinHandle The handler to be removed
- * @return OK
- */
-int g_vars_remove(GHashTable * regHostVarsTab, void** fatCubinHandle){
-	// @todo do it nicer
-	if( nullDebugChkpt(regHostVarsTab, __FUNCTION__, "regHostVarsTab") == TRUE
-		|| nullDebugChkpt(fatCubinHandle, __FUNCTION__, "fatCubinHandle") == TRUE)
-		return OK;
-
-	GPtrArray * varArr = g_hash_table_lookup(regHostVarsTab, fatCubinHandle);
-	g_ptr_array_free(varArr, FALSE);
-	g_hash_table_remove(regHostVarsTab, fatCubinHandle);
-
-	return OK;
-}
-/**
  * returns the size of the packet for the string
  * |string_length|string|
  *
@@ -691,11 +673,14 @@ void  l_printGPtrArr(gpointer key, gpointer value, gpointer user_data){
 	GPtrArray* varArr = (GPtrArray*) value;
 	guint i;
 
-	p_debug("FatCubinHandler=%p: [\n", key);
+	p_debug("Key (FatCubinHandler)=%p: Value [\n", key);
 
 //	g_ptr_array_foreach(varArr, (GFunc)printf, NULL);
 	for(i = 0; i < varArr->len; i++){
-		p_debug("%p\n", g_ptr_array_index(varArr, i));
+		vars_val_t * v = g_ptr_array_index(varArr, i);
+		if( v != NULL )
+			p_debug("[%d] = hostVar: %p, deviceName: %s\n",
+					i, v->hostVar, v->deviceName);
 	}
 	p_debug("]\n");
 }
@@ -2420,7 +2405,7 @@ inline void nullExitChkpt(void *p, char * message){
  */
 inline gboolean nullDebugChkpt(const void * p, const char * func, char * message){
 	if( NULL == p ){
-		g_debug("%s: The pointer is NULL. %s ", func, message);
+		p_debug("%s: The pointer is NULL. %s ", func, message);
 		return TRUE;
 	}
 	return FALSE;
@@ -2569,20 +2554,19 @@ fatcubin_info_t * g_fcia_host_var(GArray * fatCubinInfoArr, char * hostVar, int 
  * it will be created
  * @param regHostVarsTab The table that will be updated
  * @param fcHandle The key
- * @param hostVar the variable that will be stored
+ * @param val the variable that will be stored
  *
  * @return NULL it means that fcHandle is NULL
- *         the value corresponding to fcHandle in regHostVarsTab where the hostVar
+ *         the value (pointer to array) corresponding to fcHandle in regHostVarsTab where the pValue
  *         has been inserted
  */
-inline GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle, char * hostVar){
-
+inline GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle, vars_val_t * pValue){
+//@todo
 	// the array that holds or will hold the hostVar
 	GPtrArray *varArr = NULL;
 
-	if( NULL == fcHandle || NULL == hostVar){
-		g_debug("%s: FatCubinHandler or hostVar is NULL We do not insert NULL fatCubinHandler \n",
-				__FUNCTION__);
+	if( NULL == fcHandle || NULL == pValue){
+		p_debug("FatCubinHandler or pValue is NULL. We do not insert NULL fatCubinHandler\n");
 		return NULL;
 	}
 
@@ -2593,50 +2577,210 @@ inline GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle, 
 		g_hash_table_insert(regHostVarsTab, fcHandle, varArr);
 	}
 
-	g_ptr_array_add (varArr, (gpointer)hostVar);
+	g_ptr_array_add (varArr, (gpointer)pValue);
 
 	return varArr;
 }
 
+/**
+ * removes the handler and associated array of pointers from the table
+ * @param regHostVarsTab The pointer to the table of host vars
+ * @param fatCubinHandle The handler to be removed
+ * @return OK
+ */
+inline int g_vars_remove(GHashTable * regHostVarsTab, void** fatCubinHandle){
+//	int i;
+	// @todo do it nicer
+	if( nullDebugChkpt(regHostVarsTab, "g_vars_remove", "regHostVarsTab\n") == TRUE
+		|| nullDebugChkpt(fatCubinHandle, "g_vars_remove", "fatCubinHandle\n") == TRUE)
+		return OK;
+
+/*	GPtrArray * varArr = g_hash_table_lookup(regHostVarsTab, fatCubinHandle);
+	for(i = 0; i < varArr->len; i++){
+		g_vars_val_delete(g_ptr_array_index(varArr, i));
+	}
+
+	g_ptr_array_free(varArr, TRUE); */
+	// this trigger calling g_vars_remove_val
+	g_hash_table_remove(regHostVarsTab, fatCubinHandle);
+
+	return OK;
+}
+
+/**
+ * removes the array; the call should be triggered automatically
+ * when removing key from regHostVarTab (@see g_vars_remove())
+ * @param value The array corresponding to the fat cubin handle.
+ */
+void g_vars_remove_val(gpointer * value){
+	guint i;
+	GPtrArray * varArr = (GPtrArray*) value;
+
+	p_debug("Triggered called.");
+	if( NULL == value )
+		return;		// everything is freed
+
+	for(i = 0; i < varArr->len; i++){
+		g_vars_val_delete(g_ptr_array_index(varArr, i));
+	}
+
+	g_ptr_array_free(varArr, TRUE);
+}
 
 /**
  * predicate used by @see g_vars_find()
  *
  * @param key
  * @param value
- * @param user_data the hostVar we are looking for (char*)
+ * @param user_data which should be an array containing two pointers to char:
+ *        user_data[0] is a value we are checking, user_data[1]
+ *        which is hostVar is the found
+ *        result if return is TRUE;
  *
- * @return TRUE if the hostVar has been found
- *         FALSE if the hostVar has not been found
+ * @return TRUE if the user_data has been found
+ *         FALSE if the user_data has not been found
  */
-gboolean l_g_vars_find(gpointer key, gpointer value, gpointer user_data) {
+gboolean l_g_vars_find_hostVar(gpointer key, gpointer value, gpointer user_data) {
 	guint i ;
 	GPtrArray * varArr = (GPtrArray*)value;
+	GPtrArray * a = (GPtrArray *) user_data;
+	// what for we are looking for
+	char * symbol;
 
+	if( user_data == NULL )
+		return FALSE;
+
+	symbol = g_ptr_array_index(a, 0);
+
+	// first you need to iterate over
 	for( i = 0; i < varArr->len; i++){
-		if( g_ptr_array_index(varArr, i) == user_data)
+		vars_val_t * v = (vars_val_t *) g_ptr_array_index(varArr, i);
+		if( (v->hostVar == symbol) ){
+			g_ptr_array_add(a, v->hostVar);
 			return TRUE;
+		}
 	}
 
 	return FALSE;
 }
 
 /**
+ * predicate used by @see g_vars_find(); this function should be called
+ * after l_g_vars_find_hostVar;
+ *
+ * @param key
+ * @param value
+ * @param user_data which should be an array containing two pointers to char:
+ *        user_data[0] is a value we are checking, user_data[1]
+ *        which is hostVar is the found
+ *        result if return is TRUE;
+ *
+ * @return TRUE if the user_data has been found
+ *         FALSE if the user_data has not been found
+ */
+gboolean l_g_vars_find_deviceName(gpointer key, gpointer value, gpointer user_data) {
+	guint i ;
+	GPtrArray * varArr = (GPtrArray*)value;
+	GPtrArray * a = (GPtrArray *) user_data;
+	// what for we are looking for
+	char * symbol;
+
+	if( user_data == NULL )
+		return FALSE;
+
+	symbol = g_ptr_array_index(a, 0);
+
+
+	// first you need to iterate over
+	for( i = 0; i < varArr->len; i++){
+		vars_val_t * v = (vars_val_t *) g_ptr_array_index(varArr, i);
+		p_debug("symbol = %s\n", v->deviceName);
+		if( strcmp(v->deviceName, symbol) == 0 ){
+			g_ptr_array_add(a, v->hostVar);
+			p_debug("found\n");
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+
+/**
  * checks if the regHostVarsTab contains specified hostVar pointer
  *
  * @param regHostVarsTab The table to be search of registered
- *        host variables
- * @param hostVar For what variable we are looking for
- * @return TRUE if the hostVar has been found
- *         FALSE if the the hostVar hasn't been found
+ *        values
+ * @param symbol what we are looking for - it is a symbol which can be a pointer
+ *        (i.e., the address of the variable) or a string name (i.e. a pointer
+ *        to the name of the variable - @see cudaMemcpyToSymbol() )
+ * @return hostVar corresponding to a symbol which can be a pointer (the address
+ *         of the variable) or a string name (i.e. a pointer to the name of the variable)
+ *         NULL if symbol has not been found
  */
-inline gboolean g_vars_find(GHashTable * regHostVarsTab, const char * hostVar){
+inline char * g_vars_find(GHashTable * regHostVarsTab, const char * symbol){
 
-	if( nullDebugChkpt(regHostVarsTab,  __FUNCTION__, "regHostVarsTab" ) == TRUE)
-		return FALSE;
+	char * result;
 
-	if( nullDebugChkpt( hostVar, __FUNCTION__, "hostVar") == TRUE)
-		return FALSE;
+	if( nullDebugChkpt(regHostVarsTab,  "g_vars_find", "regHostVarsTab\n" ) == TRUE)
+		return NULL;
 
-	return (g_hash_table_find(regHostVarsTab, (GHRFunc)l_g_vars_find, (gpointer) hostVar) == NULL) ? FALSE: TRUE;
+	if( nullDebugChkpt( symbol, "g_vars_find", "symbol\n") == TRUE)
+		return NULL;
+
+	// find the array
+	GPtrArray * user_data = g_ptr_array_new();
+	g_ptr_array_add(user_data, (char* ) symbol);
+
+	// first check if symbol is a pointer; if you change the sequence (first look
+	// for a deviceName then for hostVar, if symbol is a hostVar, then it
+	// strcmp used likely will be confused and will stop working
+	g_hash_table_find(regHostVarsTab, (GHRFunc)l_g_vars_find_hostVar, (gpointer) user_data);
+
+	if( user_data->len == 1)
+		// now try with a device name;
+		g_hash_table_find(regHostVarsTab, (GHRFunc)l_g_vars_find_deviceName, (gpointer) user_data);
+
+	result = (user_data->len == 2 ? g_ptr_array_index(user_data, 1) : NULL);
+	// if g_hash_table_find returns TRUE, user_data[1] contains the deviceName
+	// if g_hash_table_find returns FALSE, we should return NULL and it means
+	// that user_data has not been changed (and are initiated to NULL)
+	g_ptr_array_free(user_data, TRUE);
+	return result;
+}
+
+/**
+ * creates a single structure from provied arguments: allocates memory and copies
+ * strings; so you are responsible for removing this from memory later
+ *
+ * @param hostVar a pointer to the hostVariable on the client side
+ * @param deviceName a string representing the device name
+ * @return the pointer to a new structure
+ *         NULL if you cannot allocate the memory
+ */
+vars_val_t * g_vars_val_new(char * hostVar, const char * deviceName){
+	vars_val_t * v = g_new(vars_val_t, 1);
+
+	v->hostVar = hostVar;
+	v->deviceName = g_strdup(deviceName);
+
+	return v;
+}
+
+/**
+ * frees the memory; it should deal with NULL values, return NULL
+ *
+ * @param pValue value to be deleted
+ * @return NULL
+ */
+vars_val_t * g_vars_val_delete(vars_val_t * pValue){
+	p_debug("Executing: %s\n", __FUNCTION__);
+	if( pValue != NULL ){
+		g_free(pValue->deviceName);
+		pValue->deviceName = NULL;
+	}
+
+	g_free(pValue);
+
+	return NULL;
 }

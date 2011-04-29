@@ -33,6 +33,18 @@ typedef struct {
 } array_int_t;
 
 /**
+ * a helper structure that stores the information about the registered variable
+ * and a corresponding name of this variable. It is intended to be used
+ * to map deviceName to hostVar which is expected by cudaMemcpyTo/FromSymbol;
+ * so we can provide a hostVar to the remote side even if the symbol is
+ * a string. It is used in __cudaRegisterVariables and later in cudaMemcpyTo/FromSymbol
+ */
+typedef struct {
+	char * hostVar;
+	char * deviceName;
+} vars_val_t;
+
+/**
  * To use it when marshaling and unmarshaling in the sent packet
  * Should indicate the size of the following bytes
  */
@@ -208,25 +220,63 @@ fatcubin_info_t * g_fcia_host_var(GArray * fatCubinInfoArr, char * hostVar, int 
  * it inserts the hostVar to the regHostVarsTab;
  * @param regHostVarsTab The table that will be updated
  * @param fcHandle The key
- * @param hostVar the variable that will be stored
+ * @param value the variable that will be stored
  *
  * @return NULL it means that fcHandle is NULL
- *         the value corresponding to fcHandle in regHostVarsTab where the hostVar
+ *         the value corresponding to fcHandle in regHostVarsTab where the val
  *         has been inserted
  */
 inline GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle,
-		char * hostVar);
+		vars_val_t * val);
 
 /**
  * checks if the regHostVarsTab contains specified hostVar pointer
  *
  * @param regHostVarsTab The table to be search of registered
- *        host variables
- * @param hostVar For what variable we are looking for
- * @return TRUE if the hostVar has been found
- *         FALSE if the the hostVar hasn't been found
+ *        values
+ * @param symbol what we are looking for - it is a symbol which can be a pointer
+ *        (i.e., the address of the variable) or a string name (i.e. a pointer
+ *        to the name of the variable - @see cudaMemcpyToSymbol() )
+ * @return deviceName corresponding to a symbol which can be a pointer (the address
+ *         of the variable) or a string name (i.e. a pointer to the name of the variable)
+ *         NULL if symbol has not been found
  */
-inline gboolean g_vars_find(GHashTable * regHostVarsTab, const char * hostVar);
+inline char * g_vars_find(GHashTable * regHostVarsTab, const char * symbol);
 
+/**
+ * removes the handler and associated array of pointers from the table
+ * @param regHostVarsTab The pointer to the table of host vars
+ * @param fatCubinHandle The handler to be removed
+ * @return OK
+ */
+inline int g_vars_remove(GHashTable * regHostVarsTab, void** fatCubinHandle);
+
+/**
+ * removes the array; the call should be triggered automatically
+ * when removing key from regHostVarTab (@see g_vars_remove())
+ * @param value The array corresponding to the fat cubin handle.
+ */
+void g_vars_remove_val(gpointer * value);
+
+
+
+/**
+ * creates a single structure from provied arguments: allocates memory and copies
+ * strings; so you are responsible for removing this from memory later
+ *
+ * @param hostVar a pointer to the hostVariable on the client side
+ * @param deviceName a string representing the device name
+ * @return the pointer to a new structure
+ *         NULL if you cannot allocate the memory
+ */
+vars_val_t * g_vars_val_new(char * hostVar, const char * deviceName);
+
+/**
+ * frees the memory; it should deal with NULL values, return NULL
+ *
+ * @param pValue value to be deleted
+ * @return NULL
+ */
+vars_val_t * g_vars_val_delete(vars_val_t * pValue);
 
 #endif /* CITUILS_H_ */

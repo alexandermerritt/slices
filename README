@@ -159,3 +159,9 @@ side. Just the client, i.e., the interposer library (libci.c).
  # export LD_LIBRARY_PATH=/opt/cunit212/lib/:$LD_LIBRARY_PATH
  [magg@prost interposer]$ 
    valgrind --leak-check=yes --track-origins=yes ./testLibciutils
+   
+   
+4. KNOWN ISSUES
+* Function g_vars_find my hang if you provide non-existing address as 
+  a symbol; since it first assumes it is a pointer, then it is a string 
+
