@@ -2589,18 +2589,10 @@ inline GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle, 
  * @return OK
  */
 inline int g_vars_remove(GHashTable * regHostVarsTab, void** fatCubinHandle){
-//	int i;
-	// @todo do it nicer
 	if( nullDebugChkpt(regHostVarsTab, "g_vars_remove", "regHostVarsTab\n") == TRUE
 		|| nullDebugChkpt(fatCubinHandle, "g_vars_remove", "fatCubinHandle\n") == TRUE)
 		return OK;
 
-/*	GPtrArray * varArr = g_hash_table_lookup(regHostVarsTab, fatCubinHandle);
-	for(i = 0; i < varArr->len; i++){
-		g_vars_val_delete(g_ptr_array_index(varArr, i));
-	}
-
-	g_ptr_array_free(varArr, TRUE); */
 	// this trigger calling g_vars_remove_val
 	g_hash_table_remove(regHostVarsTab, fatCubinHandle);
 
@@ -2616,7 +2608,7 @@ void g_vars_remove_val(gpointer * value){
 	guint i;
 	GPtrArray * varArr = (GPtrArray*) value;
 
-	p_debug("Triggered called.");
+	p_debug("Triggered call.\n");
 	if( NULL == value )
 		return;		// everything is freed
 
@@ -2694,10 +2686,10 @@ gboolean l_g_vars_find_deviceName(gpointer key, gpointer value, gpointer user_da
 	// first you need to iterate over
 	for( i = 0; i < varArr->len; i++){
 		vars_val_t * v = (vars_val_t *) g_ptr_array_index(varArr, i);
-		p_debug("symbol = %s\n", v->deviceName);
+
 		if( strcmp(v->deviceName, symbol) == 0 ){
 			g_ptr_array_add(a, v->hostVar);
-			p_debug("found\n");
+
 			return TRUE;
 		}
 	}

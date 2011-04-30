@@ -1818,6 +1818,8 @@ void test_g_vars_remove(void){
 	g_hash_table_destroy(table);
 }
 
+
+
 void test_g_vars_remove_val(void){
 	const guint HANDLERS = 3;
 	GPtrArray * a;
@@ -1827,7 +1829,7 @@ void test_g_vars_remove_val(void){
 	// create tables
 	a= g_ptr_array_new();
 	for(j = 0; j < HANDLERS; j ++)
-		g_ptr_array_add(a, &vars1[j] );
+		g_ptr_array_add(a, g_vars_val_new((char *)&HANDLERS, "hey") );
 	CU_ASSERT_EQUAL( a->len, HANDLERS);
 
 	// 0. test with a null pointer
@@ -1953,8 +1955,8 @@ int main()
 	   (NULL == CU_add_test(pSuiteRegVar, "test of test_l_packUnpackRegVar", test_l_packUnpackRegVar)) ||
 	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_insert", test_g_vars_insert)) ||
 	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_find", test_g_vars_find)) ||
-//	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_remove", test_g_vars_remove)) ||
-//	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_remove_val", test_g_vars_remove_val)) ||
+	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_remove", test_g_vars_remove)) ||
+	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_remove_val", test_g_vars_remove_val)) ||
 	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_val_newdel", test_g_vars_val_newdel))
    ){
       CU_cleanup_registry();

@@ -16,7 +16,7 @@ import os
 					  
 nvccEnv = Environment(CC = '/opt/cuda/bin/nvcc -g')
 #					  CCFLAGS = '-g')
-nvccEnv.Program('add', 'add.cu')
+nvccEnv.Program('app1', 'app1.cu')
 
-nvccEnv.Program('add1', 'add1.cu');
+nvccEnv.Program('app2', 'app2.cu');
  

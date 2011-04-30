@@ -1566,7 +1566,6 @@ cudaError_t cudaMemcpy2DArrayToArray(struct cudaArray *dst,
 cudaError_t rcudaMemcpyToSymbol(const char *symbol, const void *src,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 				__dv(cudaMemcpyHostToDevice)) {
-	int i;
 	cuda_packet_t *pPacket;
 	// this will hold the hostVar value (a pointer corresponding
 	// ot a symbol
@@ -1584,12 +1583,9 @@ cudaError_t rcudaMemcpyToSymbol(const char *symbol, const void *src,
 	// if it is not, then our assumption is wrong and symbol is a string
 	// a name of the variable
 
-//	if (g_vars_find(regHostVarsTab, symbol) == FALSE) {
-//		// @todo right now just exit
-//		p_error("Discovered that symbol is a name. Not implemented. Exiting ...");
-//	}
 	hostVar = g_vars_find(regHostVarsTab, symbol);
 	if ( NULL == hostVar ){
+		p_warn("__ERROR__: The symbol %p has not been found", symbol);
 		cuda_err = cudaErrorInvalidSymbol;
 		return cuda_err;
 	}
@@ -1657,8 +1653,6 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
 cudaError_t rcudaMemcpyFromSymbol(void *dst, const char *symbol,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 				__dv(cudaMemcpyDeviceToHost)) {
-	int i;
-	char found = 0;
 	cuda_packet_t *pPacket;
 	// this will hold the hostVar value (a pointer corresponding
 	// ot a symbol
@@ -1676,13 +1670,10 @@ cudaError_t rcudaMemcpyFromSymbol(void *dst, const char *symbol,
 	// if it is not, then our assumption is wrong and symbol is a string
 	// a name of the variable
 
-//	if( g_vars_find(regHostVarsTab, symbol) == FALSE){
-//		// @todo right now just exit
-//		p_error("Discovered that symbol is a name. Not implemented. Exiting ...\n");
-//	}
 
 	hostVar = g_vars_find(regHostVarsTab, symbol);
 	if ( NULL == hostVar ){
+		p_warn("The symbol %p has not been found!", symbol);
 		cuda_err = cudaErrorInvalidSymbol;
 		return cuda_err;
 	}
@@ -2533,12 +2524,15 @@ void r__cudaUnregisterFatBinary(void** fatCubinHandle) {
 	// update packet
 	pPacket->args[0].argdp = fatCubinHandle;
 
-	if (__nvback_cudaUnregisterFatBinary_rpc(pPacket) != OK) {
+	if (__nvback_cudaUnregisterFatBinary_rpc(pPacket) == ERROR) {
 		p_warn("__ERROR__ Return from rpc with the wrong return value.\n");
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
-		p_debug("%s: __OK__ Return from rpc with ok value.\n", __FUNCTION__);
+		printRegVarTab(regHostVarsTab);
+
+		p_debug("FATCUBIN HANDLE else: %p\n", fatCubinHandle);
+		p_debug("__OK__ Return from rpc with ok value.\n");
 		// remove the handler;
 		g_vars_remove(regHostVarsTab, fatCubinHandle);
 		// destroy the table if the last handler has been removed
@@ -2548,12 +2542,6 @@ void r__cudaUnregisterFatBinary(void** fatCubinHandle) {
 	}
 
 	free(pPacket);
-
-	// @todo Uninit the library as well
-	//CUV_EXIT();
-
-	// local housekeeping for variables et al
-//	num_registered_vars = 0;
 }
 
 void l__cudaUnregisterFatBinary(void** fatCubinHandle) {

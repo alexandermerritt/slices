@@ -21,6 +21,11 @@
  
  0. Tested configurations:
  
+ 2011-04-28
+ - upgraded Nvidia Driver to a beta driver from 270.40 (CUDA 4.0 RC2)
+ - CUDA Toolkit 3.2 and SDK 3.2
+ 
+ 
  - CentOS release 5.5 (Final),  
  - 2.6.18-194.32.1.el5 #1 SMP Wed Jan 5 17:52:25 EST 2011 x86_64 x86_64 x86_64 GNU/Linux
  - gcc (GCC) 4.1.2 20080704 (Red Hat 4.1.2-48)
@@ -28,7 +33,7 @@
         script: v2.0.1.r5134, 2010/08/16 23:02:40, by bdeegan on cooldog
         engine: v2.0.1.r5134, 2010/08/16 23:02:40, by bdeegan on cooldog
  - Cuda compilation tools, release 3.2, V0.2.1221 (nvcc --version)
- - nvidia-settings:  version 260.19.14 (nvidia-settings --help)
+ - nvidia-settings:  version 260.19.14 (nvidia-smi -q or nvidia-settings -v)
  - Hardware:
   
    -- Fermi: There is 1 device supporting CUDA
@@ -38,7 +43,7 @@
      Device 1: "GeForce 9800 GX2"
    
  
- 1. Dependencies
+ 1. DEPENDENCIES
  
  a. Scons - the build system
  b. Installed CUDA Toolkit for
@@ -69,7 +74,7 @@
     
    
  
- 2. Building
+ 2. BUILDING
  
  a. unpack sources
  b. run scons -Q (quiet - doesn't show scons information)
@@ -84,7 +89,7 @@
  a. scons -c
  
  
- 3. Running the examples
+ 3. RUNNING EXAMPLES
  
  First you need to configure the environment by providing the correct
  values to the configuration file. The name of the configuration file
@@ -140,6 +145,8 @@ side. Just the client, i.e., the interposer library (libci.c).
  b. you can run the examples from NVIDIA_SDK. I tested the 
    - matrixMul
    - BlackSholes 
+   - binomialOptions (2011-04-29)
+   - MonteCarlo (2011-04-29)
  
  cuda2$ /home/magg/proj/kidron-utils-remote-cuda-exec-2/backend/backend
  
@@ -154,14 +161,18 @@ side. Just the client, i.e., the interposer library (libci.c).
        /home/magg/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/BlackScholes
        
  
- 4. running tests
+4. RUNNING TESTS
+
  # you mind need to setup the cunit lib:
  # export LD_LIBRARY_PATH=/opt/cunit212/lib/:$LD_LIBRARY_PATH
  [magg@prost interposer]$ 
    valgrind --leak-check=yes --track-origins=yes ./testLibciutils
    
    
-4. KNOWN ISSUES
+5. KNOWN ISSUES
+
 * Function g_vars_find my hang if you provide non-existing address as 
   a symbol; since it first assumes it is a pointer, then it is a string 
 
+* Right now it doesn't support CUDA 4.0 (you can have a newer driver, but
+  the support is for CUDA Tookit 3.2 and SDK 3.2).
