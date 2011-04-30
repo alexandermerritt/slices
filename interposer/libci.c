@@ -2529,9 +2529,8 @@ void r__cudaUnregisterFatBinary(void** fatCubinHandle) {
 		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
-		printRegVarTab(regHostVarsTab);
+		// printRegVarTab(regHostVarsTab);
 
-		p_debug("FATCUBIN HANDLE else: %p\n", fatCubinHandle);
 		p_debug("__OK__ Return from rpc with ok value.\n");
 		// remove the handler;
 		g_vars_remove(regHostVarsTab, fatCubinHandle);
