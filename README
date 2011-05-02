@@ -46,18 +46,26 @@
  1. DEPENDENCIES
  
  a. Scons - the build system
+ 
  b. Installed CUDA Toolkit for
     - libcudart.a (or something)
     - some includes cuda_runtime_api.h, __cuda_format.h
     - nvcc compiler 
+ 
  c. cunit212 - for tests
- d. iniparser to parse the config file 
+    http://cunit.sourceforge.net/
+ 
+ d. iniparser to parse the config file (kidron.ini)
+ 
     http://ndevilla.free.fr/iniparser/
-    You need to update two SConstruct files:
-    
-    @todo this must be a smarter way to do that
+        
+    This affects two SConstruct files.     
+
     interposer/SConstruct
-    backend/SConstruct
+    backend/SConstruct 
+
+	But you need to setup only variables in the main SConstruct.
+
  e. glib 
  
  	- glib 2.0 - currently used (you need a devel package and a lib package)
@@ -81,8 +89,12 @@
  
  c. You should get
  interposer/libci.so    # the interposer library
+ interposer/testLibci   # tests for libci      
+ interposer/testLibciutils # tests for libcutils
  backend/backend		# which is the remote part
- cuda-app/add			# the simple cuda app that uses a few CUDA calls
+ cuda-app/app1			# the simple cuda app that uses a few CUDA calls
+ cuda-app/app2
+ 
  
  To clean the build
  
@@ -163,11 +175,23 @@ side. Just the client, i.e., the interposer library (libci.c).
  
 4. RUNNING TESTS
 
- # you mind need to setup the cunit lib:
+ 
+ * standalone
+ # go to the main directory
+ 
+ export LD_LIBRARY_PATH=/opt/cunit212/lib/:$LD_LIBRARY_PATH
+ 
+ [smagg@kidlogin1 kidron-utils-remote-cuda-exec-2]$ interposer/testLibci
+ [smagg@kidlogin1 kidron-utils-remote-cuda-exec-2]$ interposer/testLibciutils
+
+ * with Valgrind
+ 
+ # you might need to setup the cunit lib:
  # export LD_LIBRARY_PATH=/opt/cunit212/lib/:$LD_LIBRARY_PATH
  [magg@prost interposer]$ 
    valgrind --leak-check=yes --track-origins=yes ./testLibciutils
-   
+ 
+ 
    
 5. KNOWN ISSUES
 
@@ -176,3 +200,101 @@ side. Just the client, i.e., the interposer library (libci.c).
 
 * Right now it doesn't support CUDA 4.0 (you can have a newer driver, but
   the support is for CUDA Tookit 3.2 and SDK 3.2).
+  
+  
+6. INSTALLATION ON KEENELAND
+
+* Be aware what compiler is used and check if gcc
+  
+  module unload intel/2011.3.174
+  module unload PE-intel   # unload programming environment intel
+  module load PE-gnu       # load programming environment gnu
+  module load gcc/4.1.2    # developed on that compiler
+
+* Open SConstruct and edit variables to the location of cuda, iniparser, 
+  and cunit212
+ 
+  CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary/'
+  INIPARSER = '/nics/d/home/smagg/src/iniparser/'
+  CUNIT212 = '/nics/d/home/smagg/opt/cunit212'
+  
+* If scons is missing
+  
+  wget -c http://prdownloads.sourceforge.net/scons/scons-2.0.1.tar.gz
+  module load python/2.7
+  tar xfvz scons-2.0.1.tar.gz
+  cd scons-2.0.1
+  # this installs to the directory you specify
+  python setup.py install --prefix=~/opt/scons
+  export PATH=~/opt/scons/bin/:$PATH
+  
+* if driver_types.h and vector_types.h are not found
+  
+  You need to change path to for CUDA in the following files:
+  
+  /sw/keeneland/cuda/3.2/linux_binary/
+  
+  (Set variable CUDA_ROOT in main SConstruct file)
+  
+* If your iniparser is missing
+
+   wget -c http://ndevilla.free.fr/iniparser/iniparser-3.0.tar.gz
+   tar xfvz iniparser-3.0.tar.gz
+   cd iniparser
+   make
+ 
+   Change INIPARSER value in main SConstruct to point to the iniparser installation
+   directory:
+   
+   INIPARSER = '/nics/d/home/smagg/src/iniparser/'
+ 	
+ * if you cunit is missing:
+ 
+    wget -c http://sourceforge.net/projects/cunit/files/CUnit/2.1-2/CUnit-2.1-2-src.tar.bz2/download
+    bunzip2 CUnit-2.1-2-src.tar.bz2
+    tar xf CUnit-2.1-2-src.tar 
+    cd CUnit-2.1.2
+
+    ./configure --prefix=/nics/d/home/smagg/opt/cunit212
+    
+	# if you have some troubles you might tried this         
+     ./configure CC=/usr/bin/gcc CPP=/usr/bin/cpp --prefix=/nics/d/home/smagg/opt/cunit212
+    
+     make -j7
+     make install
+     
+     Now, you need to update CUNIT212 in main SConstruct
+     
+     CUNIT212 = '/nics/d/home/smagg/opt/cunit212'
+     
+7. RUNNING EXAMPLES ON KEENELAND
+
+* allocate the node in the interactive mode
+
+[smagg@kidlogin1 kidron-utils-remote-cuda-exec-2]$ qlogin -I -l nodes=1:ppn=1
+
+* allocate the second node in the interactive mode
+
+[smagg@kidlogin2 kidron-utils-remote-cuda-exec-2]$ qlogin -I -l nodes=1:ppn=1
+
+* edit kidron.ini
+
+[network]
+
+#remote = cuda2.cc.gt.atl.ga.us ;
+remote = kid117.nics.utk.edu
+
+[interposer]
+
+local   = no ;
+
+* run backend
+
+[smagg@kid117 kidron-utils-remote-cuda-exec-2]$ ./backend/backend
+
+* run example
+
+LD_PRELOAD=/nics/d/home/smagg/poj/kidron-utils-remote-cuda-exec-2/interposer/libci.so cuda-app/app1
+
+[smagg@kid043 kidron-utils-remote-cuda-exec-2]$ \
+ LD_PRELOAD=/nics/d/home/smagg/poj/kidron-utils-remote-cuda-exec-2/interposer/libci.so ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/BlackScholes 

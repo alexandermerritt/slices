@@ -10,64 +10,52 @@
 # CPPPATH  - The $CPPPATH value tells SCons to look in the current 
 #   directory ('.') for any files included by C source files (.c or .h files)
 
-
-# create the construction environment for building those
 import os
 
-# 
-envRemote = Environment(LIBS    = ['pthread'],
-				  LIBPATH = ['/opt/cuda/libs'],
-				  CPPPATH = ['../include',  '/opt/cuda/include'],
-                  CCFLAGS = '-g -Wall -Wextra')
-
-#envRemote.Object('../network/remote_api_wrapper.o', ['../network/remote_api_wrapper.c'])		
-
-INIPARSER = '/home/magg/src/iniparser/'
+Import( 'CUDA_ROOT', 'INIPARSER', 'CUNIT212' )
 
 # for glib options run: glib-config --cflags  for glib1.2 
 # glib2 lacks this thing
 
-interposerEnv = Environment(LIBS = ['rt', 'dl', 'iniparser', 'glib-2.0'],
-					  LIBPATH = ['/opt/cuda/lib64', INIPARSER, '/lib64'],
-					  CPPPATH = [
-					  '.',
-					  '/opt/cuda/include', 
-					  '../include', 
-					  '../remote',
-					  '../backend',
-					  INIPARSER + 'src',
-					  '/usr/include/glib-2.0',
-					  '/usr/lib64/glib-2.0/include'],					  
-					  CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
+interposerEnv = Environment(
+ LIBS = ['rt', 'dl', 'iniparser', 'glib-2.0'],
+ LIBPATH = [CUDA_ROOT + 'lib64', 
+   INIPARSER, 
+   '/lib64'],
+ CPPPATH = [
+    '.',
+    CUDA_ROOT + 'include', 
+    '../include', 
+    '../remote',
+    '../backend',
+    INIPARSER + 'src',
+    '/usr/include/glib-2.0',
+    '/usr/lib64/glib-2.0/include'],                                
+ CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
 
-# create a regular library
-#cudaEnv.Library('libstaticciutils.a', ['libciutils.c'])
-
-# create a shared library					  
-interposerEnv.SharedLibrary('libci.so', ['libci.c',
-									'libciutils.c', 
-   									'../remote/remote_api_wrapper.c', 
-   									'../remote/connection.c',    									
-   									'../remote/remote_packet.c'
-   									])
-   									
+# create a shared library                                         
+interposerEnv.SharedLibrary('libci.so', 
+    [ 'libci.c',
+      'libciutils.c', 
+      '../remote/remote_api_wrapper.c', 
+      '../remote/connection.c',               
+      '../remote/remote_packet.c'])
+                                                                        
 # building tests
-envTest = Environment(LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
-					  LIBPATH= ['/opt/cunit212/lib', '.', '/lib64'],
-					  CPPPATH= ['/opt/cunit212/include',
-					  			'/opt/cuda/include',
-					            '../include',
-					            '../remote',
-					            '../backend',
-					            '/usr/include/glib-2.0',
-					  			'/usr/lib64/glib-2.0/include' ],
-					  CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+envTest = Environment(
+  LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
+  LIBPATH= [CUNIT212 + 'lib', '.', '/lib64'],
+  CPPPATH= [CUNIT212 + 'include',
+            CUDA_ROOT + 'include',
+            '../include',
+            '../remote', 
+            '../backend',
+            '/usr/include/glib-2.0',
+            '/usr/lib64/glib-2.0/include' ],
+  CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
 
 # libci and libciutils should be compiled earlier
-envTest.Program('testLibci', ['testLibci.c', 
-							  'libci.so' 
-							])
-							
-envTest.Program('testLibciutils', ['testLibciutils.c', 
-							'libci.so' 
-							])
+envTest.Program('testLibci', ['testLibci.c', 'libci.so' ])
+                                                        
+envTest.Program('testLibciutils', ['testLibciutils.c', 'libci.so' ])
+       

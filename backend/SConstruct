@@ -4,31 +4,28 @@
    @brief Building the network stuff
 """
 
-# LIBS - A list of one or more libraries that will be linked with 
-# any executable programs created by this environment.
-# LIBPATH - The list of directories that will be searched for libraries.
-# CPPPATH  - The $CPPPATH value tells SCons to look in the current 
-#   directory ('.') for any files included by C source files (.c or .h files)
-
-
-# create the construction environment for building those
 import os
 
-INIPARSER = '/home/magg/src/iniparser/'
+Import('CUDA_ROOT', 'INIPARSER')
 
-envBackend = Environment(LIBS    = ['pthread', 'rt', 'dl', 'cudart', 'iniparser', 'glib-2.0' ],
-				  LIBPATH = ['/opt/cuda/lib64',
-				             INIPARSER ],
-				  CPPPATH = ['.',
-				  			 '../remote',
-				  			 '../include',   
-				  			 '../interposer', 
-				  			 '../backend',
-				  			 '/opt/cuda/include',
-				  			 INIPARSER + 'src',
-				  			 '/usr/include/glib-2.0',
-					  		 '/usr/lib64/glib-2.0/include'],
-                  CCFLAGS = '-g -Wall -Wextra')
+envBackend = Environment(
+  LIBS=['pthread', 
+        'rt', 
+        'dl', 
+        'cudart', 
+        'iniparser', 
+        'glib-2.0' ],
+  LIBPATH=[CUDA_ROOT + 'lib64', INIPARSER ],
+  CPPPATH=['.',
+  '../remote',
+  '../include',
+  '../interposer',
+  '../backend',
+  CUDA_ROOT + 'include',
+  INIPARSER + 'src',
+  '/usr/include/glib-2.0',
+  '/usr/lib64/glib-2.0/include'],
+  CCFLAGS='-g -Wall -Wextra')
 			 
 envBackend.Program('backend', [
 			'backend.c',
@@ -36,6 +33,3 @@ envBackend.Program('backend', [
 			'../remote/connection.c',
 			'../remote/remote_packet.c',
 			'../remote/remote_api_wrapper.c'])
-						 
-			  					  
- 

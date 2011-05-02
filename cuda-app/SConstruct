@@ -13,9 +13,11 @@
 
 # create the construction environment for building those
 import os
-					  
-nvccEnv = Environment(CC = '/opt/cuda/bin/nvcc -g')
-#					  CCFLAGS = '-g')
+
+Import( 'CUDA_ROOT' )                                     
+
+nvccEnv = Environment(CC = CUDA_ROOT + '/bin/nvcc',
+                      CCFLAGS = '-g')	  
 nvccEnv.Program('app1', 'app1.cu')
 
 nvccEnv.Program('app2', 'app2.cu');
