@@ -1,5 +1,4 @@
-- This was fixed on 2011-05-02
-- 2011-04-12
+- 2011-04-12; 2011-05-02 done
   remove double INIPARSER from the build systems
 
     You need to update two SConstruct files:
