@@ -955,7 +955,7 @@ int __nvback_cudaRegisterVar_srv(cuda_packet_t * packet, conn_t * myconn) {
 	if (NULL == pFcI)
 		p_error("Not such fat cubin handler. Exiting %p\n", pA->fatCubinHandle);
 
-	p_debug("FATCUBIN HANDLE: received=%p, found=%p",
+	p_debug("FATCUBIN HANDLE: received=%p, found=%p\n",
 			pA->fatCubinHandle, pFcI->fatCubinHandle);
 
 	assert(pA->fatCubinHandle == pFcI->fatCubinHandle);

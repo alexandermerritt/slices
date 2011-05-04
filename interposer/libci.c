@@ -2651,8 +2651,6 @@ void l__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 	static pFuncType pFunc = NULL;
 
 	l_printFuncSigImpl(__FUNCTION__);
-	l_printRegVar(fatCubinHandle, hostVar, deviceAddress, deviceName, ext,
-				vsize, constant, global);
 
 	if (!pFunc) {
 		pFunc = (pFuncType) dlsym(RTLD_NEXT, "__cudaRegisterVar");
@@ -2676,8 +2674,8 @@ void r__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 			exit(ERROR);
 	}
 
-	l_printRegVar(fatCubinHandle, hostVar, deviceAddress, deviceName, ext,
-			vsize, constant, global);
+//	l_printRegVar(fatCubinHandle, hostVar, deviceAddress, deviceName, ext,
+//			vsize, constant, global);
 
 	int size = 0;
 
@@ -2722,7 +2720,7 @@ void r__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 }
 
 /**
- * Andrew Kerr: "his function establishes a mapping between global variables
+ * Andrew Kerr: "this function establishes a mapping between global variables
  * defined in .ptx or .cu modules and host-side variables. In PTX, global
  * variables have module scope and can be globally referenced by module and
  * variable name. In the CUDA Runtime API, globals in two modules must not have
@@ -2731,6 +2729,9 @@ void r__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global) {
+	l_printRegVar(fatCubinHandle, hostVar, deviceAddress, deviceName, ext,
+			vsize, constant, global);
+
 	if( 1 == LOCAL_EXEC )
 		l__cudaRegisterVar(fatCubinHandle, hostVar,
 		deviceAddress, deviceName, ext, vsize, constant, global);
