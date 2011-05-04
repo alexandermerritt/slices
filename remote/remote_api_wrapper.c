@@ -434,7 +434,7 @@ int nvbackCudaMemcpyToSymbol_rpc(cuda_packet_t * packet) {
 		return ERROR;
 	}
 
-	return OK;
+	return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
 
 int nvbackCudaMemcpyFromSymbol_rpc(cuda_packet_t * packet) {
@@ -455,7 +455,7 @@ int nvbackCudaMemcpyFromSymbol_rpc(cuda_packet_t * packet) {
 		return ERROR;
 	}
 
-	return OK;
+	return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
 
 int __nvback_cudaRegisterFatBinary_rpc(cuda_packet_t *packet) {

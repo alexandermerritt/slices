@@ -1722,7 +1722,6 @@ cudaError_t lcudaMemcpyFromSymbol(void *dst, const char *symbol,
 			return cudaErrorDL;
 	}
 
-
 	return (pFunc(dst, symbol, count, offset, kind));
 }
 

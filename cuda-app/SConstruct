@@ -16,7 +16,7 @@ import os
 
 Import( 'CUDA_ROOT' )                                     
 
-nvccEnv = Environment(CC = CUDA_ROOT + '/bin/nvcc',
+nvccEnv = Environment(CC = CUDA_ROOT + 'bin/nvcc',
                       CCFLAGS = '-g')	  
 nvccEnv.Program('app1', 'app1.cu')
 

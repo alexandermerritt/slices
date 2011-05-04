@@ -11,6 +11,7 @@
 #include "method_id.h"
 #include <assert.h>
 #include "remote_api_wrapper.h"
+#include <cuda.h>   // cudaGetErrorString
 
 extern char * methodIdToString(const int method_id);
 
@@ -271,14 +272,16 @@ rpkt_t *pkt_execute(rpkt_t *rpkt, conn_t * pConn)
 		break;
 
 	default:
-		printd(DBG_ERROR, "%s: __ERROR__: Unknown method ID %d\n", __FUNCTION__, rpkt->method_id);
+		p_critical( "__ERROR__: Unknown method ID %d\n", rpkt->method_id);
 		rpkt->flags = CUDA_error;
+		rpkt->ret_ex_val.err = cudaErrorInvalidValue;
 		break;
 	}
 
     if(rpkt->method_id != __CUDA_REGISTER_FAT_BINARY)
         if(0 != rpkt->ret_ex_val.err)
-            printd(DBG_ERROR, "%s, Error: method returned an error\n", __FUNCTION__);
+            p_critical("__ERROR__: method returned an error %d, %s\n", rpkt->ret_ex_val.err,
+            		cudaGetErrorString(rpkt->ret_ex_val.err));
 
     return rpkt;
 }
