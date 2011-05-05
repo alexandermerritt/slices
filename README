@@ -166,7 +166,7 @@ The kidron.ini with example values is as presented below:
 [network]
 
 # tells where the backend is running
-remote  = cuda2.cc.gt.atl.ga.us ;
+remote  = cuda2 ;
 
 
 [interposer]
