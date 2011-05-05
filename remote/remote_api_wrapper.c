@@ -210,7 +210,7 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 	}
 
 	p_debug("received response header. Expecting %d packets and extra response size of %u in response batch\n",
-			 pHdr->num_cuda_pkts, pHdr->data_size);
+			pHdr->num_cuda_pkts, pHdr->data_size);
 
 	assert(pHdr->num_cuda_pkts == 1);
 
@@ -426,7 +426,6 @@ int nvbackCudaMemcpyToSymbol_rpc(cuda_packet_t * packet) {
 				packet->args[2].arr_argi[0], NULL, 0);
 		break;
 	case cudaMemcpyDeviceToDevice:
-		// TODO:
 		l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
 		break;
 	default:
@@ -443,7 +442,6 @@ int nvbackCudaMemcpyFromSymbol_rpc(cuda_packet_t * packet) {
 
 	switch ((enum cudaMemcpyKind) packet->args[3].argi) {
 	case cudaMemcpyDeviceToDevice:
-		// TODO:
 		l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
 		break;
 	case cudaMemcpyDeviceToHost:
@@ -495,7 +493,7 @@ int __nvback_cudaUnregisterFatBinary_rpc(cuda_packet_t *packet) {
 	l_do_cuda_rpc(packet, NULL, 0, NULL, 0);
 
 	// this doesn't get info from the _srv counterpart
-	//return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
+	// return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 	return OK;
 }
 
@@ -544,7 +542,7 @@ int nvbackCudaGetDevice_srv(cuda_packet_t *packet, conn_t * pConn) {
 
 	p_debug( "Current assigned device id = %ld\n", packet->args[0].argi );
 	p_debug( "CUDA_ERROR=%d for method id=%d after calling method\n",
-			 packet->ret_ex_val.err, packet->method_id);
+			packet->ret_ex_val.err, packet->method_id);
 	return (packet->ret_ex_val.err == 0) ? OK : ERROR;
 }
 
@@ -675,8 +673,8 @@ int nvbackCudaMemcpy_srv(cuda_packet_t *packet, conn_t * pConn) {
 		//packet->args[1].argui = (uint64_t)((char *)myconn->request_data_buffer + packet->ret_ex_val.data_unit);
 		packet->args[1].argui = (uint64_t) ((char *) pConn->pReqBuffer);
 
-// @todo to remove after implementation of cudaMemcpyTo/From Symbol
-//		assert( cudaGetSymbolAddress(&packet->args[0].argui,  "tab_d") == cudaSuccess);
+		// @todo to remove after implementation of cudaMemcpyTo/From Symbol
+		//		assert( cudaGetSymbolAddress(&packet->args[0].argui,  "tab_d") == cudaSuccess);
 
 		break;
 		//case cudaMemcpyDeviceToHost:
@@ -713,7 +711,7 @@ int nvbackCudaThreadSynchronize_srv(cuda_packet_t *packet, conn_t * pConn) {
 	packet->ret_ex_val.err = cudaThreadSynchronize();
 
 	p_info( "CUDA_ERROR=%d (%s) for method id=%d\n", packet->ret_ex_val.err,
-				cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
+			cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
 
 	return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
@@ -722,19 +720,19 @@ int nvbackCudaThreadExit_srv(cuda_packet_t *packet, conn_t * pConn) {
 	packet->ret_ex_val.err = cudaThreadExit();
 
 	p_info( "CUDA_ERROR=%d (%s) for method id=%d\n", packet->ret_ex_val.err,
-				cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
+			cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
 
 	return (packet->ret_ex_val.err == cudaSuccess) ? OK : ERROR;
 }
 
 int nvbackCudaMemcpyToSymbol_srv(cuda_packet_t *packet, conn_t * pConn) {
 	// this will hold original hostVar obtained from the client
-	const char * hostVar = (const char *) packet->args[0].argcp;  // symbol
+	const char * hostVar = (const char *) packet->args[0].argcp; // symbol
 
 	switch ((enum cudaMemcpyKind) packet->args[3].argi) {
 	case cudaMemcpyHostToDevice:
 		p_debug("pconn->request_data_size = %d, packet->count = %ld\n", pConn->request_data_size,
-				 packet->args[2].arr_argi[0]);
+				packet->args[2].arr_argi[0]);
 
 		assert((unsigned int)pConn->request_data_size == packet->args[2].arr_argi[0]);
 
@@ -745,7 +743,7 @@ int nvbackCudaMemcpyToSymbol_srv(cuda_packet_t *packet, conn_t * pConn) {
 		packet->ret_ex_val.err = cudaErrorNotYetImplemented;
 		p_critical("__ERROR__: cudaMemcpyDeviceToDevice not supported\n");
 		p_info( "CUDA_ERROR=%d (%s) for method id=%d\n", packet->ret_ex_val.err,
-						cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
+				cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
 		return ERROR;
 
 	default:
@@ -759,9 +757,10 @@ int nvbackCudaMemcpyToSymbol_srv(cuda_packet_t *packet, conn_t * pConn) {
 	// now find the symbol in the server space (based on what you have got
 	// from the client
 	int idx = 0;
-	fatcubin_info_t * p  = g_fcia_host_var(fatCInfoArr, (char*)hostVar, &idx);
+	fatcubin_info_t * p = g_fcia_host_var(fatCInfoArr, (char*) hostVar, &idx);
 
-	if (nullDebugChkpt(p, __FUNCTION__, "The hostVar has not been found\n") == TRUE ){
+	if (nullDebugChkpt(p, __FUNCTION__, "The hostVar has not been found\n")
+			== TRUE) {
 		packet->ret_ex_val.err = cudaErrorInvalidSymbol;
 	} else {
 		assert(idx > -1);
@@ -771,10 +770,13 @@ int nvbackCudaMemcpyToSymbol_srv(cuda_packet_t *packet, conn_t * pConn) {
 		//assert( cudaGetSymbolAddress(&symbol,
 		//		p->variables[idx]->deviceAddress) == cudaSuccess);
 
-		// finally call the function
+		// finally call the function; if you want to call the symbol as
+		// a deviceName it wreaks havoc with looking up the names if used many
+		// .cu modules, specifically, 'duplicate global variable looked up by
+		// a string name'
 		packet->ret_ex_val.err = cudaMemcpyToSymbol(
-				//p->variables[idx]->dom0HostAddr, //
-				p->variables[idx]->deviceName, // symbol
+				p->variables[idx]->dom0HostAddr, // symbol
+				//p->variables[idx]->deviceName, 	// symbol
 				(void *) packet->args[1].argui, // src
 				packet->args[2].arr_argi[0], // count
 				packet->args[2].arr_argi[1], // offset
@@ -782,7 +784,7 @@ int nvbackCudaMemcpyToSymbol_srv(cuda_packet_t *packet, conn_t * pConn) {
 	}
 
 	p_info( "CUDA_ERROR=%d (%s) for method id=%d\n", packet->ret_ex_val.err,
-				cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
+			cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
 
 	return packet->ret_ex_val.err == cudaSuccess ? OK : ERROR;
 }
@@ -799,14 +801,14 @@ int nvbackCudaMemcpyFromSymbol_srv(cuda_packet_t *packet, conn_t * pConn) {
 		if (mallocCheck(pConn->pRspBuffer, __FUNCTION__, NULL) == ERROR) {
 			return ERROR;
 		}
-		packet->args[1].argui = (uint64_t)pConn->pRspBuffer;
+		packet->args[1].argui = (uint64_t) pConn->pRspBuffer;
 		break;
 
 	case cudaMemcpyDeviceToDevice:
 		packet->ret_ex_val.err = cudaErrorNotYetImplemented;
 		p_critical("__ERROR__: cudaMemcpyDeviceToDevice not supported\n");
 		p_info( "CUDA_ERROR=%d (%s) for method id=%d\n", packet->ret_ex_val.err,
-						cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
+				cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
 		return ERROR;
 
 	default:
@@ -820,26 +822,30 @@ int nvbackCudaMemcpyFromSymbol_srv(cuda_packet_t *packet, conn_t * pConn) {
 	// now find the symbol in the server space (based on what you have got
 	// from the client
 	int idx = 0;
-	fatcubin_info_t * p  = g_fcia_host_var(fatCInfoArr, (char*)hostVar, &idx);
+	fatcubin_info_t * p = g_fcia_host_var(fatCInfoArr, (char*) hostVar, &idx);
 
-	if (nullDebugChkpt(p, __FUNCTION__, "The hostVar has not been found\n") == TRUE ){
+	if (nullDebugChkpt(p, __FUNCTION__, "The hostVar has not been found\n")
+			== TRUE) {
 		packet->ret_ex_val.err = cudaErrorInvalidSymbol;
 	} else {
 		assert(idx > -1);
 		assert(idx < MAX_REGISTERED_VARS);
 
-		// finally call the function
+		// finally call the function; if you want to call the symbol as
+		// a deviceName it wreaks havoc with looking up the names if used many
+		// .cu modules, specifically, 'duplicate global variable looked up by
+		// a string name'
 		packet->ret_ex_val.err = cudaMemcpyFromSymbol(
 				(void *) packet->args[1].argui, // dst
-				p->variables[idx]->deviceName, // symbol
-				//p->variables[idx]->dom0HostAddr, // symbol
+				//p->variables[idx]->deviceName, // symbol
+				p->variables[idx]->dom0HostAddr, // symbol
 				packet->args[2].arr_argi[0], // count
 				packet->args[2].arr_argi[1], // offset
 				packet->args[3].argi); // kind
 	}
 
 	p_info( "CUDA_ERROR=%d (%s) for method id=%d\n", packet->ret_ex_val.err,
-				cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
+			cudaGetErrorString(packet->ret_ex_val.err), packet->method_id);
 
 	return packet->ret_ex_val.err == cudaSuccess ? OK : ERROR;
 }
@@ -901,7 +907,7 @@ int __nvback_cudaRegisterFunction_srv(cuda_packet_t *packet, conn_t * myconn) {
 	reg_func_args_t * pA = malloc(sizeof(reg_func_args_t));
 	fatcubin_info_t * pFcI = NULL;
 
-	nullExitChkptMalloc((void*)pA, (char*) __FUNCTION__ );
+	nullExitChkptMalloc((void*) pA, (char*) __FUNCTION__);
 
 	if (unpackRegFuncArgs(pA, myconn->pReqBuffer) == ERROR)
 		p_warn("Problems with unpacking arguments in function register\n");
@@ -943,7 +949,7 @@ int __nvback_cudaRegisterVar_srv(cuda_packet_t * packet, conn_t * myconn) {
 	reg_var_args_t * pA = (reg_var_args_t *) malloc(sizeof(reg_var_args_t));
 	fatcubin_info_t * pFcI = NULL;
 
-	nullExitChkptMalloc((void*)pA, (char*)__FUNCTION__);
+	nullExitChkptMalloc((void*) pA, (char*) __FUNCTION__);
 
 	if (unpackRegVar(pA, myconn->pReqBuffer) == ERROR)
 		p_error("Problems with unpacking arguments in function register. Exiting ...\n");
@@ -969,7 +975,7 @@ int __nvback_cudaRegisterVar_srv(cuda_packet_t * packet, conn_t * myconn) {
 			(const char *) pA->deviceName, pA->ext, pA->size, pA->constant,
 			pA->global);
 	p_debug("pA->hostVar after __cudaRegisterVar: pointer = %p\n",
-			 pA->dom0HostAddr);
+			pA->dom0HostAddr);
 
 	// warn us if we want to write outbounds; fatcubin_info_srv.num_reg_fns
 	// should indicate the first free slot you can write in an array

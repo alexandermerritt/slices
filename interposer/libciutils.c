@@ -407,10 +407,12 @@ int l_getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t
 	// we will store those characters as the size as returned by strlen
 	// then the string terminated plus NULL included (it will make simpler
 	// deserializing by strcpy
+
 	size += l_getStringPktSize(pFatCubin->key);
 	size += l_getStringPktSize(pFatCubin->ident);
 	size += l_getStringPktSize(pFatCubin->usageMode);
 
+	p_debug("Here!!!!!!!\n");
 	// this probably means the information where the debug information
 	// can be found (eg. the name of the file with debug, or something)
 	// @todo don't know what to do with this member, originally a size of the
@@ -477,13 +479,12 @@ cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCuda
 // -------------------------------
 // print functions
 // ------------------------------
-
 void l_printPtxE(__cudaFatPtxEntry * p){
 	int i = 0;
-	printd(DBG_INFO, "__cudaFatPtxEntry: %p\n", p);
+	p_debug( "__cudaFatPtxEntry: %p\n", p);
 
 	while(1){
-		printd(DBG_INFO, "p[%d] (gpuProfileName, ptx): %s, %s\n",
+		p_debug( "p[%d] (gpuProfileName, ptx): %s, %s\n",
 						i, p[i].gpuProfileName, p[i].ptx);
 
 		if( !(p+i) || !p[i].gpuProfileName || !p[i].ptx )
@@ -495,10 +496,10 @@ void l_printPtxE(__cudaFatPtxEntry * p){
 
 void l_printCubinE(__cudaFatCubinEntry * p){
 	int i = 0;
-	printd(DBG_INFO, "__cudaFatCubinEntry: %p\n", p);
+	p_debug( "__cudaFatCubinEntry: %p\n", p);
 
 	while(1){
-		printd(DBG_INFO, "p[%d] (gpuProfileName, cubin): %s, %s\n",
+		p_debug( "p[%d] (gpuProfileName, cubin): %s, %s\n",
 				i, p[i].gpuProfileName, p[i].cubin);
 
 		if( !(p+i) || !p[i].gpuProfileName || !p[i].cubin )
@@ -510,10 +511,10 @@ void l_printCubinE(__cudaFatCubinEntry * p){
 
 void l_printSymbolE(__cudaFatSymbol * p, char * name){
 	int i = 0;
-	printd(DBG_INFO, "__cudaFatSymbol: %s,  %p\n", name, p);
+	p_debug( "__cudaFatSymbol: %s,  %p\n", name, p);
 
 	while(p && p->name ){
-		printd(DBG_INFO, "p[%d] (name): %s\n",
+		p_debug( "p[%d] (name): %s\n",
 				i, p[i].name);
 		i++;
 	}
@@ -521,9 +522,9 @@ void l_printSymbolE(__cudaFatSymbol * p, char * name){
 
 void l_printDebugE(__cudaFatDebugEntry * p){
 	int i = 0;
-	printd(DBG_INFO, "__cudaFatDebugEntry: %p\n", p);
+	p_debug( "__cudaFatDebugEntry: %p\n", p);
 	while( p ){
-		printd(DBG_INFO, "p[%d] (gpuProfileName, debug, next, size): %s, %s, %p, %d\n",
+		p_debug( "p[%d] (gpuProfileName, debug, next, size): %s, %s, %p, %d\n",
 				i, p->gpuProfileName, p->debug, p->next, p->size);
 		p = p->next;
 		i++;
@@ -533,11 +534,11 @@ void l_printDebugE(__cudaFatDebugEntry * p){
 void l_printDepE(__cudaFatCudaBinary * p){
 	int i = 0;
 
-	printd(DBG_INFO, "__cudaFatCudaBinary: %p\n", p);
+	p_debug( "__cudaFatCudaBinary: %p\n", p);
 
 	while( p && p->ident){
 
-		printd(DBG_INFO, "p[%i]\n", i);
+		p_debug( "p[%i]\n", i);
 		i++;
 		p = p->dependends;
 	}
@@ -546,35 +547,34 @@ void l_printDepE(__cudaFatCudaBinary * p){
 void l_printElfE(__cudaFatElfEntry * p){
 
 	int i = 0;
-	printd(DBG_INFO, "__cudaFatElfEntry: %p\n", p);
+	p_debug( "__cudaFatElfEntry: %p\n", p);
 
 	while( p ){
-		printd(DBG_INFO, "p[%d] (gpuProfileName, elf, next, size): %s, %p, %p, %d\n",
+		p_debug( "p[%d] (gpuProfileName, elf, next, size): %s, %p, %p, %d\n",
 				i, p->gpuProfileName,  p->elf, p->next, p->size);
 		p = p->next;
 		i++;
 	}
 }
 
-
 void l_printFatBinary(__cudaFatCudaBinary * pFatBin){
 	if( pFatBin == NULL ){
-		printd(DBG_INFO, "~~~~~~~~ FatBinary  = %p\n", pFatBin);
+		p_info( "~~~~~~~~ FatBinary  = %p\n", pFatBin);
 	} else {
-		printd(DBG_DEBUG, "\tmagic: %ld, version: %ld , gpuInfoVersion: %ld\n",
+		p_debug( "\tmagic: %ld, version: %ld , gpuInfoVersion: %ld\n",
 				pFatBin->magic, pFatBin->version, pFatBin->gpuInfoVersion);
-		printd(DBG_DEBUG, "\tkey: %s, ident: %s, usageMode: %s\n",
+		p_debug( "\tkey: %s, ident: %s, usageMode: %s\n",
 				pFatBin->key, pFatBin->ident, pFatBin->usageMode);
 		l_printPtxE(pFatBin->ptx);
 		l_printCubinE(pFatBin->cubin);
 		l_printDebugE(pFatBin->debug);
 
-		printd(DBG_DEBUG, "\tdebugInfo (pointer, char*): %p, %s\n", pFatBin->debugInfo, (char*) pFatBin->debugInfo);
-		printd(DBG_DEBUG, "\tflags: %u\n", pFatBin->flags);
+		p_debug( "\tdebugInfo (pointer, char*): %p, %s\n", pFatBin->debugInfo, (char*) pFatBin->debugInfo);
+		p_debug( "\tflags: %u\n", pFatBin->flags);
 		l_printSymbolE(pFatBin->exported, "exported");
 		l_printSymbolE(pFatBin->imported, "imported");
 		l_printDepE(pFatBin->dependends);
-		printd(DBG_DEBUG, "\tcharacteristics: %u\n", pFatBin->characteristic);
+		p_debug( "\tcharacteristics: %u\n", pFatBin->characteristic);
 		l_printElfE(pFatBin->elf);
 	}
 }

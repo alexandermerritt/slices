@@ -1614,6 +1614,7 @@ cudaError_t rcudaMemcpyToSymbol(const char *symbol, const void *src,
 	free(pPacket);
 
 	return cuda_err;
+
 }
 
 cudaError_t lcudaMemcpyToSymbol(const char *symbol, const void *src,
@@ -2438,6 +2439,7 @@ void** r__cudaRegisterFatBinary(void* fatC){
 	}
 
 	fb_size = getFatRecPktSize(pSrcFatC, &entries_cached);
+
 	p_debug( "FatCubin size: %d\n",fb_size);
 	//l_printFatBinary(pSrcFatC);
 
@@ -2461,23 +2463,10 @@ void** r__cudaRegisterFatBinary(void* fatC){
 	// send the packet
 	if (__nvback_cudaRegisterFatBinary_rpc(pPacket) != OK) {
 		p_critical("Return from rpc with the wrong return value.\n");
-		// @todo some cleaning or setting cuda_err
 		cuda_err = cudaErrorUnknown;
 	} else {
-		// get the response, get the fat cubin handle
 		fatCubinHandle = pPacket->ret_ex_val.handle;
-		//fatcubin_info_rpc.fatCubin = pSrcFatC;
-		//fatcubin_info_rpc.fatCubinHandle = pPacket->ret_ex_val.handle;
-
-		// @todo maybe I am wrong with this assert, maybe it should
-		// be what is got from rpc call: args[1].argp which is
-		// the fatCubin of the remote server
-		// actually I think it doesn't matter, since to unregister
-		// you need a handler
-	//	assert(fatC == fatcubin_info_rpc.fatCubin);
-
 		p_debug( "Returned fatCubinHandle = %p\n", pPacket->ret_ex_val.handle);
-
 	}
 
 	free(pPacket);
@@ -2490,6 +2479,7 @@ void** l__cudaRegisterFatBinary(void* fatC) {
 	static void** (*func)(void* fatC) = NULL;
 
 	l_printFuncSigImpl(__FUNCTION__);
+
 	if (!func) {
 		func = dlsym(RTLD_NEXT, "__cudaRegisterFatBinary");
 
@@ -2503,7 +2493,9 @@ void** l__cudaRegisterFatBinary(void* fatC) {
 void** __cudaRegisterFatBinary(void* fatC) {
 
 	LOCAL_EXEC = l_getLocalFromConfig();
-	p_debug( "LOCAL_EXEC=%d (1-local, 0-remote)\n", LOCAL_EXEC);
+	p_debug( "LOCAL_EXEC=%d (1-local, 0-remote), faC = %p\n", LOCAL_EXEC, fatC);
+
+	//l_printFatBinary(fatC);
 
 	if( LOCAL_EXEC == 1 )
 		return l__cudaRegisterFatBinary(fatC);
@@ -2556,7 +2548,6 @@ void l__cudaUnregisterFatBinary(void** fatCubinHandle) {
 	}
 
 	(pFunc(fatCubinHandle));
-
 }
 
 void __cudaUnregisterFatBinary(void** fatCubinHandle) {
