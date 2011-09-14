@@ -19,7 +19,7 @@ Help("""
 CUDA_ROOT = '/opt/cuda/'
 INIPARSER = '/home/magg/src/iniparser/'
 CUNIT212 = '/opt/cunit212/'
-
+GLIB20   = '/opt/glib-2.28.7/'
 
 if not os.path.exists(INIPARSER):
         print INIPARSER, """does not exist!"""
@@ -31,8 +31,10 @@ if not os.path.exists(CUDA_ROOT):
 if not os.path.exists(CUNIT212):
         print CUNIT212, """does not exist!"""
 
+if not os.path.exists(GLIB20):
+        print GLIB20, """ does not exist! """
 # export variables to other scripts
-Export( 'CUDA_ROOT', 'INIPARSER', 'CUNIT212' )
+Export( 'CUDA_ROOT', 'INIPARSER', 'CUNIT212', 'GLIB20' )
 
 					  
 # call all scripts

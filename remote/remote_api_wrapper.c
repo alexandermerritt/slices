@@ -31,14 +31,18 @@
 
 #include "fatcubininfo.h"   // for fatcubin_info_t
 #include "iniparser.h"
+#include "kidron_common_s.h"	// ini_t structure
 
 // stores the config parameters
 #include "config.h"
 
 #include <glib.h>
 
+//! this will store the data read from the ini file
+static ini_t ini;
+
 //! This will be storing the name of the hsot
-static char REMOTE_HOSTNAME[HOSTNAME_STRLEN];
+//static char REMOTE_HOSTNAME[HOSTNAME_STRLEN];
 
 //! open the connection forever; if you open and then close the
 //! connection the program stops to work, so you have to make it static
@@ -58,6 +62,10 @@ extern void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global);
 
+// from kidron_common_f.c
+extern char* ini_getBackendHost(const ini_t* pIni);
+extern int ini_getIni(ini_t* pIni);
+extern int ini_freeIni(ini_t* pIni);
 ///////////////////
 // RPC CALL UTILS//
 ///////////////////
@@ -82,7 +90,7 @@ int l_cleanUpConn(conn_t * pConn, const int exit_code) {
 /**
  * Returns the remote host or NULL if the remote host
  */
-inline char * l_getRemoteHost(void) {
+/*inline char * l_getRemoteHost(void) {
 
 	dictionary * d;
 	char * s;
@@ -100,7 +108,7 @@ inline char * l_getRemoteHost(void) {
 
 	p_debug( "%s\n", REMOTE_HOSTNAME);
 	return REMOTE_HOSTNAME;
-}
+}*/
 
 /**
  * executes the cuda call over the network
@@ -140,10 +148,15 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 	// if you close and open the connection, the program exits; a kind of
 	// singleton
 	if (0 == myconn.valid) {
-		if (conn_connect(&myconn, l_getRemoteHost()) == -1)
+		// initialize the ini structure; in the future it might be
+		// in some more appropriate place
+		ini_getIni(&ini);
+		gchar* backend_hostname = ini_getBackendHost(&ini);
+		if (conn_connect(&myconn, backend_hostname) == -1)
 			exit(ERROR);
-		p_info( "Connection to host: %s\n", REMOTE_HOSTNAME);
+		p_info( "Connection to host: %s\n", backend_hostname);
 		myconn.valid = 1;
+		ini_freeIni(&ini);
 	}
 
 	// for simplicity we use aliases for particular fields of the myconn

@@ -12,7 +12,7 @@
 
 import os
 
-Import( 'CUDA_ROOT', 'INIPARSER', 'CUNIT212' )
+Import( 'CUDA_ROOT', 'INIPARSER', 'CUNIT212', 'GLIB20' )
 
 # for glib options run: glib-config --cflags  for glib1.2 
 # glib2 lacks this thing
@@ -20,7 +20,8 @@ Import( 'CUDA_ROOT', 'INIPARSER', 'CUNIT212' )
 interposerEnv = Environment(
  LIBS = ['rt', 'dl', 'iniparser', 'glib-2.0'],
  LIBPATH = [CUDA_ROOT + 'lib64', 
-   INIPARSER, 
+   INIPARSER,
+   GLIB20 + 'lib', 
    '/lib64'],
  CPPPATH = [
     '.',
@@ -29,8 +30,9 @@ interposerEnv = Environment(
     '../remote',
     '../backend',
     INIPARSER + 'src',
-    '/usr/include/glib-2.0',
-    '/usr/lib64/glib-2.0/include'],                                
+    GLIB20 + 'include/glib-2.0',
+    GLIB20 + 'include/gio-unix-2.0',
+    GLIB20 + 'lib/glib-2.0/include'],                                
  CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
 
 # create a shared library                                         
@@ -39,19 +41,21 @@ interposerEnv.SharedLibrary('libci.so',
       'libciutils.c', 
       '../remote/remote_api_wrapper.c', 
       '../remote/connection.c',               
-      '../remote/remote_packet.c'])
+      '../remote/remote_packet.c',
+      '../include/kidron_common_f.c'])
                                                                         
 # building tests
 envTest = Environment(
   LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
-  LIBPATH= [CUNIT212 + 'lib', '.', '/lib64'],
+  LIBPATH= [CUNIT212 + 'lib', '.', GLIB20 + 'lib', '/lib64'],
   CPPPATH= [CUNIT212 + 'include',
             CUDA_ROOT + 'include',
             '../include',
             '../remote', 
             '../backend',
-            '/usr/include/glib-2.0',
-            '/usr/lib64/glib-2.0/include' ],
+            GLIB20 + 'include/glib-2.0',
+            GLIB20 + 'include/gio-unix-2.0',
+            GLIB20 + 'lib/glib-2.0/include'],
   CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
 
 # libci and libciutils should be compiled earlier

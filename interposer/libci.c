@@ -57,6 +57,12 @@
 #include <assert.h>
 
 #include <glib.h>		// for GHashTable
+#include "kidron_common_s.h" // for ini file
+
+// from kidron_common_f.c
+extern int ini_getLocal(const ini_t* pIni);
+extern int ini_getIni(ini_t* pIni);
+extern int ini_freeIni(ini_t* pIni);
 
 
 //! to indicate the error with the dynamic loaded library
@@ -2492,7 +2498,15 @@ void** l__cudaRegisterFatBinary(void* fatC) {
 
 void** __cudaRegisterFatBinary(void* fatC) {
 
-	LOCAL_EXEC = l_getLocalFromConfig();
+	ini_t ini;			// for ini file
+
+	// get the ini file
+	ini_getIni(&ini);
+
+	LOCAL_EXEC = ini_getLocal(&ini);
+	ini_freeIni(&ini);
+
+	//LOCAL_EXEC = l_getLocalFromConfig();
 	p_debug( "LOCAL_EXEC=%d (1-local, 0-remote), faC = %p\n", LOCAL_EXEC, fatC);
 
 	//l_printFatBinary(fatC);

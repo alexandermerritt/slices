@@ -150,7 +150,7 @@ char * methodIdToString(const int method_id);
  * @return 1 - Local GPU will be invoked (means interposer:local is yes)
  *         0 - remote GPU will be invoked (means interposer:local is set no)
  */
-inline int l_getLocalFromConfig(void);
+//inline int l_getLocalFromConfig(void);
 
 /**
  * returns an index in fatCubinInfoArr to the fatcubin_info_t corresponding to

@@ -32,4 +32,5 @@ envBackend.Program('backend', [
 			'../interposer/libciutils.c',
 			'../remote/connection.c',
 			'../remote/remote_packet.c',
-			'../remote/remote_api_wrapper.c'])
+			'../remote/remote_api_wrapper.c',
+            '../include/kidron_common_f.c'])

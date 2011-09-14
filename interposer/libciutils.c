@@ -19,6 +19,7 @@
 #include "config.h"		 // for the KIDRON_INI
 #include "iniparser.h"   // for dictionary, iniparser_load, etc
 
+#include <glib.h>		 // for ini files
 
 
 /**
@@ -50,6 +51,8 @@ inline char * freeBuffer(char * pBuffer){
 	return NULL;
 }
 
+
+
 /**
  * Reads the interposer:local value from the KIDRON_INI file and returns
  * the numerical value
@@ -57,7 +60,7 @@ inline char * freeBuffer(char * pBuffer){
  * @return 1 - Local GPU will be invoked (means interposer:local is yes)
  *         0 - remote GPU will be invoked (means interposer:local is set no)
  */
-inline int l_getLocalFromConfig(void){
+/*inline int l_getLocalFromConfig(void){
 
 	dictionary * d;
 	int b;
@@ -76,7 +79,7 @@ inline int l_getLocalFromConfig(void){
 		printd(DBG_INFO, "Remote GPU will be invoked\n");
 
 	return b;
-}
+} */
 
 /**
  * cleans the structure, frees the allocated memory, sets values to zeros,
