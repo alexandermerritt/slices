@@ -12,18 +12,14 @@ Help("""
 
 # keeneland
 CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary/'
-INIPARSER = '/nics/d/home/smagg/src/iniparser/'
 CUNIT212 = '/nics/d/home/smagg/opt/cunit212/'
 GLIB20='/nics/d/home/smagg/opt/glib-2.28.7/'
 # TODO: you should support also GLIB variable
 # prost georgia tech
 #CUDA_ROOT = '/opt/cuda/'
-#INIPARSER = '/home/magg/src/iniparser/'
 #CUNIT212 = '/opt/cunit212/'
 #GLIB20   = '/opt/glib-2.28.7/'
 
-if not os.path.exists(INIPARSER):
-        print INIPARSER, """does not exist!"""
                         
 if not os.path.exists(CUDA_ROOT):
         print CUDA_ROOT, """does not exist!"""
@@ -35,7 +31,9 @@ if not os.path.exists(CUNIT212):
 if not os.path.exists(GLIB20):
         print GLIB20, """ does not exist! """
 # export variables to other scripts
-Export( 'CUDA_ROOT', 'INIPARSER', 'CUNIT212', 'GLIB20' )
+Export( 'CUDA_ROOT', 
+        'CUNIT212', 
+        'GLIB20' )
 
 					  
 # call all scripts

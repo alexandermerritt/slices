@@ -30,7 +30,6 @@
 #include "connection.h"
 
 #include "fatcubininfo.h"   // for fatcubin_info_t
-#include "iniparser.h"
 #include "kidron_common_s.h"	// ini_t structure
 
 // stores the config parameters

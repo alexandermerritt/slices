@@ -6,25 +6,29 @@
 
 import os
 
-Import('CUDA_ROOT', 'INIPARSER')
+Import('CUDA_ROOT', 
+       'GLIB20')
 
 envBackend = Environment(
   LIBS=['pthread', 
         'rt', 
         'dl', 
         'cudart', 
-        'iniparser', 
         'glib-2.0' ],
-  LIBPATH=[CUDA_ROOT + 'lib64', INIPARSER ],
+  LIBPATH=[CUDA_ROOT + 'lib64',
+           GLIB20 + 'lib'],
   CPPPATH=['.',
   '../remote',
   '../include',
   '../interposer',
   '../backend',
   CUDA_ROOT + 'include',
-  INIPARSER + 'src',
-  '/usr/include/glib-2.0',
-  '/usr/lib64/glib-2.0/include'],
+  GLIB20 + 'include/glib-2.0',
+  GLIB20 + 'include/gio-unix-2.0',
+  GLIB20 + 'lib/glib-2.0/include'
+  #'/usr/include/glib-2.0',
+  #'/usr/lib64/glib-2.0/include'
+  ],
   CCFLAGS='-g -Wall -Wextra')
 			 
 envBackend.Program('backend', [

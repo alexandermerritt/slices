@@ -20,6 +20,62 @@
  Magic Magg ported the virtualized-based software to a non-virtualized case.
  
  0. Tested configurations:
+
+ 2011-09-15
+ - Keeneland nodes
+ 
+ [smagg@kid078 2011-09-14-kidron-utils-rce]$ python utils/devel_info.py
+Info system developed by Magda Slawinska, aka Magic Magg, 2011
+The information about the development environment for the Kidron Utils dSimons
+************>  date
+Thu Sep 15 14:56:25 EDT 2011
+************>  hostname
+kid078.nics.utk.edu
+************> SOFTWARE
+************>scons --version
+SCons by Steven Knight et al.:
+        script: v2.0.1.r5134, 2010/08/16 23:02:40, by bdeegan on cooldog
+        engine: v2.0.1.r5134, 2010/08/16 23:02:40, by bdeegan on cooldog
+Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010 The SCons Foundation
+************> gcc -v
+Using built-in specs.
+Target: x86_64-redhat-linux6E
+Configured with: ../configure --prefix=/usr --mandir=/usr/share/man --infodir=/usr/share/info --with-bugurl=http://bugzilla.redhat.com/bugzilla --enable-bootstrap --enable-shared --enable-threads=posix --enable-checking=release --with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions --enable-languages=c,c++,fortran --disable-libgcj --with-mpfr=/builddir/build/BUILD/gcc-4.4.0-20090514/obj-x86_64-redhat-linux6E/mpfr-install/ --with-ppl=/builddir/build/BUILD/gcc-4.4.0-20090514/obj-x86_64-redhat-linux6E/ppl-install --with-cloog=/builddir/build/BUILD/gcc-4.4.0-20090514/obj-x86_64-redhat-linux6E/cloog-install --with-tune=generic --with-arch_32=i586 --build=x86_64-redhat-linux6E
+Thread model: posix
+gcc version 4.4.0 20090514 (Red Hat 4.4.0-6) (GCC) 
+************> nvcc --version
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2010 NVIDIA Corporation
+Built on Wed_Nov__3_16:16:57_PDT_2010
+Cuda compilation tools, release 3.2, V0.2.1221
+************> SYSTEM AND HARDWARE
+************> uname -a
+Linux kid078.nics.utk.edu 2.6.18-194.el5.perfctr #1 SMP Wed Feb 9 18:13:07 EST 2011 x86_64 x86_64 x86_64 GNU/Linux
+************> nvidia-smi -q | head
+
+==============NVSMI LOG==============
+
+Timestamp                       : Thu Sep 15 14:56:27 2011
+
+Driver Version                  : 270.41.19
+
+Attached GPUs                   : 3
+
+GPU 0:6:0
+************> cat /etc/redhat-release
+CentOS release 5.5 (Final)
+************>  cat /proc/cpuinfo | head
+processor       : 0
+vendor_id       : GenuineIntel
+cpu family      : 6
+model           : 44
+model name      : Intel(R) Xeon(R) CPU           X5660  @ 2.80GHz
+stepping        : 2
+cpu MHz         : 2800.188
+cache size      : 12288 KB
+physical id     : 0
+siblings        : 6
+ 
  
  2011-05-05
  - Keeneland nodes
@@ -62,7 +118,6 @@ physical id     : 0
 siblings        : 6
  
  
- 
  2011-04-28
  - upgraded Nvidia Driver to a beta driver from 270.40 (CUDA 4.0 RC2)
  - CUDA Toolkit 3.2 and SDK 3.2
@@ -97,18 +152,7 @@ siblings        : 6
  c. cunit212 - for tests
     http://cunit.sourceforge.net/
  
- d. iniparser to parse the config file (kidron.ini)
- 
-    http://ndevilla.free.fr/iniparser/
-        
-    This affects two SConstruct files.     
-
-    interposer/SConstruct
-    backend/SConstruct 
-
-	But you need to setup only variables in the main SConstruct.
-
- e. glib 
+ d. glib 
  
  	- glib-2.28.7 - developed with this version, at least requires the
  	  decent version that supports key file  	
@@ -118,8 +162,8 @@ siblings        : 6
         GLIB20 + 'include/gio-unix-2.0',
         GLIB20 + 'lib/glib-2.0/include'      
  
- 2. BUILDING
  
+ 2. BUILDING
  
  a. unpack sources
  b. run scons -Q (quiet - doesn't show scons information)
@@ -136,6 +180,11 @@ siblings        : 6
  cuda-app/app1			# the simple cuda app that uses a few CUDA calls
  cuda-app/app2
  
+ d. utils/devel_info.py is a script to get you some information about
+    the system
+    You can run it as 
+    
+    python utils/devel_info.py
  
  To clean the build
  
@@ -248,6 +297,27 @@ TEST PASSED!
    
 5. KNOWN ISSUES
 
+* 2011-09-15 - g_vars_remove - produces segmentation fault. It can be observed when
+  running MonteCarlo and binomialOptions
+   
+  -- with execution with gdb
+   (gdb) 
+DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
+2544                    g_vars_remove(regHostVarsTab, fatCubinHandle);
+(gdb) 
+
+Program received signal SIGSEGV, Segmentation fault.
+0x0000000001e8c220 in ?? ()
+   
+   -- execution without gdb
+   
+   >>>>>>>>>> Implemented >>>>>>>>>>: r__cudaUnregisterFatBinary (id = 38)
+DEBUG(5) __nvback_cudaUnregisterFatBinary_rpc:505: CUDA_ERROR=30 before RPC on method 38
+DEBUG(5) l_do_cuda_rpc:144: MethodID: 38, reqbuf (nil), reqbuf_size 0, rspbuf (nil), rspbuf_size 0
+DEBUG(5) conn_sendCudaPktHdr:46: Header sent: pkt_num 1, extra buffer size: 0.
+DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
+Segmentation fault
+ 
 
 * Function g_vars_find my hang if you provide non-existing address as 
   a symbol; since it first assumes it is a pointer, then it is a string 
@@ -267,12 +337,12 @@ TEST PASSED!
   module load PE-gnu       # load programming environment gnu
   module load gcc/4.1.2    # developed on that compiler
 
-* Open SConstruct and edit variables to the location of cuda, iniparser, 
+* Open SConstruct and edit variables to the location of cuda, glib 
   and cunit212
  
   CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary/'
-  INIPARSER = '/nics/d/home/smagg/src/iniparser/'
   CUNIT212 = '/nics/d/home/smagg/opt/cunit212'
+  GLIB20= '/nics/d/home/smagg/opt/glib-2.28.7/'
   
 * If scons is missing
   
@@ -291,20 +361,8 @@ TEST PASSED!
   /sw/keeneland/cuda/3.2/linux_binary/
   
   (Set variable CUDA_ROOT in main SConstruct file)
-  
-* If your iniparser is missing
-
-   wget -c http://ndevilla.free.fr/iniparser/iniparser-3.0.tar.gz
-   tar xfvz iniparser-3.0.tar.gz
-   cd iniparser
-   make
- 
-   Change INIPARSER value in main SConstruct to point to the iniparser installation
-   directory:
-   
-   INIPARSER = '/nics/d/home/smagg/src/iniparser/'
- 	
- * if you cunit is missing:
+   	
+* if your cunit is missing:
  
     wget -c http://sourceforge.net/projects/cunit/files/CUnit/2.1-2/CUnit-2.1-2-src.tar.bz2/download
     bunzip2 CUnit-2.1-2-src.tar.bz2
@@ -362,11 +420,26 @@ LD_PRELOAD=/nics/d/home/smagg/proj/kidron-utils-remote-cuda-exec-2/interposer/li
  - ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/BlackScholes
  
  - it might require setting the environment variable 
+   (observed the segmentation fault after execution the program
+   it is related with g_vars_remove
+   DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
+2544                    g_vars_remove(regHostVarsTab, fatCubinHandle);
+   
+   
+   
+   >>>>>>>>>> Implemented >>>>>>>>>>: r__cudaUnregisterFatBinary (id = 38)
+DEBUG(5) __nvback_cudaUnregisterFatBinary_rpc:505: CUDA_ERROR=30 before RPC on method 38
+DEBUG(5) l_do_cuda_rpc:144: MethodID: 38, reqbuf (nil), reqbuf_size 0, rspbuf (nil), rspbuf_size 0
+DEBUG(5) conn_sendCudaPktHdr:46: Header sent: pkt_num 1, extra buffer size: 0.
+DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
+Segmentation fault
+   )
+ 
    [smagg@kid071 2011-09-14-kidron-utils-rce]$ export LD_LIBRARY_PATH=/nics/d/home/smagg/opt/glib-2.28.7/lib:$LD_LIBRARY_PATH
     ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/MonteCarlo
     
  - ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/binomialOptions  
-   (observed the segmentation fault after execution the program with 
+   (observed the segmentation fault after execution the program 
    DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
    Segmentation fault
    ) - this might be the reason of  updating to a newer version of glib 2.28.7
@@ -376,7 +449,8 @@ LD_PRELOAD=/nics/d/home/smagg/proj/kidron-utils-remote-cuda-exec-2/interposer/li
 
 * 2011-09-15 
    - Added a test for a connection
-   - got rid of the iniparser -> used glib key file for this
+   - got rid of the iniparser -> used glib key file for parsing ini file
+   - added utils/devel_info.py -> a script about the development environment
    
 * 2011-05-05 First realease: 0.0.1 -- Kidron utils remote CUDA exec
  Description:

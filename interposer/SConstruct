@@ -12,15 +12,17 @@
 
 import os
 
-Import( 'CUDA_ROOT', 'INIPARSER', 'CUNIT212', 'GLIB20' )
-
+Import( 'CUDA_ROOT', 
+        'CUNIT212', 
+        'GLIB20' )
+   
 # for glib options run: glib-config --cflags  for glib1.2 
 # glib2 lacks this thing
 
 interposerEnv = Environment(
- LIBS = ['rt', 'dl', 'iniparser', 'glib-2.0'],
+ LIBS = ['rt', 'dl', 
+         'glib-2.0'],
  LIBPATH = [CUDA_ROOT + 'lib64', 
-   INIPARSER,
    GLIB20 + 'lib', 
    '/lib64'],
  CPPPATH = [
@@ -29,7 +31,6 @@ interposerEnv = Environment(
     '../include', 
     '../remote',
     '../backend',
-    INIPARSER + 'src',
     GLIB20 + 'include/glib-2.0',
     GLIB20 + 'include/gio-unix-2.0',
     GLIB20 + 'lib/glib-2.0/include'],                                
