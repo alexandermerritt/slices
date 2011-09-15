@@ -50,36 +50,6 @@ inline char * freeBuffer(char * pBuffer){
 	return NULL;
 }
 
-
-
-/**
- * Reads the interposer:local value from the KIDRON_INI file and returns
- * the numerical value
- *
- * @return 1 - Local GPU will be invoked (means interposer:local is yes)
- *         0 - remote GPU will be invoked (means interposer:local is set no)
- */
-/*inline int l_getLocalFromConfig(void){
-
-	dictionary * d;
-	int b;
-
-	d = iniparser_load(KIDRON_INI);
-	if(NULL == d){
-		printd(DBG_ERROR, "Can't parse the config file. Quitting ... ");
-		exit(ERROR);
-	}
-	b = iniparser_getboolean(d, "interposer:local", -1);
-
-	iniparser_freedict(d);
-	if( b == 1 )
-		printd(DBG_INFO, "Local GPU will be invoked\n");
-	else
-		printd(DBG_INFO, "Remote GPU will be invoked\n");
-
-	return b;
-} */
-
 /**
  * cleans the structure, frees the allocated memory, sets values to zeros,
  * nulls, etc; intended to be used in __unregisterCudaFatBinary

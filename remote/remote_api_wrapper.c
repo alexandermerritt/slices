@@ -40,9 +40,6 @@
 //! this will store the data read from the ini file
 static ini_t ini;
 
-//! This will be storing the name of the hsot
-//static char REMOTE_HOSTNAME[HOSTNAME_STRLEN];
-
 //! open the connection forever; if you open and then close the
 //! connection the program stops to work, so you have to make it static
 static conn_t myconn;
@@ -86,28 +83,6 @@ int l_cleanUpConn(conn_t * pConn, const int exit_code) {
 	return exit_code;
 }
 
-/**
- * Returns the remote host or NULL if the remote host
- */
-/*inline char * l_getRemoteHost(void) {
-
-	dictionary * d;
-	char * s;
-
-	d = iniparser_load(KIDRON_INI);
-	if (NULL == d) {
-		p_error( "Can't parse the config file. Quitting ... ");
-	}
-	s = iniparser_getstring(d, "network:remote", NULL);
-
-	// complain if the name is to long
-	assert(strlen(s) < HOSTNAME_STRLEN - 1);
-	strcpy(REMOTE_HOSTNAME, s);
-	iniparser_freedict(d);
-
-	p_debug( "%s\n", REMOTE_HOSTNAME);
-	return REMOTE_HOSTNAME;
-}*/
 
 /**
  * executes the cuda call over the network
