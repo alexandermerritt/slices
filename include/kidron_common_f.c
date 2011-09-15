@@ -35,11 +35,11 @@ int ini_getIni(ini_t* pIni){
 	pIni->backend_host = g_key_file_get_string(key_file, "network", "backend_host", &error);
 	if( NULL == pIni->backend_host&& (G_KEY_FILE_ERROR_KEY_NOT_FOUND == error->code ||
 			G_KEY_FILE_ERROR_GROUP_NOT_FOUND == error->code) )
-		p_exit("Can't read the value from ini file : [%s:%s]\n", "network", "backend");
+		p_exit("Can't read the value from ini file : [%s:%s]\n", "network", "backend_host");
 
 
 	pIni->local = g_key_file_get_boolean(key_file, "interposer", "local", &error);
-	if( FALSE == pIni->local && (G_KEY_FILE_ERROR_KEY_NOT_FOUND == error->code ||
+	if( FALSE == pIni->local && NULL != error && (G_KEY_FILE_ERROR_KEY_NOT_FOUND == error->code ||
 			G_KEY_FILE_ERROR_INVALID_VALUE == error->code ))
 		p_exit("Can't read the value from ini file: [%s:%s]\n", "interposer", "local");
 

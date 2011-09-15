@@ -110,18 +110,13 @@ siblings        : 6
 
  e. glib 
  
- 	- glib 2.0 - currently used (you need a devel package and a lib package)
- 	  -- includes: -I/usr/include/glib-2.0
-				   -I/usr/lib64/glib-2.0/include
-	  -- path to libraries 
-	      -L /lib64 (likely it is set by default)
+ 	- glib-2.28.7 - developed with this version, at least requires the
+ 	  decent version that supports key file  	
  	  -- link with -lglib-2.0
-    - it shouldn't be issues with glib 1.2 (I also used glib-1.2 in early
-      stages and it worked).
-      -- for options to set in build files run
-      glib-config --cflags 
-      -- for the linker you need to link with -lglib
-      
+ 	  -- include directories
+ 	    GLIB20 + 'include/glib-2.0',
+        GLIB20 + 'include/gio-unix-2.0',
+        GLIB20 + 'lib/glib-2.0/include'      
  
  2. BUILDING
  
@@ -133,6 +128,10 @@ siblings        : 6
  interposer/libci.so    # the interposer library
  interposer/testLibci   # tests for libci      
  interposer/testLibciutils # tests for libcutils
+ 
+ interposer/testConnectionListener  # test for a connection
+ interposer/testConnectionSender    # test for a connection
+ 
  backend/backend		# which is the remote part
  cuda-app/app1			# the simple cuda app that uses a few CUDA calls
  cuda-app/app2
@@ -160,20 +159,20 @@ The file is called kidron.ini and should be present in the current directory.
 The kidron.ini with example values is as presented below:
 
 # ---------- start of kidron.ini -------------- 
+
+#
 # The configuration file for the kidron system
 #
 
 [network]
 
-# tells where the backend is running
-remote  = cuda2 ;
+backend_host=kid091.nics.utk.edu
 
 
 [interposer]
 
-# tells if the functions should be called locally or not
-local   = no ;
- 
+local=false
+
 #
 # --------- end of kidron.ini -----------------
 #
@@ -221,12 +220,25 @@ side. Just the client, i.e., the interposer library (libci.c).
  * standalone
  # go to the main directory
  
- export LD_LIBRARY_PATH=/opt/cunit212/lib/:$LD_LIBRARY_PATH
+ [smagg@kidlogin2 2011-09-14-kidron-utils-rce]$ LD_LIBRARY_PATH=/nics/d/home/smagg/opt/cunit212/lib/:/nics/d/home/smagg/opt/glib-2.28.7/lib interposer/testLibciutils
+ [smagg@kidlogin2 2011-09-14-kidron-utils-rce]$ LD_LIBRARY_PATH=/nics/d/home/smagg/opt/cunit212/lib/:/nics/d/home/smagg/opt/glib-2.28.7/lib interposer/testLibci
  
- [smagg@kidlogin1 kidron-utils-remote-cuda-exec-2]$ interposer/testLibci
- [smagg@kidlogin1 kidron-utils-remote-cuda-exec-2]$ interposer/testLibciutils
+ # there is a test for testing the network connection. The test consists of 
+ # the Listener and Sender part. The listener listens for a connection. The sender
+ # sends the number. To run the sender you need to provide a name of the hostname
+ # which is printed by the listener. First run the listener then a sender.
+  
+  [smagg@kidlogin2 2011-09-14-kidron-utils-rce]$ LD_LIBRARY_PATH=/nics/d/home/smagg/opt/cunit212/lib/:/nics/d/home/smagg/opt/glib-2.28.7/lib interposer/testConnectionListener <4> conn_localbind[196]: Queried for hostname: kidlogin2.nics.utk.edu
+<4> conn_accept[286]: Got new incoming connection
+Test PASSED: got 44
 
- * with Valgrind
+ [smagg@kidlogin2 2011-09-14-kidron-utils-rce]$  LD_LIBRARY_PATH=/nigg/opt/cunit212/lib/:/nics/d/home/smagg/opt/glib-2.28.7/lib interposer/testConnectionSender kidlogin2.nics.utk.edu
+<5> conn_connect[124]: Socket = 3
+DEBUG(5) main:43: Sending message: 44
+TEST PASSED!
+ 
+
+ * with Valgrind, you might need to add the glib/lib directory to LD_LIBRARY_PATH
  
  # you might need to setup the cunit lib:
  # export LD_LIBRARY_PATH=/opt/cunit212/lib/:$LD_LIBRARY_PATH
@@ -346,13 +358,26 @@ LD_PRELOAD=/nics/d/home/smagg/proj/kidron-utils-remote-cuda-exec-2/interposer/li
  
  7a. OTHER TESTED EXAMPLES
  
- - ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/matricMul
+ - ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/matrixMul
  - ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/BlackScholes
- - ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/MonteCarlo
+ 
+ - it might require setting the environment variable 
+   [smagg@kid071 2011-09-14-kidron-utils-rce]$ export LD_LIBRARY_PATH=/nics/d/home/smagg/opt/glib-2.28.7/lib:$LD_LIBRARY_PATH
+    ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/MonteCarlo
+    
  - ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/binomialOptions  
+   (observed the segmentation fault after execution the program with 
+   DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
+   Segmentation fault
+   ) - this might be the reason of  updating to a newer version of glib 2.28.7
+   with some cleaning after computations are done.
  
  8. HISTORY 
- 
+
+* 2011-09-15 
+   - Added a test for a connection
+   - got rid of the iniparser -> used glib key file for this
+   
 * 2011-05-05 First realease: 0.0.1 -- Kidron utils remote CUDA exec
  Description:
  

@@ -150,6 +150,7 @@ int l_do_cuda_rpc(cuda_packet_t *packet, void * reqbuf, const int reqbuf_size,
 	if (0 == myconn.valid) {
 		// initialize the ini structure; in the future it might be
 		// in some more appropriate place
+		ini.ini_name = KIDRON_INI;
 		ini_getIni(&ini);
 		gchar* backend_hostname = ini_getBackendHost(&ini);
 		if (conn_connect(&myconn, backend_hostname) == -1)

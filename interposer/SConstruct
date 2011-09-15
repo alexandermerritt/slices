@@ -47,7 +47,7 @@ interposerEnv.SharedLibrary('libci.so',
 # building tests
 envTest = Environment(
   LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
-  LIBPATH= [CUNIT212 + 'lib', '.', GLIB20 + 'lib', '/lib64'],
+  LIBPATH= [CUNIT212 + 'lib', '.', GLIB20 + 'lib'],
   CPPPATH= [CUNIT212 + 'include',
             CUDA_ROOT + 'include',
             '../include',
@@ -62,4 +62,10 @@ envTest = Environment(
 envTest.Program('testLibci', ['testLibci.c', 'libci.so' ])
                                                         
 envTest.Program('testLibciutils', ['testLibciutils.c', 'libci.so' ])
+
+# obviously this doesn't require all libci.so functionality, however
+# since there is a mess with dependencies I tried to minimizem, without much
+# success. Maybe next time
+envTest.Program('testConnectionListener', ['testConnectionListener.c', 'libci.so'])
+envTest.Program('testConnectionSender', ['testConnectionSender.c', 'libci.so'])
        

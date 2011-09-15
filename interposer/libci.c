@@ -59,6 +59,8 @@
 #include <glib.h>		// for GHashTable
 #include "kidron_common_s.h" // for ini file
 
+#include "config.h"
+
 // from kidron_common_f.c
 extern int ini_getLocal(const ini_t* pIni);
 extern int ini_getIni(ini_t* pIni);
@@ -2500,6 +2502,7 @@ void** __cudaRegisterFatBinary(void* fatC) {
 
 	ini_t ini;			// for ini file
 
+	ini.ini_name = KIDRON_INI;
 	// get the ini file
 	ini_getIni(&ini);
 

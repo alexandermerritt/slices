@@ -19,6 +19,7 @@
 #include <__cudaFatFormat.h> // for __cudaFatPtxEntry, and others
 #include "libciutils.h"	     // for cache_num_entries_t
 #include "method_id.h"		// for ids of the cuda calls
+#include <glib.h>
 
 
 extern inline int l_getStringPktSize(const char const * string);
