@@ -64,7 +64,7 @@ int mallocCheck(const void * const p, const char * const pFuncName,
  *         FALSE the pointer is not null and the message is
  *               not displayed
  */
-inline gboolean nullDebugChkpt(const void * p, const char *func, char * message);
+gboolean nullDebugChkpt(const void * p, const char *func, char * message);
 
 /**
  * check if the pointer is null and if yes then exit
@@ -72,7 +72,7 @@ inline gboolean nullDebugChkpt(const void * p, const char *func, char * message)
  * @param p pointer to be checked
  * @param message the message that needs to be displayed when error occurs
  */
-inline void nullExitChkpt(void *p, char * message);
+void nullExitChkpt(void *p, char * message);
 
 /**
  * checks if the pointer is null and if yes then exits
@@ -81,9 +81,9 @@ inline void nullExitChkpt(void *p, char * message);
  * @param p pointer to be checked
  * @param message the message the needs to be displayed when error occurs
  */
-inline void nullExitChkptMalloc(void *p, char * message);
+void nullExitChkptMalloc(void *p, char * message);
 
-inline char * freeBuffer(char * pBuffer);
+char * freeBuffer(char * pBuffer);
 
 int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin,
 		cache_num_entries_t * pEntriesCache);
@@ -164,7 +164,7 @@ char * methodIdToString(const int method_id);
  * @return index of the entry holding the fatCubinHandle
  *         -1 if no entry equal to fatCubinHandle can be found
  */
-inline int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle);
+int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle);
 
 /**
  * returns the the pointer to the fatcubin_info_t corresponding to
@@ -179,7 +179,7 @@ inline int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle);
  *         NULL if no entry equal to fatCubinHandle can be found or fatCubinInfoArr
  *         is lost
  */
-inline fatcubin_info_t * g_fcia_elem(GArray * fatCubinInfoArr,
+fatcubin_info_t * g_fcia_elem(GArray * fatCubinInfoArr,
 		void ** fatCubinHandle);
 
 /**
@@ -196,7 +196,7 @@ inline fatcubin_info_t * g_fcia_elem(GArray * fatCubinInfoArr,
  *         NULL if no entry equal to fatCubinHandle can be found or fatCubinInfoArr
  *         is lost
  */
-inline fatcubin_info_t * g_fcia_elidx(GArray * fatCubinInfoArr,
+fatcubin_info_t * g_fcia_elidx(GArray * fatCubinInfoArr,
 		void ** fatCubinHandle, int * pIndex);
 
 /**
@@ -226,7 +226,7 @@ fatcubin_info_t * g_fcia_host_var(GArray * fatCubinInfoArr, char * hostVar, int 
  *         the value corresponding to fcHandle in regHostVarsTab where the val
  *         has been inserted
  */
-inline GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle,
+GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle,
 		vars_val_t * val);
 
 /**
@@ -241,7 +241,7 @@ inline GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle,
  *         of the variable) or a string name (i.e. a pointer to the name of the variable)
  *         NULL if symbol has not been found
  */
-inline char * g_vars_find(GHashTable * regHostVarsTab, const char * symbol);
+char * g_vars_find(GHashTable * regHostVarsTab, const char * symbol);
 
 /**
  * removes the handler and associated array of pointers from the table
@@ -249,7 +249,7 @@ inline char * g_vars_find(GHashTable * regHostVarsTab, const char * symbol);
  * @param fatCubinHandle The handler to be removed
  * @return OK
  */
-inline int g_vars_remove(GHashTable * regHostVarsTab, void** fatCubinHandle);
+int g_vars_remove(GHashTable * regHostVarsTab, void** fatCubinHandle);
 
 /**
  * removes the array; the call should be triggered automatically
