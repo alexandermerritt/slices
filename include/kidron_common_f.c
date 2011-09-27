@@ -12,7 +12,16 @@
 #include <glib.h>
 #include "debug.h"
 #include <unistd.h>
+#include <string.h>
 
+
+/**
+ * The idea of how to work with ini file:
+ *
+ * 1. parse the command line
+ * 2. ini_getIni
+ * 3. when you are done: ini_freeIni
+ */
 
 /**
  * Gets the ini file and transforms it to the structure
@@ -37,6 +46,10 @@ int ini_getIni(ini_t* pIni){
 			G_KEY_FILE_ERROR_GROUP_NOT_FOUND == error->code) )
 		p_exit("Can't read the value from ini file : [%s:%s]\n", "network", "backend_host");
 
+	pIni->vc_manager_host = g_key_file_get_string(key_file, "network", "vc_manager_host", &error);
+	if( NULL == pIni->backend_host&& (G_KEY_FILE_ERROR_KEY_NOT_FOUND == error->code ||
+				G_KEY_FILE_ERROR_GROUP_NOT_FOUND == error->code) )
+			p_exit("Can't read the value from ini file : [%s:%s]\n", "network", "backend_host");
 
 	pIni->local = g_key_file_get_boolean(key_file, "interposer", "local", &error);
 	if( FALSE == pIni->local && NULL != error && (G_KEY_FILE_ERROR_KEY_NOT_FOUND == error->code ||
@@ -58,6 +71,9 @@ int ini_freeIni(ini_t* pIni){
 
 	g_free(pIni->backend_host);
 	pIni->backend_host = NULL;
+
+	g_free(pIni->vc_manager_host);
+	pIni->vc_manager_host = NULL;
 
 	return 0;
 }
@@ -96,6 +112,45 @@ char* ini_getBackendHost(const ini_t* pIni){
 
 
 /**
+ * sets the hostname to the ini file; exits if there are any problems
+ * @param pIni The pointer the ini structure that contains the
+ *             ini file name
+ */
+void ini_vc_setVCManagerHost(const ini_t* pIni){
+	GKeyFile*		key_file;
+	GKeyFileFlags	flags = G_KEY_FILE_KEEP_COMMENTS | G_KEY_FILE_KEEP_TRANSLATIONS;
+	GError*			error = NULL;
+	char 			hostname[256];
+
+	if( gethostname(hostname, sizeof(hostname)) != 0 )
+		p_exit("Problems with getting the host name\n");
+
+	key_file = g_key_file_new ();
+	ptr_null_exit(key_file, "Problems with openin he ini file\n");
+
+	if( !g_key_file_load_from_file(key_file, pIni->ini_name, flags, &error)){
+		p_exit("Problems with loading the file: %s (code: %d)\n",
+				error->message, error->code);
+	}
+
+	g_key_file_set_string(key_file, "network", "vc_manager_host", hostname);
+
+	gsize length;
+	gchar* ini_content;
+
+	ini_content = g_key_file_to_data(key_file, &length, &error);
+	FILE * f;
+	f = fopen(pIni->ini_name, "w");
+	fwrite(ini_content, 1, strlen(ini_content), f);
+
+	fclose(f);
+	g_key_file_free(key_file);
+
+	p_debug("[network:vc_manager_host] set to: %s\n", hostname);
+}
+
+
+/**
  * parse the command line options; the version for the
  *
  * @param argc the argument count as provided by the command line
@@ -114,9 +169,9 @@ ini_cmd_parse(int argc, char** argv, ini_t* pIni){
 	  { NULL, '\0', 0, 0,  NULL, NULL, NULL}
 	};
 
-	context = g_option_context_new("- Kidron Remote CUDA Executions Utils");
+	context = g_option_context_new("- Kidron Virtual Clusters Utils");
 	g_option_context_set_summary(context,
-	"The software is a part of Kidron utils. "
+	"The software is a part of the Kidron system and implements the concept of Virtual Clusters. "
 	);
 	g_option_context_add_main_entries( context, entries, NULL);
 
@@ -131,4 +186,15 @@ ini_cmd_parse(int argc, char** argv, ini_t* pIni){
 
 	// clean things if possible
 	g_option_context_free(context);
+}
+
+/**
+ * prints the ini file
+ * @param pIni The structure to be printed
+ */
+void
+ini_print(const ini_t* pIni){
+	printf("backend_host_name = %s\n", pIni->backend_host);
+	printf("backend config file name = %s\n", pIni->ini_name);
+	printf("backend vc_manager_host = %s\n", pIni->vc_manager_host);
 }

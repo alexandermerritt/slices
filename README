@@ -262,6 +262,19 @@ side. Just the client, i.e., the interposer library (libci.c).
  prost$  LD_PRELOAD=/home/magg/kidron/interposer/libci.so \
        /home/magg/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/BlackScholes
        
+ and here are tests on keeneland:
+ 
+ [smagg@kid070 2011-09-14-kidron-utils-rce]$ \
+ /nics/d/home/smagg/proj/wksp-ecl-cpp/2011-09-14-kidron-utils-rce/backend/backend -f kidron.f
+ 
+ [smagg@kid069 2011-09-14-kidron-utils-rce]$ \
+ LD_PRELOAD=/nics/d/home/smagg/proj/ksp-ecl-cpp/2011-09-14-kidron-utils-rce/interposer/libci.so \
+ /nics/d/home/smagg/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/BlackScholes
+ 
+ To run vc_manager:
+ [smagg@kidlogin2 2011-09-14-kidron-utils-rce]$ \
+ LD_LIBRARY_PATH=/nics/d/home/smagg/proj/wksp-ecl-cpp/2011-09-14-kidron-utils-rce/interposer \
+ vc_manager/vc_manager -f kidron.ini
  
 4. RUNNING TESTS
 

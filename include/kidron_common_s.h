@@ -22,6 +22,8 @@ typedef struct _ini {
 	// [network] stuff
 	//! the host where the backend is running
 	gchar*		backend_host;
+	//! the host where the VC_Manager is running
+	gchar*		vc_manager_host;
 
 	// [interposer]
 	//! tells if the interposer library functions need to be called locally

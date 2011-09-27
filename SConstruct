@@ -2,6 +2,8 @@
    @author Magdalena Slawinska magg@gatech.edu
    @date 2011-02-15
    @brief Building kidron-utils-remote-cuda-exec-2
+   
+   @todo The building system is such a mess 
 """
 import os
 
@@ -40,7 +42,8 @@ Export( 'CUDA_ROOT',
 SConscript([
 'cuda-app/SConstruct',		# it doesn't depend on anything
 'interposer/SConstruct',    # it compiles a bunch of stuff
-'backend/SConstruct'			
+'backend/SConstruct',
+'vc_manager/SConstruct'     # it compiles the vc_manager		
 ])
                   
 
