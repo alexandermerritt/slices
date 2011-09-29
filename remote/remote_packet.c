@@ -14,6 +14,8 @@
 #include <cuda.h>   // cudaGetErrorString
 
 extern char * methodIdToString(const int method_id);
+extern const char* cudaGetErrorString(cudaError_t error);
+
 
 int strm_full(strm_t * strm)
 {
