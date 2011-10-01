@@ -8,6 +8,7 @@
 
 import os
 import commands
+import sys
 
 Import('CUDA_ROOT', 
        'GLIB20')
@@ -36,6 +37,25 @@ if nodename.startswith('prost') :
       #'/usr/lib64/glib-2.0/include'
       ],
       CCFLAGS='-g -Wall -Wextra')
+elif nodename.startswith('shiva') :
+    envBackend = Environment(
+      LIBS=['pthread', 
+            'rt', 
+            'dl', 
+            'cudart', 
+            'glib-2.0' ],
+      LIBPATH=[CUDA_ROOT + 'lib64'],
+      CPPPATH=['.',
+      '../remote',
+      '../include',
+      '../interposer',
+      '../backend',
+      CUDA_ROOT + 'include',
+      '/usr/include/glib-2.0',
+      '/usr/include/gio-unix-2.0',
+      '/usr/lib/glib-2.0/include'
+      ],
+      CCFLAGS='-g -Wall -Wextra')
 elif nodename.startswith('ifrit') :
     envBackend = Environment(
       LIBS=['pthread', 
@@ -55,6 +75,9 @@ elif nodename.startswith('ifrit') :
       '/usr/lib/glib-2.0/include'
       ],
       CCFLAGS='-g -Wall -Wextra')
+else :
+    print "Define build variables for this machine in backend/SConstruct"
+    sys.exit()
 			 
 envBackend.Program('backend', [
 			'backend.c',

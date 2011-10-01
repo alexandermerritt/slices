@@ -15,6 +15,7 @@
 
 import os
 import commands
+import sys
 
 Import( 'CUDA_ROOT', 
         'CUNIT212', 
@@ -42,6 +43,21 @@ if nodename.startswith('prost') :
         GLIB20 + 'include/gio-unix-2.0',
         GLIB20 + 'lib/glib-2.0/include'],                                
      CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
+elif nodename.startswith('shiva') :
+    interposerEnv = Environment(
+     LIBS = ['rt', 'dl', 
+             'glib-2.0'],
+     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64'],
+     CPPPATH = [
+        '.',
+        CUDA_ROOT + 'include', 
+        '../include', 
+        '../remote',
+        '../backend',
+        '/usr/include/glib-2.0',
+        '/usr/lib/glib-2.0/include'
+        ],
+     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
 elif nodename.startswith('ifrit') :
     interposerEnv = Environment(
      LIBS = ['rt', 'dl', 
@@ -59,6 +75,7 @@ elif nodename.startswith('ifrit') :
      CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
 else :
     print "Define build variables for this host in interposer/SConstruct"
+    sys.exit()
 
 # create a shared library                                         
 interposerEnv.SharedLibrary('libci.so', 
@@ -83,6 +100,18 @@ if nodename.startswith('prost') :
                 GLIB20 + 'include/gio-unix-2.0',
                 GLIB20 + 'lib/glib-2.0/include'],
       CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+elif nodename.startswith('shiva') :
+    envTest = Environment(
+      LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
+      LIBPATH= ['.'],
+      CPPPATH= [CUDA_ROOT + 'include',
+                '../include',
+                '../remote', 
+                '../backend',
+                '/usr/include/glib-2.0',
+                '/usr/include/gio-unix-2.0',
+                '/usr/lib/glib-2.0/include'],
+      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
 elif nodename.startswith('ifrit') :
     envTest = Environment(
       LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
@@ -95,6 +124,9 @@ elif nodename.startswith('ifrit') :
                 '/usr/include/gio-unix-2.0',
                 '/usr/lib/glib-2.0/include'],
       CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+else :
+    print "Define build variables for this machine in interposer/SConstruct"
+    sys.exit()
 
 # libci and libciutils should be compiled earlier
 envTest.Program('testLibci', ['testLibci.c', 'libci.so' ])
