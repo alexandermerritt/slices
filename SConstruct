@@ -4,37 +4,89 @@
    @brief Building kidron-utils-remote-cuda-exec-2
 """
 import os
+import socket
 
 Help("""
    Type: 'scons -Q' to build the production program,
          'scons -c' to clean the program
+   Currently automatically detected environments: 
+   - keeneland (NICS, UTK) 
+   - prost     (Georgia Tech)
+   If you want to add another environment check the function
+   build_variables_set(). Currently it is based on the
+   hostnames you are building on.
     """)
 
-# keeneland
-CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary/'
-CUNIT212 = '/nics/d/home/smagg/opt/cunit212/'
-GLIB20='/nics/d/home/smagg/opt/glib-2.28.7/'
-# TODO: you should support also GLIB variable
-# prost georgia tech
-#CUDA_ROOT = '/opt/cuda/'
-#CUNIT212 = '/opt/cunit212/'
-#GLIB20   = '/opt/glib-2.28.7/'
 
-                        
-if not os.path.exists(CUDA_ROOT):
-        print CUDA_ROOT, """does not exist!"""
+""" 
+  required variables for this building system
+  if you need to add another configuration you need to modify the 
+  setBuildVariables()
+"""
+
+# points to the directory where the CUDA root is
+CUDA_ROOT=None
+# points to the directory where the GLIB20 is
+GLIB20=None
+
+#################################################
+# helper functions
+#################################################
+def build_variables_set():
+    """
+      sets the build variables automatically depending on the system you
+      are working on
+    """
+    global CUDA_ROOT
+    global GLIB20
+    
+    hostname=socket.gethostname()
+    print('The configuration will be applied for: ' + hostname)
+    # configuration for keeneland
+    if ( hostname.startswith('kid') ):
+        print('kid prefix detected ...')
+        CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary/'
+        GLIB20='/nics/d/home/smagg/opt/glib-2.28.7/'
+    # configuration for prost
+    if ( hostname.startswith('prost')):
+        print('prost prefix detected ...')
+        CUDA_ROOT = '/opt/cuda/'
+        GLIB20='/opt/glib-2.28.7/'
+
+def variable_check_exit(var_name, var):
+    """
+        checks if the variable is correctly set and quits the script if not
+        @param var_name: The name of the variable to be checked 
+        @param var: The variable that supposed to be a path to the directory 
+    """
+    if var == None :
+        print(var_name + 'not set. You have to set it in build_variables_set() in this script')
+        sys.exit(-1)
+    if not os.path.exists(var):
+        print(var_name + '= ' + var + ' does not exist!')
+        sys.exit(-1)
+    print(var_name + '= ' + var)
+
+def build_variables_print():
+    """
+      prints the build variables or exits the script if they are not set
+    """
+    variable_check_exit('CUDA_ROOT', CUDA_ROOT)
+    variable_check_exit('GLIB20', GLIB20)
+
+#######################################
+# start actual execution script
+#######################################
+
+# set build variables    
+build_variables_set()
+# check if the variables are set and directories exist and print them
+build_variables_print()
 
 
-if not os.path.exists(CUNIT212):
-        print CUNIT212, """does not exist!"""
-
-if not os.path.exists(GLIB20):
-        print GLIB20, """ does not exist! """
 # export variables to other scripts
 Export( 'CUDA_ROOT', 
-        'CUNIT212', 
         'GLIB20' )
-
 					  
 # call all scripts
 SConscript([

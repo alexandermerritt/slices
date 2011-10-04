@@ -13,7 +13,6 @@
 import os
 
 Import( 'CUDA_ROOT', 
-        'CUNIT212', 
         'GLIB20' )
    
 # for glib options run: glib-config --cflags  for glib1.2 
@@ -47,10 +46,9 @@ interposerEnv.SharedLibrary('libci.so',
                                                                         
 # building tests
 envTest = Environment(
-  LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
-  LIBPATH= [CUNIT212 + 'lib', '.', GLIB20 + 'lib'],
-  CPPPATH= [CUNIT212 + 'include',
-            CUDA_ROOT + 'include',
+  LIBS = [ 'pthread', 'glib-2.0'],
+  LIBPATH= [ '.', GLIB20 + 'lib'],
+  CPPPATH= [CUDA_ROOT + 'include',
             '../include',
             '../remote', 
             '../backend',
@@ -61,7 +59,6 @@ envTest = Environment(
 
 # libci and libciutils should be compiled earlier
 envTest.Program('testLibci', ['testLibci.c', 'libci.so' ])
-                                                        
 envTest.Program('testLibciutils', ['testLibciutils.c', 'libci.so' ])
 
 # obviously this doesn't require all libci.so functionality, however

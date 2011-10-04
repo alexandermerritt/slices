@@ -9,8 +9,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <CUnit/CUnit.h>
-#include <CUnit/Basic.h>
+//#include <CUnit/CUnit.h>
+//#include <CUnit/Basic.h>
+
+#include <glib.h>
 
 #include "packetheader.h"
 #include "debug.h"	// ERROR, OK
@@ -136,18 +138,18 @@ void test_l_getStringPktSize(void){
 	// 0. null string NULL + NULL
 	s = NULL;
 	size = sizeof(size_pkt_field_t);
-	CU_ASSERT_EQUAL( l_getStringPktSize(s), size );
+	g_assert(l_getStringPktSize(s) == size );
 
 	// 1. zero length string
 	s = "";
 	// "" + NULL
 	size = sizeof(size_pkt_field_t);
-	CU_ASSERT( l_getStringPktSize(s) == size );
+	g_assert( l_getStringPktSize(s) == size );
 
 	// 2. regular string
 	s = "1323";
 	size = sizeof(size_pkt_field_t) + 4 * sizeof(char);
-	CU_ASSERT( l_getStringPktSize(s) == size );
+	g_assert( l_getStringPktSize(s) == size );
 }
 
 /**
@@ -161,14 +163,14 @@ void test_l_getSize__cudaFatPtxEntry(void){
 
 	// 0a. null entry
 	size = sizeof(size_pkt_field_t);
-	CU_ASSERT( l_getSize__cudaFatPtxEntry(NULL, &cache) == size);
-	CU_ASSERT( 0 ==  cache);
+	g_assert( l_getSize__cudaFatPtxEntry(NULL, &cache) == size);
+	g_assert( 0 ==  cache);
 
 	// 0b. null values
 	size = sizeof(size_pkt_field_t);
 	cache = 0;
-	CU_ASSERT( l_getSize__cudaFatPtxEntry(e1, &cache) == size);
-	CU_ASSERT( 0 == cache);
+	g_assert( l_getSize__cudaFatPtxEntry(e1, &cache) == size);
+	g_assert( 0 == cache);
 
 	// 1. count the size of the empty structure
 	__cudaFatPtxEntry e2[] = { {"", ""}, {NULL, NULL}};
@@ -176,15 +178,15 @@ void test_l_getSize__cudaFatPtxEntry(void){
 	size = sizeof(size_pkt_field_t)
 			+ sizeof(size_pkt_field_t)
 			+ sizeof(size_pkt_field_t);
-	CU_ASSERT( l_getSize__cudaFatPtxEntry(e2, &cache) ==  size);
-	CU_ASSERT( 1 == cache);
+	g_assert( l_getSize__cudaFatPtxEntry(e2, &cache) ==  size);
+	g_assert( 1 == cache);
 
 	// 2. put some not empty things
 	__cudaFatPtxEntry e3[] = { {"1", "12"}, {"3", "7"}, {NULL, NULL} };
 	cache = 0;
 	size = sizeof(size_pkt_field_t) + 4*sizeof(size_pkt_field_t) + 5 * sizeof(char);
-	CU_ASSERT( l_getSize__cudaFatPtxEntry(e3, &cache) ==  size);
-	CU_ASSERT( 2 == cache);
+	g_assert( l_getSize__cudaFatPtxEntry(e3, &cache) ==  size);
+	g_assert( 2 == cache);
 }
 
 /**
@@ -199,14 +201,14 @@ void test_l_getSize__cudaFatCubinEntry(void){
 
 	// 0a. null entry
 	size = sizeof(size_pkt_field_t);
-	CU_ASSERT( l_getSize__cudaFatCubinEntry(NULL, &cache) == size);
-	CU_ASSERT( 0 ==  cache);
+	g_assert( l_getSize__cudaFatCubinEntry(NULL, &cache) == size);
+	g_assert( 0 ==  cache);
 
 	// 0b. null values
 	size = sizeof(size_pkt_field_t);
 	cache = 0;
-	CU_ASSERT( l_getSize__cudaFatCubinEntry(e1, &cache) == size);
-	CU_ASSERT( 0 == cache);
+	g_assert( l_getSize__cudaFatCubinEntry(e1, &cache) == size);
+	g_assert( 0 == cache);
 
 	// 1. count the size of the empty structure
 	__cudaFatCubinEntry e2[] = { {"", ""}, {NULL, NULL}};
@@ -214,8 +216,8 @@ void test_l_getSize__cudaFatCubinEntry(void){
 	size = sizeof(size_pkt_field_t)
 			+ sizeof(size_pkt_field_t)
 			+ sizeof(size_pkt_field_t);
-	CU_ASSERT( l_getSize__cudaFatCubinEntry(e2, &cache) ==  size);
-	CU_ASSERT( 1 == cache);
+	g_assert( l_getSize__cudaFatCubinEntry(e2, &cache) ==  size);
+	g_assert( 1 == cache);
 
 
 	// 3. put some not empty things |ncubs|(len|str|NULL|)*4
@@ -225,8 +227,8 @@ void test_l_getSize__cudaFatCubinEntry(void){
 	size = sizeof(size_pkt_field_t)  		// helding size
 			+ 4 * sizeof(size_pkt_field_t)  // sizes for particular strings
 			+ 5 * sizeof(char);             // total string length
-	CU_ASSERT( l_getSize__cudaFatCubinEntry(e3, &cache) ==  size);
-	CU_ASSERT( cache == 2);
+	g_assert( l_getSize__cudaFatCubinEntry(e3, &cache) ==  size);
+	g_assert( cache == 2);
 }
 /**
  * tests if the packet for the debugEntry is correctly counted
@@ -241,21 +243,21 @@ void test_l_getSize__cudaFatDebugEntry(void){
 
 	// 0. null entry
 	size = sizeof(size_pkt_field_t);
-	CU_ASSERT( l_getSize__cudaFatDebugEntry(NULL, &cache) == size);
-	CU_ASSERT( 0 == cache);
+	g_assert( l_getSize__cudaFatDebugEntry(NULL, &cache) == size);
+	g_assert( 0 == cache);
 
 	// 1a. next null, the strings null
 	cache = 0;
 	size = sizeof(size_pkt_field_t);
-	CU_ASSERT( l_getSize__cudaFatDebugEntry(e, &cache) == size);
-	CU_ASSERT( 0 == cache);
+	g_assert( l_getSize__cudaFatDebugEntry(e, &cache) == size);
+	g_assert( 0 == cache);
 
 	// 1b. next is null, the strings are empty
 	e2[0].next = &e2[1];
 	cache = 0;
 	size = sizeof(size_pkt_field_t);
-	CU_ASSERT( l_getSize__cudaFatDebugEntry(e, &cache) == size);
-	CU_ASSERT( 0 == cache);
+	g_assert( l_getSize__cudaFatDebugEntry(e, &cache) == size);
+	g_assert( 0 == cache);
 
 	// 2. now normal situation
 	__cudaFatDebugEntry e4 = {"prof", "deb", NULL, 13};
@@ -270,8 +272,8 @@ void test_l_getSize__cudaFatDebugEntry(void){
 			sizeof(size_pkt_field_t) + 3 +
 			sizeof(e[0].size);
 	cache = 0;
-	CU_ASSERT( l_getSize__cudaFatDebugEntry(e1, &cache) == size);
-	CU_ASSERT( 2 == cache);
+	g_assert( l_getSize__cudaFatDebugEntry(e1, &cache) == size);
+	g_assert( 2 == cache);
 }
 /**
  * tests if the packet size for the elfEntry is correctly counted
@@ -288,8 +290,8 @@ void test_l_getSize__cudaFatElfEntry(void){
 
 	// 1. null entry
 	size = sizeof(size_pkt_field_t);
-	CU_ASSERT( l_getSize__cudaFatElfEntry(NULL, &cache) == size);
-	CU_ASSERT( 0 == cache);
+	g_assert( l_getSize__cudaFatElfEntry(NULL, &cache) == size);
+	g_assert( 0 == cache);
 
 	// 2. one element
 	e[0].elf = "file1";
@@ -304,8 +306,8 @@ void test_l_getSize__cudaFatElfEntry(void){
 		+ sizeof(e[0].size) // size
 		+ e[0].size ; // elf length in bytes (provided by size)
 
-	CU_ASSERT( l_getSize__cudaFatElfEntry(e, &cache) == size);
-	CU_ASSERT( 1 == cache);
+	g_assert( l_getSize__cudaFatElfEntry(e, &cache) == size);
+	g_assert( 1 == cache);
 
 	// 3. two another normal situation
 	__cudaFatElfEntry e1[] = { {"profile", "elffil", &e[0], 6}};
@@ -318,8 +320,8 @@ void test_l_getSize__cudaFatElfEntry(void){
 			5 +
 			sizeof(e[0].size);
 	cache = 0;
-	CU_ASSERT( l_getSize__cudaFatElfEntry(e1, &cache) == size);
-	CU_ASSERT( 2 == cache);
+	g_assert( l_getSize__cudaFatElfEntry(e1, &cache) == size);
+	g_assert( 2 == cache);
 }
 
 void test_l_getSize__cudaFatSymbolEntry(void){
@@ -330,8 +332,8 @@ void test_l_getSize__cudaFatSymbolEntry(void){
 	counter = 0;
 	size =  sizeof(size_pkt_field_t)
 			+ sizeof(size_pkt_field_t);
-	CU_ASSERT(l_getSize__cudaFatSymbolEntry(NULL, &counter) == size);
-	CU_ASSERT(0 == counter);
+	g_assert(l_getSize__cudaFatSymbolEntry(NULL, &counter) == size);
+	g_assert(0 == counter);
 
 	// arr[4]
 	__cudaFatSymbol * arr = malloc(sizeof(__cudaFatSymbol) * 4);
@@ -343,8 +345,8 @@ void test_l_getSize__cudaFatSymbolEntry(void){
 	counter = 0;
 	size = sizeof(size_pkt_field_t)   // counter
 			+ sizeof(size_pkt_field_t) ; // length
-	CU_ASSERT(l_getSize__cudaFatSymbolEntry(arr, &counter) == size);
-	CU_ASSERT(0 == counter);
+	g_assert(l_getSize__cudaFatSymbolEntry(arr, &counter) == size);
+	g_assert(0 == counter);
 
 	// 1b. now not null, but empty
 	arr[0].name = "";
@@ -353,8 +355,8 @@ void test_l_getSize__cudaFatSymbolEntry(void){
 	size = sizeof(size_pkt_field_t)
 			+ sizeof(size_pkt_field_t) ;
 
-	CU_ASSERT(l_getSize__cudaFatSymbolEntry(arr, &counter) == size);
-	CU_ASSERT(1 == counter);
+	g_assert(l_getSize__cudaFatSymbolEntry(arr, &counter) == size);
+	g_assert(1 == counter);
 
 	// 2. now three elements
 	arr[0].name = "1";
@@ -367,8 +369,8 @@ void test_l_getSize__cudaFatSymbolEntry(void){
 			+ sizeof(size_pkt_field_t) + 1
 			+ sizeof(size_pkt_field_t) + 3
 			+ sizeof(size_pkt_field_t) + 1 ;
-	CU_ASSERT(l_getSize__cudaFatSymbolEntry(arr, &counter) == size);
-	CU_ASSERT(3 == counter);
+	g_assert(l_getSize__cudaFatSymbolEntry(arr, &counter) == size);
+	g_assert(3 == counter);
 
 	free(arr);
 }
@@ -455,7 +457,7 @@ void test_l_getSize__cudaFatBinaryEntry(void){
 			+ sizeof(size_pkt_field_t) + sizeof(size_pkt_field_t) + 1 // imported
 			;
 
-	CU_ASSERT_EQUAL(size, expected);
+	g_assert(size == expected);
 }
 
 
@@ -468,33 +470,33 @@ void test_l_packUnpackStr(void){
 
 	// 1a. test packing the NULL string
 	offset = sizeof(size_pkt_field_t);
-	CU_ASSERT(l_packStr(arr, NULL) == offset);
+	g_assert(l_packStr(arr, NULL) == offset);
 	// @todo you might want to check what contains arr, but
 	// we won't do that
 	unpack = l_unpackStr(arr, &offset);
-	CU_ASSERT(unpack == NULL);
-	CU_ASSERT(sizeof(size_pkt_field_t) == offset);
+	g_assert(unpack == NULL);
+	g_assert(sizeof(size_pkt_field_t) == offset);
 	free(unpack);
 
 	// 1b. test empty string
 	offset = sizeof(size_pkt_field_t);
-	CU_ASSERT(l_packStr(arr, "") == offset);
+	g_assert(l_packStr(arr, "") == offset);
 	// @todo you might want to check what contains arr, but
 	// we won't do that
 	unpack = l_unpackStr(arr, &offset);
-	CU_ASSERT(unpack == NULL);
-	CU_ASSERT(sizeof(size_pkt_field_t) == offset);
+	g_assert(unpack == NULL);
+	g_assert(sizeof(size_pkt_field_t) == offset);
 	free(unpack);
 
 	// 2. test normal string
 	str = "hej";
 	offset = sizeof(size_pkt_field_t) + strlen(str);
-	CU_ASSERT(l_packStr(arr, str) == offset);
+	g_assert(l_packStr(arr, str) == offset);
 	unpack = l_unpackStr(arr, &offset);
-	CU_ASSERT(unpack != NULL);
-	CU_ASSERT(strcmp(str, "hej") == 0);
+	g_assert(unpack != NULL);
+	g_assert(strcmp(str, "hej") == 0);
 	unpack_offset = sizeof(size_pkt_field_t) + strlen(str);
-	CU_ASSERT_EQUAL(unpack_offset, offset);
+	g_assert(unpack_offset == offset);
 	free(unpack);
 }
 
@@ -506,25 +508,26 @@ void test_l_packUnpackPtx(void){
 	__cudaFatPtxEntry * unpack;
 
 	// 1. NULL dst
-	CU_ASSERT_EQUAL(l_packPtx(NULL, ptx, 2), ERROR);
+	g_assert(l_packPtx(NULL, ptx, 2) == ERROR);
 
 	// 2. NULL entry
 	offset = sizeof(size_pkt_field_t);
-	CU_ASSERT_EQUAL(l_packPtx(arr, NULL, 0), offset);
+	g_assert(l_packPtx(arr, NULL, 0) ==  offset);
 
 	// 3. regular thing
 	offset = sizeof(size_pkt_field_t)
 			+ sizeof(size_pkt_field_t) + strlen(ptx[0].gpuProfileName) +
 			+ sizeof(size_pkt_field_t) + strlen(ptx[0].ptx);
-	CU_ASSERT_EQUAL(l_packPtx(arr, ptx, 1), offset);
+	g_assert(l_packPtx(arr, ptx, 1) == offset);
 
 	// now unpack it
 	unpack = l_unpackPtx(arr, &unpack_offset);
-	CU_ASSERT_EQUAL(unpack_offset, offset);
-	CU_ASSERT_NSTRING_EQUAL(unpack[0].gpuProfileName, "gpuProf", 7);
-	CU_ASSERT_NSTRING_EQUAL(unpack[0].ptx, "ptx", 3);
-	CU_ASSERT_EQUAL(unpack[1].gpuProfileName, NULL);
-	CU_ASSERT_EQUAL(unpack[1].ptx, NULL);
+	g_assert(unpack_offset == offset);
+
+	g_assert(strncmp(unpack[0].gpuProfileName, "gpuProf", 7) == 0);
+	g_assert(strncmp(unpack[0].ptx, "ptx", 3) == 0);
+	g_assert(unpack[1].gpuProfileName == NULL);
+	g_assert(unpack[1].ptx == NULL);
 
 	free(unpack[0].gpuProfileName);
 	free(unpack[0].ptx);
@@ -539,25 +542,25 @@ void test_l_packUnpackCubin(void){
 	__cudaFatCubinEntry * unpack;
 
 	// 1. NULL dst
-	CU_ASSERT_EQUAL(l_packCubin(NULL, cubin, 2), ERROR);
+	g_assert_cmpint (l_packCubin(NULL, cubin, 2),==, ERROR);
 
 	// 2. NULL entry
 	offset = sizeof(size_pkt_field_t);
-	CU_ASSERT_EQUAL(l_packCubin(arr, NULL, 0), offset);
+	g_assert_cmpint(l_packCubin(arr, NULL, 0),==, offset);
 
 	// 3. regular thing
 	offset = sizeof(size_pkt_field_t)
 			+ sizeof(size_pkt_field_t) + strlen(cubin[0].gpuProfileName) +
 			+ sizeof(size_pkt_field_t) + strlen(cubin[0].cubin);
-	CU_ASSERT_EQUAL(l_packCubin(arr, cubin, 1), offset);
+	g_assert_cmpint(l_packCubin(arr, cubin, 1),==, offset);
 
 	// now unpack it
 	unpack = l_unpackCubin(arr, &unpack_offset);
-	CU_ASSERT_EQUAL(unpack_offset, offset);
-	CU_ASSERT_NSTRING_EQUAL(unpack[0].gpuProfileName, "gpuProf", 7);
-	CU_ASSERT_NSTRING_EQUAL(unpack[0].cubin, "cubin", 3);
-	CU_ASSERT_EQUAL(unpack[1].gpuProfileName, NULL);
-	CU_ASSERT_EQUAL(unpack[1].cubin, NULL);
+	g_assert_cmpint(unpack_offset, ==, offset);
+	g_assert(strncmp(unpack[0].gpuProfileName, "gpuProf", 7) == 0);
+	g_assert(strncmp(unpack[0].cubin, "cubin", 5) == 0);
+	g_assert(unpack[1].gpuProfileName == NULL);
+	g_assert(unpack[1].cubin == NULL);
 
 	free(unpack[0].gpuProfileName);
 	free(unpack[0].cubin);
@@ -578,11 +581,11 @@ void test_l_packUnpackDebug(void){
 	__cudaFatDebugEntry * unpack;
 
 	// 1. NULL dst
-	CU_ASSERT_EQUAL(l_packDebug(NULL, &debug1, 2), ERROR);
+	g_assert_cmpint(l_packDebug(NULL, &debug1, 2), ==, ERROR);
 
 	// 2. NULL entry
 	offset = sizeof(size_pkt_field_t);
-	CU_ASSERT_EQUAL(l_packDebug(arr, NULL, 0), offset);
+	g_assert_cmpint(l_packDebug(arr, NULL, 0),==, offset);
 
 	// 3. regular thing
 	offset = sizeof(size_pkt_field_t)
@@ -592,24 +595,24 @@ void test_l_packUnpackDebug(void){
 			+ sizeof(size_pkt_field_t) + strlen(debug2.gpuProfileName) +
 			+ sizeof(size_pkt_field_t) + strlen(debug2.debug) +
 			+ sizeof(unsigned int);
-	CU_ASSERT_EQUAL(l_packDebug(arr, &debug1, 2), offset);
+	g_assert_cmpint(l_packDebug(arr, &debug1, 2), ==, offset);
 
 	// now unpack it
 	unpack = l_unpackDebug(arr, &unpack_offset);
-	CU_ASSERT_EQUAL(unpack_offset, offset);
-	CU_ASSERT_NSTRING_EQUAL(unpack[0].gpuProfileName, "prof1", 5);
-	CU_ASSERT_NSTRING_EQUAL(unpack[0].debug, "deb1", 4);
-	CU_ASSERT_EQUAL(unpack[0].size, 3);
-	CU_ASSERT_PTR_EQUAL(unpack[0].next, &unpack[1]);
+	g_assert_cmpint(unpack_offset, ==, offset);
+	g_assert(strncmp(unpack[0].gpuProfileName, "prof1", 5) == 0);
+	g_assert(strncmp(unpack[0].debug, "deb1", 4) == 0);
+	g_assert(unpack[0].size == 3);
+	g_assert(unpack[0].next == &unpack[1]);
 
-	CU_ASSERT_NSTRING_EQUAL(unpack[1].gpuProfileName, "prof2", 5);
-	CU_ASSERT_NSTRING_EQUAL(unpack[1].debug, "deb2", 4);
-	CU_ASSERT_EQUAL(unpack[1].size, 13);
-	CU_ASSERT_PTR_EQUAL(unpack[1].next, &unpack[2]);
+	g_assert(strncmp(unpack[1].gpuProfileName,"prof2",5) == 0);
+	g_assert(strncmp(unpack[1].debug, "deb2", 5) == 0);
+	g_assert(unpack[1].size == 13);
+	g_assert(unpack[1].next == &unpack[2]);
 
-	CU_ASSERT_PTR_EQUAL(unpack[2].gpuProfileName, NULL);
-	CU_ASSERT_PTR_EQUAL(unpack[2].debug, NULL);
-	CU_ASSERT_PTR_EQUAL(unpack[2].next, NULL);
+	g_assert(unpack[2].gpuProfileName == NULL);
+	g_assert(unpack[2].debug == NULL);
+	g_assert(unpack[2].next == NULL);
 
 	free(unpack[0].gpuProfileName);
 	free(unpack[0].debug);
@@ -633,11 +636,11 @@ void test_l_packUnpackElf(void){
 	__cudaFatElfEntry * unpack;
 
 	// 1. NULL dst
-	CU_ASSERT_EQUAL(l_packElf(NULL, &entry1, 2), ERROR);
+	g_assert_cmpint(l_packElf(NULL, &entry1, 2), ==, ERROR);
 
 	// 2. NULL entry
 	offset = sizeof(size_pkt_field_t);
-	CU_ASSERT_EQUAL(l_packElf(arr, NULL, 0), offset);
+	g_assert_cmpint(l_packElf(arr, NULL, 0), ==, offset);
 
 	// 3. regular thing
 	offset = sizeof(size_pkt_field_t)
@@ -647,25 +650,31 @@ void test_l_packUnpackElf(void){
 			+ sizeof(size_pkt_field_t) + strlen(entry2.gpuProfileName) +
 			+ strlen(entry2.elf) +
 			+ sizeof(unsigned int);
-	CU_ASSERT_EQUAL(l_packElf(arr, &entry1, 2), offset);
+	g_assert_cmpint(l_packElf(arr, &entry1, 2), ==, offset);
 
 	// now unpack it
 	unpack = l_unpackElf(arr, &unpack_offset);
-	CU_ASSERT_EQUAL(unpack_offset, offset);
-	CU_ASSERT_NSTRING_EQUAL(unpack[0].gpuProfileName, "prof1", 5);
-	CU_ASSERT_NSTRING_EQUAL(unpack[0].elf, "elf1", 4);
-	CU_ASSERT_EQUAL(unpack[0].size, 4);
-	CU_ASSERT_PTR_EQUAL(unpack[0].next, &unpack[1]);
+	g_assert_cmpint(unpack_offset, ==, offset);
+	g_assert(strncmp(unpack[0].gpuProfileName, "prof1",5) == 0);
+	// @todo ERROR some kind of error, you send the number of important characters
+	// so maybe it is not an error; if you leave just cmpstr there is an
+	// otherwise not
+	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!111
+	//g_assert_cmpstr(unpack[0].elf, ==, "elf1<");
+	g_assert(strncmp(unpack[0].elf, "elf1", 4) == 0);
+	//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!111
+	g_assert(unpack[0].size == 4);
+	g_assert(unpack[0].next == &unpack[1]);
 
-	CU_ASSERT_NSTRING_EQUAL(unpack[1].gpuProfileName, "prof2", 5);
-	CU_ASSERT_NSTRING_EQUAL(unpack[1].elf, "elf24", 5);
-	CU_ASSERT_EQUAL(unpack[1].size, 5);
-	CU_ASSERT_PTR_NOT_NULL(unpack[1].next);
+	g_assert(strncmp(unpack[1].gpuProfileName, "prof2", 5) == 0);
+	g_assert(strncmp(unpack[1].elf, "elf24",5) == 0);
+	g_assert(unpack[1].size == 5);
+	g_assert(unpack[1].next != NULL);
 
-	CU_ASSERT_PTR_NULL(unpack[1].next->elf);
-	CU_ASSERT_PTR_NULL(unpack[1].next->gpuProfileName);
-	CU_ASSERT_PTR_NULL(unpack[1].next->next);
-	CU_ASSERT_EQUAL(unpack[1].next->size, 0);
+	g_assert(NULL == unpack[1].next->elf);
+	g_assert(NULL == unpack[1].next->gpuProfileName);
+	g_assert(NULL == unpack[1].next->next);
+	g_assert(unpack[1].next->size == 0);
 
 
 	free(unpack[0].gpuProfileName);
@@ -684,29 +693,29 @@ void test_l_packUnpackSymbol(void){
 	__cudaFatSymbol * unpack;
 
 	// 1. NULL dst
-	CU_ASSERT_EQUAL(l_packSymbol(NULL, sym, 2), ERROR);
+	g_assert(l_packSymbol(NULL, sym, 2) == ERROR);
 
 	// 2. NULL entry - this is a very typical thing
 	offset = sizeof(size_pkt_field_t);
-	CU_ASSERT_EQUAL(l_packSymbol(arr, NULL, 0), offset);
+	g_assert_cmpint(l_packSymbol(arr, NULL, 0), ==, offset);
 	offset = 0;
 	unpack = l_unpackSymbol(arr, &offset);
-	CU_ASSERT_EQUAL(offset, sizeof(size_pkt_field_t));
-	CU_ASSERT_PTR_NULL(unpack);
+	g_assert(offset == sizeof(size_pkt_field_t));
+	g_assert(NULL == unpack);
 
 
 	// 3. regular thing
 	offset = sizeof(size_pkt_field_t)
 			+ sizeof(size_pkt_field_t) + strlen(sym[0].name) +
 			+ sizeof(size_pkt_field_t) + strlen(sym[0].name);
-	CU_ASSERT_EQUAL(l_packSymbol(arr, sym, 2), offset);
+	g_assert(l_packSymbol(arr, sym, 2) == offset);
 
 	// now unpack it
 	unpack = l_unpackSymbol(arr, &unpack_offset);
-	CU_ASSERT_EQUAL(unpack_offset, offset);
-	CU_ASSERT_NSTRING_EQUAL(unpack[0].name, "sym1", 4);
-	CU_ASSERT_NSTRING_EQUAL(unpack[1].name, "sym2", 4);
-	CU_ASSERT_EQUAL(unpack[2].name, NULL);
+	g_assert(unpack_offset ==  offset);
+	g_assert(strncmp(unpack[0].name, "sym1", 4) == 0);
+	g_assert(strncmp(unpack[1].name, "sym2", 4) == 0);
+	g_assert(unpack[2].name == NULL);
 
 	free(unpack[0].name);
 	free(unpack[1].name);
@@ -782,65 +791,65 @@ void test_l_packUnpackDep(){
 	size = getFatRecPktSize(&b[0], &cache);
 	char * pPacket = malloc(size);
 
-	CU_ASSERT_NOT_EQUAL(packFatBinary(pPacket, &b[0], &cache), ERROR);
+	g_assert(packFatBinary(pPacket, &b[0], &cache) != ERROR);
 
-	CU_ASSERT_NOT_EQUAL(unpackFatBinary(&u,pPacket), ERROR );
+	g_assert(unpackFatBinary(&u,pPacket) != ERROR );
 
-	CU_ASSERT_EQUAL(u.magic, b[0].magic);
-	CU_ASSERT_EQUAL(u.version, b[0].version);
-	CU_ASSERT_EQUAL(u.gpuInfoVersion, b[0].gpuInfoVersion);
-	CU_ASSERT_EQUAL(u.flags,  b[0].flags);
-	CU_ASSERT_EQUAL(u.characteristic, b[0].characteristic);
-	CU_ASSERT_NSTRING_EQUAL(u.key, "key", 3);
-	CU_ASSERT_NSTRING_EQUAL(u.ident, "ident", 5);
-	CU_ASSERT_NSTRING_EQUAL(u.usageMode, "usageMode", 9);
+	g_assert(u.magic == b[0].magic);
+	g_assert(u.version == b[0].version);
+	g_assert(u.gpuInfoVersion == b[0].gpuInfoVersion);
+	g_assert(u.flags ==  b[0].flags);
+	g_assert(u.characteristic == b[0].characteristic);
+	g_assert(strncmp(u.key, "key", 3) == 0);
+	g_assert(strncmp(u.ident, "ident", 5) == 0);
+	g_assert(strncmp(u.usageMode, "usageMode", 9) == 0);
 
 	// ptx
-	CU_ASSERT_NSTRING_EQUAL(u.ptx->gpuProfileName, "p1", 2);
-	CU_ASSERT_NSTRING_EQUAL(u.ptx->ptx, "ptx1", 4);
-	CU_ASSERT( u.ptx[1].gpuProfileName == NULL);
-	CU_ASSERT( u.ptx[1].ptx == NULL);
+	g_assert(strncmp(u.ptx->gpuProfileName, "p1", 2) == 0);
+	g_assert(strncmp(u.ptx->ptx, "ptx1", 4) == 0);
+	g_assert( u.ptx[1].gpuProfileName == NULL);
+	g_assert( u.ptx[1].ptx == NULL);
 
 	// cubin
-	CU_ASSERT_NSTRING_EQUAL(u.cubin->gpuProfileName, "p1", 2);
-	CU_ASSERT_NSTRING_EQUAL(u.cubin->cubin, "cubin1", 6);
-	CU_ASSERT( u.cubin[1].gpuProfileName == NULL);
-	CU_ASSERT( u.cubin[1].cubin == NULL);
+	g_assert(strncmp(u.cubin->gpuProfileName, "p1", 2) == 0);
+	g_assert(strncmp(u.cubin->cubin, "cubin1", 6) == 0);
+	g_assert( u.cubin[1].gpuProfileName == NULL);
+	g_assert( u.cubin[1].cubin == NULL);
 
 	// debug
-	CU_ASSERT_NSTRING_EQUAL(u.debug->gpuProfileName, "p1", 2);
-	CU_ASSERT_NSTRING_EQUAL(u.debug->debug, "debug1", 6);
-	CU_ASSERT_EQUAL(u.debug->size, 1);
-	CU_ASSERT_PTR_NOT_EQUAL(u.debug->next, NULL);
+	g_assert(strncmp(u.debug->gpuProfileName, "p1", 2) == 0);
+	g_assert(strncmp(u.debug->debug, "debug1", 6) == 0);
+	g_assert(u.debug->size == 1);
+	g_assert(u.debug->next != NULL);
 	// debug terminator
-	CU_ASSERT_PTR_NULL(u.debug->next->gpuProfileName);
-	CU_ASSERT_PTR_NULL(u.debug->next->debug);
-	CU_ASSERT_PTR_NULL(u.debug->next->next);
-	CU_ASSERT_EQUAL(u.debug->next->size, 0);
+	g_assert(NULL == u.debug->next->gpuProfileName);
+	g_assert(NULL == u.debug->next->debug);
+	g_assert(NULL == u.debug->next->next);
+	g_assert(u.debug->next->size == 0);
 
 	// elf
-	CU_ASSERT_NSTRING_EQUAL(u.elf->gpuProfileName, "p1", 2);
-	CU_ASSERT_NSTRING_EQUAL(u.elf->elf, "elf1", 4);
-	CU_ASSERT_EQUAL(u.elf->size, 4);
-	CU_ASSERT_PTR_NOT_NULL(u.elf->next);
+	g_assert(strncmp(u.elf->gpuProfileName, "p1", 2) == 0);
+	g_assert(strncmp(u.elf->elf, "elf1", 4) == 0);
+	g_assert(u.elf->size == 4);
+	g_assert(NULL != u.elf->next);
 	// elf terminator
-	CU_ASSERT_PTR_NULL(u.elf->next->gpuProfileName);
-	CU_ASSERT_PTR_NULL(u.elf->next->elf);
-	CU_ASSERT_PTR_NULL(u.elf->next->next);
-	CU_ASSERT_EQUAL(u.elf->next->size, 0);
+	g_assert(NULL == u.elf->next->gpuProfileName);
+	g_assert(NULL == u.elf->next->elf);
+	g_assert(NULL == u.elf->next->next);
+	g_assert(u.elf->next->size == 0);
 
 
 	// exported
-	CU_ASSERT_NSTRING_EQUAL(u.exported->name, "s1", 2);
-	CU_ASSERT_NSTRING_EQUAL(u.exported[1].name, "sym1", 4);
-	CU_ASSERT( u.exported[2].name == NULL);
+	g_assert(strncmp(u.exported->name, "s1", 2) == 0);
+	g_assert(strncmp(u.exported[1].name, "sym1", 4) == 0);
+	g_assert( u.exported[2].name == NULL);
 
 	// imported
-	CU_ASSERT_NSTRING_EQUAL(u.imported->name, "s1", 7);
-	CU_ASSERT_NSTRING_EQUAL(u.imported[1].name, "sym1", 4);
-	CU_ASSERT( u.imported[2].name == NULL);
+	g_assert(strncmp(u.imported->name, "s1", 7) == 0);
+	g_assert(strncmp(u.imported[1].name, "sym1", 4) == 0);
+	g_assert( u.imported[2].name == NULL);
 
-	CU_ASSERT_PTR_EQUAL(u.dependends, NULL);
+	g_assert(u.dependends == NULL);
 /* @todo uncomment when dependent implemented
  	// now the second dependent
 	CU_ASSERT_PTR_NOT_EQUAL(u.dependends, NULL);
@@ -960,78 +969,78 @@ void test_packunpack(void){
 	size = getFatRecPktSize(&b, &cache);
 	char * pPacket = malloc(size);
 
-	CU_ASSERT_EQUAL(cache.nptxs, 1);
-	CU_ASSERT_EQUAL(cache.ncubs, 1);
-	CU_ASSERT_EQUAL(cache.ndebs, 1);
-	CU_ASSERT_EQUAL(cache.nexps, 2);
-	CU_ASSERT_EQUAL(cache.nimps, 2);
-	CU_ASSERT_EQUAL(cache.ndeps, 0);
-	CU_ASSERT_EQUAL(cache.nelves, 1);
+	g_assert(cache.nptxs == 1);
+	g_assert(cache.ncubs == 1);
+	g_assert(cache.ndebs == 1);
+	g_assert(cache.nexps == 2);
+	g_assert(cache.nimps == 2);
+	g_assert(cache.ndeps == 0);
+	g_assert(cache.nelves == 1);
 
 
-	CU_ASSERT_NOT_EQUAL(packFatBinary(pPacket, &b, &cache), ERROR);
+	g_assert(packFatBinary(pPacket, &b, &cache) != ERROR);
 
-	CU_ASSERT_NOT_EQUAL(unpackFatBinary(&u,pPacket), ERROR );
+	g_assert(unpackFatBinary(&u,pPacket) != ERROR );
 
-	CU_ASSERT_EQUAL(u.magic, b.magic);
-	CU_ASSERT_EQUAL(u.version, b.version);
-	CU_ASSERT_EQUAL(u.gpuInfoVersion, b.gpuInfoVersion);
-	CU_ASSERT_EQUAL(u.flags,  b.flags);
-	CU_ASSERT_EQUAL( b.characteristic, u.characteristic);
+	g_assert(u.magic == b.magic);
+	g_assert(u.version == b.version);
+	g_assert(u.gpuInfoVersion == b.gpuInfoVersion);
+	g_assert(u.flags ==  b.flags);
+	g_assert( b.characteristic == u.characteristic);
 
-	CU_ASSERT( strcmp("key", u.key) == 0);
-	CU_ASSERT( strcmp("ident", u.ident) == 0);
-	CU_ASSERT( strcmp("usageMode", u.usageMode) == 0);
+	g_assert( strncmp("key", u.key, 3) == 0);
+	g_assert( strncmp("ident", u.ident, 5) == 0);
+	g_assert( strncmp("usageMode", u.usageMode, 9) == 0);
 
-	CU_ASSERT( u.debugInfo == &cache);
+	g_assert( u.debugInfo == &cache);
 
 	// ptx
-	CU_ASSERT_NSTRING_EQUAL(u.ptx->gpuProfileName, "gpuProf", 7);
-	CU_ASSERT_NSTRING_EQUAL(u.ptx->ptx, "ptx", 3);
-	CU_ASSERT( u.ptx[1].gpuProfileName == NULL);
-	CU_ASSERT( u.ptx[1].ptx == NULL);
+	g_assert(strncmp(u.ptx->gpuProfileName, "gpuProf", 7) == 0);
+	g_assert(strncmp(u.ptx->ptx, "ptx", 3) == 0);
+	g_assert( u.ptx[1].gpuProfileName == NULL);
+	g_assert( u.ptx[1].ptx == NULL);
 
 	// cubin
-	CU_ASSERT_NSTRING_EQUAL(u.cubin->gpuProfileName, "profiler", 8);
-	CU_ASSERT_NSTRING_EQUAL(u.cubin->cubin, "cubin", 5);
-	CU_ASSERT( u.cubin[1].gpuProfileName == NULL);
-	CU_ASSERT( u.cubin[1].cubin == NULL);
+	g_assert(strncmp(u.cubin->gpuProfileName, "profiler", 8) == 0);
+	g_assert(strncmp(u.cubin->cubin, "cubin", 5) == 0);
+	g_assert( u.cubin[1].gpuProfileName == NULL);
+	g_assert( u.cubin[1].cubin == NULL);
 
 	// debug
-	CU_ASSERT_NSTRING_EQUAL(u.debug->gpuProfileName, "prof", 4);
-	CU_ASSERT_NSTRING_EQUAL(u.debug->debug, "debug", 5);
-	CU_ASSERT_EQUAL(u.debug->size, 1);
-	CU_ASSERT_PTR_NOT_NULL(u.debug->next);
+	g_assert(strncmp(u.debug->gpuProfileName, "prof", 4) == 0);
+	g_assert(strncmp(u.debug->debug, "debug", 5) == 0);
+	g_assert(u.debug->size == 1);
+	g_assert(NULL != u.debug->next);
 	// debug terminator
-	CU_ASSERT_PTR_NULL(u.debug->next->gpuProfileName);
-	CU_ASSERT_PTR_NULL(u.debug->next->debug);
-	CU_ASSERT_PTR_NULL(u.debug->next->next);
-	CU_ASSERT_EQUAL(u.debug->next->size, 0);
+	g_assert(NULL == u.debug->next->gpuProfileName);
+	g_assert(NULL == u.debug->next->debug);
+	g_assert(NULL == u.debug->next->next);
+	g_assert(u.debug->next->size == 0);
 
 	// elf
-	CU_ASSERT_NSTRING_EQUAL(u.elf->gpuProfileName, "prof", 4);
-	CU_ASSERT_NSTRING_EQUAL(u.elf->elf, "elf", 3);
-	CU_ASSERT_EQUAL(u.elf->size, 3);
-	CU_ASSERT_PTR_NOT_NULL(u.elf->next);
+	g_assert(strncmp(u.elf->gpuProfileName, "prof", 4) == 0);
+	g_assert(strncmp(u.elf->elf, "elf", 3) == 0);
+	g_assert(u.elf->size == 3);
+	g_assert(NULL != u.elf->next);
 	// elf terminator
-	CU_ASSERT_PTR_NULL(u.elf->next->gpuProfileName);
-	CU_ASSERT_PTR_NULL(u.elf->next->elf);
-	CU_ASSERT_PTR_NULL(u.elf->next->next);
-	CU_ASSERT_EQUAL(u.elf->next->size, 0);
+	g_assert(NULL == u.elf->next->gpuProfileName);
+	g_assert(NULL == u.elf->next->elf);
+	g_assert(NULL == u.elf->next->next);
+	g_assert(u.elf->next->size ==  0);
 
 
 	// exported
-	CU_ASSERT_NSTRING_EQUAL(u.exported->name, "symbol1", 7);
-	CU_ASSERT_NSTRING_EQUAL(u.exported[1].name, "sym2", 4);
-	CU_ASSERT( u.exported[2].name == NULL);
+	g_assert(strncmp(u.exported->name, "symbol1", 7) == 0);
+	g_assert(strncmp(u.exported[1].name, "sym2", 4) == 0);
+	g_assert( u.exported[2].name == NULL);
 
 	// imported
-	CU_ASSERT_NSTRING_EQUAL(u.imported->name, "symbol1", 7);
-	CU_ASSERT_NSTRING_EQUAL(u.imported[1].name, "sym2", 4);
-	CU_ASSERT( u.imported[2].name == NULL);
+	g_assert(strncmp(u.imported->name, "symbol1", 7) == 0);
+	g_assert(strncmp(u.imported[1].name, "sym2", 4) == 0);
+	g_assert( u.imported[2].name == NULL);
 
 	// dependends
-	CU_ASSERT(NULL == u.dependends);
+	g_assert(NULL == u.dependends);
 
 	//cleaning the memory mess
  	free(u.key);
@@ -1072,16 +1081,16 @@ void test_l_getPtrPktSize(void){
 	int i;
 
 	// first uint3
-	CU_ASSERT_EQUAL(l_getUint3PtrPktSize(NULL), sizeof(void*));
-	CU_ASSERT_EQUAL(l_getUint3PtrPktSize(&u), sizeof(void*)+3*sizeof(u.x));
+	g_assert(l_getUint3PtrPktSize(NULL) ==  sizeof(void*));
+	g_assert(l_getUint3PtrPktSize(&u) == sizeof(void*)+3*sizeof(u.x));
 
 	// dim3
-	CU_ASSERT_EQUAL(l_getDim3PtrPktSize(NULL), sizeof(void*));
-	CU_ASSERT_EQUAL(l_getDim3PtrPktSize(&d), sizeof(void*)+3*sizeof(d.x));
+	g_assert(l_getDim3PtrPktSize(NULL) == sizeof(void*));
+	g_assert(l_getDim3PtrPktSize(&d) == sizeof(void*)+3*sizeof(d.x));
 
 	// int
-	CU_ASSERT_EQUAL(l_getIntPtrPktSize(NULL), sizeof(void*));
-	CU_ASSERT_EQUAL(l_getIntPtrPktSize(&i), sizeof(void*)+sizeof(int));
+	g_assert(l_getIntPtrPktSize(NULL) == sizeof(void*));
+	g_assert(l_getIntPtrPktSize(&i) == sizeof(void*)+sizeof(int));
 }
 
 void test_l_getSize_regFuncArgs(void){
@@ -1102,13 +1111,13 @@ void test_l_getSize_regFuncArgs(void){
 			+ strlen("_Z12square_arrayPfi")
 			+ core_expected;
 
-	CU_ASSERT_EQUAL(size, expected);
+	g_assert_cmpint(size,==, expected);
 
 	// 2. null things
 	size = l_getSize_regFuncArgs(NULL, NULL, NULL, NULL, -1,
 					NULL, NULL, NULL, NULL, NULL);
 	expected = core_expected;
-	CU_ASSERT_EQUAL(size, expected);
+	g_assert_cmpint(size, ==, expected);
 
 	// 3. not null things
 	uint3 i1 = {1,2,2};
@@ -1121,7 +1130,7 @@ void test_l_getSize_regFuncArgs(void){
 	expected = core_expected
 			+ 5 // string length
 			+ 6 * sizeof(i1.x) + 6 * sizeof(d1.x) + sizeof(int);
-	CU_ASSERT_EQUAL(size, expected);
+	g_assert_cmpint(size, ==, expected);
 }
 
 void test_l_getSize_regVar(void){
@@ -1139,12 +1148,12 @@ void test_l_getSize_regVar(void){
 	expected = strlen("d_OptionData")
 				+ strlen("d_OptionData")
 				+ core_expected;
-	CU_ASSERT_EQUAL(size, expected);
+	g_assert_cmpint(size, ==, expected);
 
 	// 2. null things
 	size = l_getSize_regVar(NULL, NULL, NULL, NULL, 1, 2, 3, 13);
 	expected = core_expected;
-	CU_ASSERT_EQUAL(size, expected);
+	g_assert_cmpint(size, ==, expected);
 }
 
 void test_l_packUnpackUint3Ptr(void){
@@ -1154,33 +1163,33 @@ void test_l_packUnpackUint3Ptr(void){
 
 	// 0. pack from NULL src
 	offset = l_packUint3Ptr(NULL, NULL);
-	CU_ASSERT_EQUAL(offset, ERROR);
+	g_assert_cmpint(offset, ==, ERROR);
 
 	// 1. pack/unpack NULL pointer
 	offset = l_packUint3Ptr(arr, NULL);
-	CU_ASSERT_EQUAL(offset, sizeof(void*));
+	g_assert_cmpint(offset, ==, sizeof(void*));
 	offset = 0;
 	pU = l_unpackUint3Ptr(arr, &offset);
-	CU_ASSERT_EQUAL(offset, sizeof(void*));
-	CU_ASSERT_PTR_NULL(pU);
+	g_assert_cmpint(offset, ==, sizeof(void*));
+	g_assert(NULL == pU );
 
 	// 2. unpack NULL
 	offset = 4;
 	pU = l_unpackUint3Ptr(NULL, &offset);
-	CU_ASSERT_PTR_NULL(pU);
-	CU_ASSERT_EQUAL(offset, ERROR);
+	g_assert(NULL == pU);
+	g_assert_cmpint(offset, ==, ERROR);
 
 	// 3. pack/unpack normal non-NULL
 	uint3 u = { 1, 13, 5};
 	offset = l_packUint3Ptr(arr, &u);
-	CU_ASSERT_EQUAL(offset, sizeof(void*) + 3*sizeof(u.x));
+	g_assert_cmpint(offset, ==, sizeof(void*) + 3*sizeof(u.x));
 	offset = 0;
 	pU = l_unpackUint3Ptr(arr, &offset);
-	CU_ASSERT_EQUAL(offset, sizeof(void*) + 3*sizeof(u.x));
-	CU_ASSERT_PTR_NOT_NULL(pU);
-	CU_ASSERT_EQUAL(pU->x, 1);
-	CU_ASSERT_EQUAL(pU->y, 13);
-	CU_ASSERT_EQUAL(pU->z, 5);
+	g_assert_cmpint(offset, ==, sizeof(void*) + 3*sizeof(u.x));
+	g_assert( NULL != pU);
+	g_assert(pU->x == 1);
+	g_assert(pU->y == 13);
+	g_assert(pU->z == 5);
 
 	free(pU);
 }
@@ -1192,33 +1201,33 @@ void test_l_packUnpackDim3Ptr(void){
 
 	// 0. pack from NULL src
 	offset = l_packDim3Ptr(NULL, NULL);
-	CU_ASSERT_EQUAL(offset, ERROR);
+	g_assert_cmpint(offset, ==, ERROR);
 
 	// 1. pack/unpack NULL pointer
 	offset = l_packDim3Ptr(arr, NULL);
-	CU_ASSERT_EQUAL(offset, sizeof(void*));
+	g_assert_cmpint(offset, ==, sizeof(void*));
 	offset = 0;
 	pU = l_unpackDim3Ptr(arr, &offset);
-	CU_ASSERT_EQUAL(offset, sizeof(void*));
-	CU_ASSERT_PTR_NULL(pU);
+	g_assert_cmpint(offset, ==, sizeof(void*));
+	g_assert(NULL == pU);
 
 	// 2. unpack NULL
 	offset = 4;
 	pU = l_unpackDim3Ptr(NULL, &offset);
-	CU_ASSERT_PTR_NULL(pU);
-	CU_ASSERT_EQUAL(offset, ERROR);
+	g_assert(NULL == pU);
+	g_assert_cmpint(offset, ==, ERROR);
 
 	// 3. pack/unpack normal non-NULL
 	dim3 u = { 1, 13, 5};
 	offset = l_packDim3Ptr(arr, &u);
-	CU_ASSERT_EQUAL(offset, sizeof(void*) + 3*sizeof(u.x));
+	g_assert_cmpint(offset, ==, sizeof(void*) + 3*sizeof(u.x));
 	offset = 0;
 	pU = l_unpackDim3Ptr(arr, &offset);
-	CU_ASSERT_EQUAL(offset, sizeof(void*) + 3*sizeof(u.x));
-	CU_ASSERT_PTR_NOT_NULL(pU);
-	CU_ASSERT_EQUAL(pU->x, 1);
-	CU_ASSERT_EQUAL(pU->y, 13);
-	CU_ASSERT_EQUAL(pU->z, 5);
+	g_assert_cmpint(offset, ==, sizeof(void*) + 3*sizeof(u.x));
+	g_assert(NULL != pU);
+	g_assert(pU->x == 1);
+	g_assert(pU->y ==  13);
+	g_assert(pU->z == 5);
 
 	free(pU);
 }
@@ -1230,31 +1239,31 @@ void test_l_packUnpackIntPtr(void){
 
 	// 0. pack from NULL src
 	offset = l_packIntPtr(NULL, NULL);
-	CU_ASSERT_EQUAL(offset, ERROR);
+	g_assert_cmpint(offset, ==, ERROR);
 
 	// 1. pack/unpack NULL pointer
 	offset = l_packIntPtr(arr, NULL);
-	CU_ASSERT_EQUAL(offset, sizeof(void*));
+	g_assert_cmpint(offset, ==, sizeof(void*));
 	offset = 0;
 	pU = l_unpackIntPtr(arr, &offset);
-	CU_ASSERT_EQUAL(offset, sizeof(void*));
-	CU_ASSERT_PTR_NULL(pU);
+	g_assert_cmpint(offset, ==, sizeof(void*));
+	g_assert(NULL == pU);
 
 	// 2. unpack NULL
 	offset = 4;
 	pU = l_unpackIntPtr(NULL, &offset);
-	CU_ASSERT_PTR_NULL(pU);
-	CU_ASSERT_EQUAL(offset, ERROR);
+	g_assert(NULL == pU);
+	g_assert_cmpint(offset,==, ERROR);
 
 	// 3. pack/unpack normal non-NULL
 	int u = 13;
 	offset = l_packIntPtr(arr, &u);
-	CU_ASSERT_EQUAL(offset, sizeof(int*) + sizeof(int));
+	g_assert_cmpint(offset, ==, sizeof(int*) + sizeof(int));
 	offset = 0;
 	pU = l_unpackIntPtr(arr, &offset);
-	CU_ASSERT_EQUAL(offset, sizeof(int*) + sizeof(int));
-	CU_ASSERT_PTR_NOT_NULL(pU);
-	CU_ASSERT_EQUAL(*pU, 13);
+	g_assert_cmpint(offset, ==, sizeof(int*) + sizeof(int));
+	g_assert(NULL != pU);
+	g_assert(*pU == 13);
 }
 
 void test_l_packUnpackRegFuncArgs(void){
@@ -1287,27 +1296,27 @@ void test_l_packUnpackRegFuncArgs(void){
 		   + sizeof(void*) + sizeof(dim3)
 		   + sizeof(int*) + sizeof(int);
 
-   CU_ASSERT_EQUAL(size, all_size);
-   CU_ASSERT_EQUAL( unpackRegFuncArgs(&a, pack), OK);
-   CU_ASSERT_PTR_EQUAL(a.fatCubinHandle, v);
-   CU_ASSERT_NSTRING_EQUAL(a.hostFun, str1, strlen(str1));
-   CU_ASSERT_PTR_EQUAL(a.hostFEaddr, str1);
-   CU_ASSERT_NSTRING_EQUAL(a.deviceFun, str2, strlen(str2));
-   CU_ASSERT_NSTRING_EQUAL(a.deviceName, str3, strlen(str3));
-   CU_ASSERT_EQUAL(a.thread_limit, -1);
-   CU_ASSERT_EQUAL(a.tid->x, u1.x );
-   CU_ASSERT_EQUAL(a.tid->y, u1.y );
-   CU_ASSERT_EQUAL(a.tid->z, u1.z );
-   CU_ASSERT_EQUAL(a.bid->x, u2.x );
-   CU_ASSERT_EQUAL(a.bid->y, u2.y );
-   CU_ASSERT_EQUAL(a.bid->z, u2.z );
-   CU_ASSERT_EQUAL(a.bDim->x, d1.x );
-   CU_ASSERT_EQUAL(a.bDim->y, d1.y );
-   CU_ASSERT_EQUAL(a.bDim->z, d1.z );
-   CU_ASSERT_EQUAL(a.gDim->x, d2.x );
-   CU_ASSERT_EQUAL(a.gDim->y, d2.y );
-   CU_ASSERT_EQUAL(a.gDim->z, d2.z );
-   CU_ASSERT_EQUAL(*a.wSize, wsize)
+   g_assert_cmpint(size, ==, all_size);
+   g_assert_cmpint( unpackRegFuncArgs(&a, pack), ==, OK);
+   g_assert(a.fatCubinHandle == v);
+   g_assert(strncmp(a.hostFun, str1, strlen(str1)) == 0);
+   g_assert(a.hostFEaddr == str1);
+   g_assert(strncmp(a.deviceFun, str2, strlen(str2)) == 0);
+   g_assert(strncmp(a.deviceName, str3, strlen(str3)) == 0);
+   g_assert(a.thread_limit == -1);
+   g_assert(a.tid->x == u1.x );
+   g_assert(a.tid->y == u1.y );
+   g_assert(a.tid->z == u1.z );
+   g_assert(a.bid->x == u2.x );
+   g_assert(a.bid->y == u2.y );
+   g_assert(a.bid->z == u2.z );
+   g_assert(a.bDim->x == d1.x );
+   g_assert(a.bDim->y == d1.y );
+   g_assert(a.bDim->z == d1.z );
+   g_assert(a.gDim->x == d2.x );
+   g_assert(a.gDim->y == d2.y );
+   g_assert(a.gDim->z == d2.z );
+   g_assert(*a.wSize == wsize);
 
    free(a.hostFun);
    free(a.deviceFun);
@@ -1351,17 +1360,17 @@ void test_l_packUnpackRegVar(void){
 				   + sizeof(size_pkt_field_t) + strlen(str2)
 				   + sizeof(size_pkt_field_t) + strlen(str3)
 				   + sizeof(int) * 4;
-	CU_ASSERT_EQUAL(size, all_size);
-	CU_ASSERT_EQUAL(unpackRegVar(&a, pack), OK);
-	CU_ASSERT_PTR_EQUAL(a.fatCubinHandle, v);
-	CU_ASSERT_PTR_EQUAL(a.hostVar, 0x123);
-	CU_ASSERT_PTR_NOT_NULL(a.dom0HostAddr);
-	CU_ASSERT_NSTRING_EQUAL(a.deviceAddress, str2, strlen(str2));
-	CU_ASSERT_NSTRING_EQUAL(a.deviceName, str3, strlen(str3));
-	CU_ASSERT_EQUAL(a.ext, 1);
-	CU_ASSERT_EQUAL(a.size, 2);
-	CU_ASSERT_EQUAL(a.constant, 3);
-	CU_ASSERT_EQUAL(a.global, 4);
+	g_assert_cmpint(size, ==, all_size);
+	g_assert_cmpint(unpackRegVar(&a, pack),==, OK);
+	g_assert(a.fatCubinHandle == v);
+	g_assert(a.hostVar == 0x123);
+	g_assert(NULL != a.dom0HostAddr);
+	g_assert(strncmp(a.deviceAddress, str2, strlen(str2)) == 0);
+	g_assert(strncmp(a.deviceName, str3, strlen(str3)) == 0);
+	g_assert(a.ext == 1);
+	g_assert(a.size == 2);
+	g_assert(a.constant == 3);
+	g_assert(a.global == 4);
 
 	free(a.deviceAddress);
 	free(a.deviceName);
@@ -1382,12 +1391,12 @@ void test_methodIdToString(void){
 
 	// 1. non existing
 	str = methodIdToString(-3);
-	CU_ASSERT_PTR_NULL(str);
+	g_assert(NULL == str);
 
 	// 2. normal situation
 	for(i = 0; i < sizeof(ids)/sizeof(int); i++){
 		str = methodIdToString(ids[i]);
-		CU_ASSERT_NSTRING_EQUAL(str, refStr[i], strlen(refStr[i]));
+		g_assert(strncmp(str, refStr[i], strlen(refStr[i])) == 0);
 	}
 }
 
@@ -1395,9 +1404,9 @@ void test_freeBuffer(void){
 	char * buffer=NULL;
 
 	buffer = malloc(10);
-	CU_ASSERT_PTR_NOT_NULL(buffer);
+	g_assert(NULL != buffer);
 	buffer = freeBuffer(buffer);
-	CU_ASSERT_PTR_NULL(buffer);
+	g_assert(NULL == buffer);
 }
 
 void test_g_fcia_idx(void){
@@ -1409,50 +1418,50 @@ void test_g_fcia_idx(void){
 	void ** pV2 = (void**) 0x3;
 	void ** pV3 = (void**) 0x4;
 
-	CU_ASSERT_PTR_NOT_NULL(pFcArr);
+	g_assert(NULL != pFcArr);
 
 	p1.fatCubinHandle = pV1;
 	p1.num_reg_fns = 3;
 	g_array_append_val(pFcArr, p1);
 
-	CU_ASSERT_EQUAL(pFcArr->len, 1);
+	g_assert(pFcArr->len == 1);
 
 	p2.fatCubinHandle = pV2;
 	p2.num_reg_fns = 2;
 	g_array_append_val(pFcArr, p2);
-	CU_ASSERT_EQUAL(pFcArr->len, 2);
+	g_assert(pFcArr->len == 2);
 
 	int idx = -2;
 	// 0. check what happens with NULL array
 	idx = g_fcia_idx(NULL, pV3);
-	CU_ASSERT_EQUAL(idx, -1);
+	g_assert(idx == -1);
 
 	// 1. now not null array and not existing fatcubin
 	idx = -2;
 	idx = g_fcia_idx(pFcArr, pV3);
-	CU_ASSERT_EQUAL(idx, -1);
+	g_assert(idx == -1);
 
 	// 2. now not null array and NULL pointer to find (not existing)
 	idx = -2;
 	idx = g_fcia_idx(pFcArr, NULL);
-	CU_ASSERT_EQUAL(idx, -1);
+	g_assert(idx == -1);
 
 	// 3. now try to find the existing value
 	idx = -2;
 	idx = g_fcia_idx(pFcArr, pV1);
-	CU_ASSERT_NOT_EQUAL(idx, -1);
+	g_assert(idx != -1);
 	p = &g_array_index(pFcArr, fatcubin_info_t, idx);
-	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV1);
-	CU_ASSERT_EQUAL(p->num_reg_fns, 3);
+	g_assert(p->fatCubinHandle == pV1);
+	g_assert(p->num_reg_fns == 3);
 
 
 	// 4. another value
 	idx = -2;
 	idx = g_fcia_idx(pFcArr, pV2);
-	CU_ASSERT_NOT_EQUAL(idx, -1);
+	g_assert(idx != -1);
 	p = &g_array_index(pFcArr, fatcubin_info_t, idx);
-	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV2);
-	CU_ASSERT_EQUAL(p->num_reg_fns, 2);
+	g_assert(p->fatCubinHandle == pV2);
+	g_assert(p->num_reg_fns == 2);
 
 
 	// it should free the elements as well
@@ -1467,49 +1476,49 @@ void test_g_fcia_elem(void){
 	void ** pV3 = (void **) 0x3;
 	fatcubin_info_t * p = NULL;
 
-	CU_ASSERT_PTR_NOT_NULL(pFcArr);
+	g_assert(NULL != pFcArr);
 
 	// feed our array
 	fatcubin_info_t * pFatCInfo1 = malloc(sizeof(fatcubin_info_t));
-	CU_ASSERT_PTR_NOT_NULL(pFatCInfo1);
+	g_assert(NULL != pFatCInfo1);
 	pFatCInfo1->fatCubinHandle = pV1;
 	pFatCInfo1->num_reg_fns = 3;
 	g_array_append_val(pFcArr, *pFatCInfo1);
 
-	CU_ASSERT_EQUAL(pFcArr->len, 1);
+	g_assert(pFcArr->len == 1);
 
 	fatcubin_info_t * pFatCInfo2 = malloc(sizeof(fatcubin_info_t));
-	CU_ASSERT_PTR_NOT_NULL(pFatCInfo2);
+	g_assert(NULL != pFatCInfo2);
 	pFatCInfo2->fatCubinHandle = pV2;
 	pFatCInfo2->num_reg_fns = 2;
 	g_array_append_val(pFcArr, *pFatCInfo2);
-	CU_ASSERT_EQUAL(pFcArr->len, 2);
+	g_assert(pFcArr->len == 2);
 
 
 	// 0. check what happens with NULL array
 	p = g_fcia_elem(NULL, pV3);
-	CU_ASSERT_PTR_NULL(p);
+	g_assert(NULL == p);
 
 	// 1. now not null array and not existing fatcubin
 	p = NULL;
 	p = g_fcia_elem(pFcArr, pV3);
-	CU_ASSERT_PTR_NULL(p);
+	g_assert(NULL == p);
 
 	// 2. now not null array and NULL pointer to find (not existing)
 	p = g_fcia_elem(pFcArr, NULL);
-	CU_ASSERT_PTR_NULL(p);
+	g_assert(NULL == p);
 
 	// 3. now try to find the existing value
 	p = g_fcia_elem(pFcArr, pV1);
-	CU_ASSERT_PTR_NOT_NULL(p);
-	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV1);
-	CU_ASSERT_EQUAL(p->num_reg_fns, 3);
+	g_assert(NULL != p);
+	g_assert(p->fatCubinHandle == pV1);
+	g_assert(p->num_reg_fns == 3);
 
 	// 4. another existing
 	p = g_fcia_elem(pFcArr, pV2);
-	CU_ASSERT_PTR_NOT_NULL(p);
-	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV2);
-	CU_ASSERT_EQUAL(p->num_reg_fns, 2);
+	g_assert(NULL != p);
+	g_assert(p->fatCubinHandle == pV2);
+	g_assert(p->num_reg_fns == 2);
 
 	free(pFatCInfo1);
 	free(pFatCInfo2);
@@ -1527,52 +1536,52 @@ void test_g_fcia_elidx(void){
 	void ** pV2 = (void**) 0x3;
 	void ** pV3 = (void**) 0x4;
 
-	CU_ASSERT_PTR_NOT_NULL(pFcArr);
+	g_assert(NULL != pFcArr);
 
 	p1.fatCubinHandle = pV1;
 	p1.num_reg_fns = 3;
 	g_array_append_val(pFcArr, p1);
 
-	CU_ASSERT_EQUAL(pFcArr->len, 1);
+	g_assert(pFcArr->len == 1);
 
 	p2.fatCubinHandle = pV2;
 	p2.num_reg_fns = 2;
 	g_array_append_val(pFcArr, p2);
-	CU_ASSERT_EQUAL(pFcArr->len, 2);
+	g_assert(pFcArr->len == 2);
 
 	// 0. check what happens with NULL array
 	p = g_fcia_elidx(NULL, pV3, &idx);
-	CU_ASSERT_EQUAL(idx, -1);
-	CU_ASSERT_PTR_NULL(p);
+	g_assert(idx == -1);
+	g_assert(NULL == p);
 
 	// 1. now not null array and not existing fatcubin
 	idx = -2;
 	p = g_fcia_elidx(pFcArr, pV3, &idx);
-	CU_ASSERT_PTR_NULL(p);
-	CU_ASSERT_EQUAL(idx, -1);
+	g_assert(NULL == p);
+	g_assert(idx == -1);
 
 	// 2. now not null array and NULL pointer to find (not existing)
 	idx = -2;
 	p = g_fcia_elidx(pFcArr, NULL, &idx);
-	CU_ASSERT_EQUAL(idx, -1);
-	CU_ASSERT_PTR_NULL(p);
+	g_assert(idx == -1);
+	g_assert(NULL == p);
 
 	// 3. now try to find the existing value
 	idx = -2;
 	p = g_fcia_elidx(pFcArr, pV1, &idx);
-	CU_ASSERT_NOT_EQUAL(idx, -1);
+	g_assert(idx != -1);
 	p = &g_array_index(pFcArr, fatcubin_info_t, idx);
-	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV1);
-	CU_ASSERT_EQUAL(p->num_reg_fns, 3);
+	g_assert(p->fatCubinHandle == pV1);
+	g_assert(p->num_reg_fns == 3);
 
 
 	// 4. another value
 	idx = -2;
 	p = g_fcia_elidx(pFcArr, pV2, &idx);
-	CU_ASSERT_NOT_EQUAL(idx, -1);
+	g_assert(idx != -1);
 	p = &g_array_index(pFcArr, fatcubin_info_t, idx);
-	CU_ASSERT_PTR_EQUAL(p->fatCubinHandle, pV2);
-	CU_ASSERT_EQUAL(p->num_reg_fns, 2);
+	g_assert(p->fatCubinHandle == pV2);
+	g_assert(p->num_reg_fns == 2);
 
 	g_array_free(pFcArr, TRUE);
 }
@@ -1598,7 +1607,7 @@ void test_g_fcia_host_var(void){
 	v2.fatCubinHandle = pV1;
 
 
-	CU_ASSERT_PTR_NOT_NULL(pFcArr);
+	g_assert(NULL != pFcArr);
 
 	p1.fatCubinHandle = pV1;
 	p1.num_reg_fns = 3;
@@ -1608,32 +1617,31 @@ void test_g_fcia_host_var(void){
 
 	g_array_append_val(pFcArr, p1);
 
-	CU_ASSERT_EQUAL(pFcArr->len, 1);
+	g_assert(pFcArr->len == 1);
 
 	p2.fatCubinHandle = pV2;
 	p2.num_reg_fns = 2;
 	p2.num_reg_vars = 0;
 	g_array_append_val(pFcArr, p2);
-	CU_ASSERT_EQUAL(pFcArr->len, 2);
+	g_assert(pFcArr->len == 2);
 
 	// 0a. start with NULL pFcArr
-	CU_ASSERT_PTR_NULL(g_fcia_host_var(NULL, (char*) 0x23, &idx ));
+	g_assert(NULL == g_fcia_host_var(NULL, (char*) 0x23, &idx ));
 
 	// 0b. check NULL hostVar
-	CU_ASSERT_PTR_NULL(g_fcia_host_var(pFcArr, NULL,&idx));
+	g_assert(NULL == g_fcia_host_var(pFcArr, NULL,&idx));
 
 	// 1. ask about not existing hostVar
-	CU_ASSERT_PTR_NULL(g_fcia_host_var(pFcArr, (char*) 0x13, &idx));
+	g_assert(NULL == g_fcia_host_var(pFcArr, (char*) 0x13, &idx));
 
 	// 2. ask about correct values
 	p = g_fcia_host_var(pFcArr, hostVar1, &idx);
-	CU_ASSERT_PTR_NOT_NULL(p);
-	CU_ASSERT_EQUAL(p->variables[0]->hostVar,hostVar1);
+	g_assert(NULL != p);
+	g_assert(p->variables[0]->hostVar == hostVar1);
 
 	p = g_fcia_host_var(pFcArr, hostVar2, &idx);
-	CU_ASSERT_PTR_NOT_NULL(p);
-	CU_ASSERT_EQUAL(p->variables[1]->hostVar, (char*)0x2);
-
+	g_assert(NULL != p);
+	g_assert(p->variables[1]->hostVar == (char*)0x2);
 
 	g_array_free(pFcArr, TRUE);
 }
@@ -1651,58 +1659,58 @@ void test_g_vars_insert(void){
 
 	// create a table
 	table = g_hash_table_new(g_direct_hash, g_direct_equal);
-	CU_ASSERT_EQUAL(g_hash_table_size(table), 0);
+	g_assert(g_hash_table_size(table) == 0);
 
 	// 0a. try to add a NULL handler
-	CU_ASSERT_PTR_NULL(g_vars_insert(table, NULL, &vars[0]));
-	CU_ASSERT_EQUAL(g_hash_table_size(table), 0);
+	g_assert(NULL == g_vars_insert(table, NULL, &vars[0]));
+	g_assert(g_hash_table_size(table) == 0);
 
 	// 0a. try to add a NULL var
-	CU_ASSERT_PTR_NULL(g_vars_insert(table, h1, NULL));
-	CU_ASSERT_EQUAL(g_hash_table_size(table), 0);
+	g_assert(NULL == g_vars_insert(table, h1, NULL));
+	g_assert(g_hash_table_size(table) == 0);
 
 	// 1. try to add a regular handler
-	CU_ASSERT_PTR_NOT_NULL(g_vars_insert(table, h1, &vars[0]));
-	CU_ASSERT_EQUAL(g_hash_table_size(table), 1);
+	g_assert(NULL != g_vars_insert(table, h1, &vars[0]));
+	g_assert(g_hash_table_size(table) == 1);
 
 	GPtrArray * p = NULL;
 
 	p = g_hash_table_lookup(table, h1);
 	v = g_ptr_array_index(p, 0);
-	CU_ASSERT_EQUAL(v, &vars[0]);
-	CU_ASSERT_EQUAL(v->deviceName, vars[0].deviceName);
-	CU_ASSERT_EQUAL(v->hostVar, (void*)0x23)
+	g_assert(v == &vars[0]);
+	g_assert(v->deviceName == vars[0].deviceName);
+	g_assert(v->hostVar == (void*)0x23);
 
 	// 2. try to add another value
-	CU_ASSERT_PTR_NOT_NULL(g_vars_insert(table, h1, &vars[1]));
-	CU_ASSERT_EQUAL(g_hash_table_size(table), 1);
+	g_assert(NULL != g_vars_insert(table, h1, &vars[1]));
+	g_assert(g_hash_table_size(table) == 1);
 
 	p = g_hash_table_lookup(table, h1);
 	v = g_ptr_array_index(p, 1);
-	CU_ASSERT_EQUAL(v, &vars[1]);
-	CU_ASSERT_EQUAL(v->deviceName, vars[1].deviceName);
-	CU_ASSERT_EQUAL(v->hostVar, vars[1].hostVar);
+	g_assert(v == &vars[1]);
+	g_assert(v->deviceName == vars[1].deviceName);
+	g_assert(v->hostVar == vars[1].hostVar);
 
 	// 3. now add a new value to a new handler
-	CU_ASSERT_PTR_NOT_NULL(g_vars_insert(table, h2, &vars[1]));
-	CU_ASSERT_EQUAL(g_hash_table_size(table), 2);
+	g_assert(NULL != g_vars_insert(table, h2, &vars[1]));
+	g_assert(g_hash_table_size(table) == 2);
 
 	p = g_hash_table_lookup(table, h2);
 	v = g_ptr_array_index(p, 0);
-	CU_ASSERT_EQUAL(v, &vars[1]);
-	CU_ASSERT_EQUAL(v->deviceName, vars[1].deviceName);
-	CU_ASSERT_EQUAL(v->hostVar, vars[1].hostVar);
+	g_assert(v == &vars[1]);
+	g_assert(v->deviceName == vars[1].deviceName);
+	g_assert(v->hostVar == vars[1].hostVar);
 
 	// 3. now add a new value to a new handler
-	CU_ASSERT_PTR_NOT_NULL(g_vars_insert(table, h2, &vars[2]));
-	CU_ASSERT_EQUAL(g_hash_table_size(table), 2);
+	g_assert(NULL != g_vars_insert(table, h2, &vars[2]));
+	g_assert(g_hash_table_size(table) == 2);
 
 	p = g_hash_table_lookup(table, h2);
 
 	v = g_ptr_array_index(p, 1);
-	CU_ASSERT_EQUAL(v, &vars[2]);
-	CU_ASSERT_EQUAL(v->deviceName, vars[2].deviceName);
-	CU_ASSERT_EQUAL(v->hostVar, vars[2].hostVar);
+	g_assert(v == &vars[2]);
+	g_assert(v->deviceName == vars[2].deviceName);
+	g_assert(v->hostVar == vars[2].hostVar);
 
 	// free the table
 	g_ptr_array_free(g_hash_table_lookup(table, h1), TRUE);
@@ -1727,45 +1735,45 @@ void test_g_vars_find(void){
 	for(i = 0; i < 3; i ++)
 		g_ptr_array_add(a[0], &vars1[i]);
 
-	CU_ASSERT_EQUAL( a[0]->len, 3);
+	g_assert( a[0]->len == 3);
 
 	for(i = 0; i < 2; i ++)
 		g_ptr_array_add(a[1], &vars2[i]);
 
-	CU_ASSERT_EQUAL( a[1]->len, 2);
+	g_assert( a[1]->len == 2);
 
 	g_hash_table_insert(table, h[0], a[0]);
 	g_hash_table_insert(table, h[1], a[1]);
 
 	printRegVarTab(table);
 
-	CU_ASSERT_EQUAL(g_hash_table_size(table), 2);
+	g_assert(g_hash_table_size(table) == 2);
 
 	// 0a. try to find something in a NULL regHostVarsTab
-	CU_ASSERT_PTR_NULL( g_vars_find(NULL, vars1[0].deviceName ));
+	g_assert( NULL == g_vars_find(NULL, vars1[0].deviceName ));
 
 	// 0b. try to find a NULL hostVar in a non-null table
-	CU_ASSERT_PTR_NULL( g_vars_find(table, NULL ));
+	g_assert( NULL == g_vars_find(table, NULL ));
 
 	// 1a. try to find not existing pointer; @todo issues with this test
 	//CU_ASSERT_PTR_NULL( g_vars_find(table, vars3[0].hostVar ));
 
 	// 1b. try to find non existing string
-	CU_ASSERT_PTR_NULL( g_vars_find(table, "hej" ));
+	g_assert( NULL == g_vars_find(table, "hej" ));
 
 	// 2. try to find all existing existing
 	for(i = 0; i < 3; i++){
 		// check against fields hostVar
-		CU_ASSERT_PTR_EQUAL( g_vars_find(table, vars1[i].hostVar ), vars1[i].hostVar);
+		g_assert( g_vars_find(table, vars1[i].hostVar ) == vars1[i].hostVar);
 		// check against deviceName
-		CU_ASSERT_PTR_EQUAL( g_vars_find(table, vars1[i].deviceName ), vars1[i].hostVar);
+		g_assert( g_vars_find(table, vars1[i].deviceName ) == vars1[i].hostVar);
 	}
 
 	for(i = 0; i < 2; i++){
 		// check against fields hostVar
-		CU_ASSERT_PTR_EQUAL( g_vars_find(table, vars2[i].hostVar ), vars2[i].hostVar);
+		g_assert( g_vars_find(table, vars2[i].hostVar ) == vars2[i].hostVar);
 		// check against deviceName
-		CU_ASSERT_PTR_EQUAL( g_vars_find(table, vars2[i].deviceName ), vars2[i].hostVar);
+		g_assert( g_vars_find(table, vars2[i].deviceName ) == vars2[i].hostVar);
 	}
 
 	// free the memory
@@ -1791,7 +1799,7 @@ void test_g_vars_remove(void){
 		a[i] = g_ptr_array_new();
 		for(j = 0; j < 3; j ++)
 			g_ptr_array_add(a[i], &vars1[j]);
-		CU_ASSERT_EQUAL( a[i]->len, 3);
+		g_assert( a[i]->len == 3);
 	}
 
 	for( i = 0; i < HANDLERS; i ++)
@@ -1800,26 +1808,24 @@ void test_g_vars_remove(void){
 	for( i = 0; i < HANDLERS; i ++ )
 		g_hash_table_insert(table, h[i], a);
 
-	CU_ASSERT_EQUAL(g_hash_table_size(table), 10);
+	g_assert(g_hash_table_size(table) == 10);
 
 
 	// 0. test NULL values; write now skip
-	CU_ASSERT_EQUAL(g_vars_remove(table, NULL), OK);
-	CU_ASSERT_EQUAL(g_hash_table_size(table), 10);
-	CU_ASSERT_EQUAL(g_vars_remove(NULL, h[0]), OK);
-	CU_ASSERT_EQUAL(g_hash_table_size(table), 10);
+	g_assert(g_vars_remove(table, NULL) == OK);
+	g_assert(g_hash_table_size(table) == 10);
+	g_assert(g_vars_remove(NULL, h[0]) == OK);
+	g_assert(g_hash_table_size(table) == 10);
 
 	// 1. remove all handlers
 	for( i = 0; i < HANDLERS; i++){
 		g_vars_remove(table, h[i]);
-		CU_ASSERT_EQUAL(g_hash_table_size(table), (unsigned int) HANDLERS - i - 1);
+		g_assert(g_hash_table_size(table) == (unsigned int) HANDLERS - i - 1);
 		//CU_ASSERT_EQUAL(g_hash_table_size(table), (unsigned int) HANDLERS - i);
 	}
 
 	g_hash_table_destroy(table);
 }
-
-
 
 void test_g_vars_remove_val(void){
 	const guint HANDLERS = 3;
@@ -1831,11 +1837,11 @@ void test_g_vars_remove_val(void){
 	a= g_ptr_array_new();
 	for(j = 0; j < HANDLERS; j ++)
 		g_ptr_array_add(a, g_vars_val_new((char *)&HANDLERS, "hey") );
-	CU_ASSERT_EQUAL( a->len, HANDLERS);
+	g_assert( a->len == HANDLERS);
 
 	// 0. test with a null pointer
 	g_vars_remove_val(NULL);
-	CU_ASSERT_EQUAL( a->len, HANDLERS);
+	g_assert( a->len == HANDLERS);
 
 	// 1. test removing the array - whatever
 	// @todo you should test it better, partially it is tested in g_vars_remove_val
@@ -1847,156 +1853,79 @@ void test_g_vars_val_newdel(void){
 
 	// 0. add NULL hostVar
 	v = g_vars_val_new(NULL, "hej");
-	CU_ASSERT_PTR_NOT_NULL(v);
-	CU_ASSERT_PTR_NULL(v->hostVar);
-	CU_ASSERT_STRING_EQUAL(v->deviceName, "hej");
+	g_assert(NULL != v);
+	g_assert(NULL == v->hostVar);
+	g_assert_cmpstr(v->deviceName, ==, "hej");
 	v = g_vars_val_delete(v);
-	CU_ASSERT_PTR_NULL(v);
+	g_assert(NULL == v);
 
 	// 1. add NULL deviceName
 	v = g_vars_val_new((void*)0x1, NULL);
-	CU_ASSERT_PTR_NOT_NULL(v);
-	CU_ASSERT_PTR_NULL(v->deviceName);
-	CU_ASSERT_PTR_EQUAL(v->hostVar, (void*)0x1);
+	g_assert(NULL != v);
+	g_assert(NULL == v->deviceName);
+	g_assert(v->hostVar == (void*)0x1);
 	v = g_vars_val_delete(v);
-	CU_ASSERT_PTR_NULL(v);
+	g_assert(NULL == v);
 
 	// 2. add non-Null things
 	char * devName = "deviceName";
 	char * p;
 
 	v = g_vars_val_new(p, devName);
-	CU_ASSERT_PTR_NOT_NULL(v);
-	CU_ASSERT_STRING_EQUAL(v->deviceName, devName);
-	CU_ASSERT_PTR_EQUAL(v->hostVar, p);
+	g_assert(NULL != v);
+	g_assert_cmpstr(v->deviceName, ==, devName);
+	g_assert(v->hostVar == p);
 	v = g_vars_val_delete(v);
-	CU_ASSERT_PTR_NULL(v);
-	CU_ASSERT_STRING_EQUAL(devName, "deviceName");
+	g_assert(NULL == v);
+	g_assert_cmpstr(devName, ==, "deviceName");
 }
 
-/* The main() function for setting up and running the tests.
- * Returns a CUE_SUCCESS on successful running, another
- * CUnit error code on failure.
- */
-int main()
-{
-   CU_pSuite pSuite = NULL;
-   CU_pSuite pSuitePack = NULL;
-   CU_pSuite pSuiteRegFuncArgs = NULL;
-   CU_pSuite pSuiteRegVar = NULL;
-   CU_pSuite pSuiteFcia = NULL;
-   CU_pSuite pSuiteMisc = NULL;
+int
+main(int argc, char *argv[]){
 
-   /* initialize the CUnit test registry */
-   if (CUE_SUCCESS != CU_initialize_registry())
-      return CU_get_error();
+	// initialize test program
+	g_test_init(&argc, &argv, NULL);
 
-   /* add a suite to the registry */
-   pSuite = CU_add_suite("FatBinary: GetSizeTest_Suite", init_suite1, clean_suite1);
-   if (NULL == pSuite) {
-      CU_cleanup_registry();
-      return CU_get_error();
-   }
+	// hook up the test functions
+	g_test_add_func("/FatBinary/test_l_getStringPktSize", test_l_getStringPktSize);
+	g_test_add_func("/FatBinary/test_l_getSize__cudaFatPtxEntry", test_l_getSize__cudaFatPtxEntry);
+	g_test_add_func("/FatBinary/test_l_getSize__cudaFatCubinEntry", test_l_getSize__cudaFatCubinEntry);
+	g_test_add_func("/FatBinary/test_l_getSize__cudaFatDebugEntry", test_l_getSize__cudaFatDebugEntry);
+	g_test_add_func("/FatBinary/test_l_getSize__cudaFatElfEntry", test_l_getSize__cudaFatElfEntry);
+	g_test_add_func("/FatBinary/test_l_getSize__cudaFatSymbolEntry", test_l_getSize__cudaFatSymbolEntry);
+	g_test_add_func("/FatBinary/test_l_getSize__cudaFatBinaryEntry", test_l_getSize__cudaFatBinaryEntry);
 
-   /* add the tests to the suite */
-   if ( (NULL == CU_add_test(pSuite, "test of test_l_getStringPktSize", test_l_getStringPktSize)) ||
-		(NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatPtxEntry", test_l_getSize__cudaFatPtxEntry)) ||
-        (NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatCubinEntry", test_l_getSize__cudaFatCubinEntry)) ||
-        (NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatDebugEntry", test_l_getSize__cudaFatDebugEntry)) ||
-        (NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatElfEntry", test_l_getSize__cudaFatElfEntry)) ||
-        (NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatSymbolEntry", test_l_getSize__cudaFatSymbolEntry)) ||
-        (NULL == CU_add_test(pSuite, "test of test_l_getSize__cudaFatBinaryEntry", test_l_getSize__cudaFatBinaryEntry)) ){
-      CU_cleanup_registry();
-      return CU_get_error();
-   }
+	g_test_add_func( "/FatBinaryPackUnpack/test of test_packUnpackStr", test_l_packUnpackStr);
+	g_test_add_func( "/FatBinaryPackUnpack/test_packUnpackPtx", test_l_packUnpackPtx);
+	g_test_add_func( "/FatBinaryPackUnpack/test_packUnpackCubin", test_l_packUnpackCubin);
+	g_test_add_func( "/FatBinaryPackUnpack/test_packUnpackDebug", test_l_packUnpackDebug);
+// something problematic with comparing strings observed 2011-09-29; see the test for details
+	g_test_add_func( "/FatBinaryPackUnpack/test_packUnpackElf", test_l_packUnpackElf);
+	g_test_add_func( "/FatBinaryPackUnpack/test_packUnpackSymbol", test_l_packUnpackSymbol);
+	g_test_add_func( "/FatBinaryPackUnpack/test_packUnpackDep", test_l_packUnpackDep);
+	g_test_add_func( "/FatBinaryPackUnpack/test_packunpack", test_packunpack);
 
-   pSuitePack = CU_add_suite("FatBinary PackUnpackTest_Suite", init_suite1, clean_suite1);
-   if(NULL == pSuitePack){
-	   CU_cleanup_registry();
-	   return CU_get_error();
-   }
-   /* add the tests to the suite */
-   if ( (NULL == CU_add_test(pSuitePack, "test of test_packUnpackStr", test_l_packUnpackStr)) ||
-		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackPtx", test_l_packUnpackPtx)) ||
-		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackCubin", test_l_packUnpackCubin)) ||
-		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackDebug", test_l_packUnpackDebug)) ||
-		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackElf", test_l_packUnpackElf)) ||
-		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackSymbol", test_l_packUnpackSymbol)) ||
-		(NULL == CU_add_test(pSuitePack, "test of test_packUnpackDep", test_l_packUnpackDep)) ||
-		(NULL == CU_add_test(pSuitePack, "test of test_packunpack", test_packunpack))
-		){
-      CU_cleanup_registry();
-      return CU_get_error();
-   }
+	g_test_add_func("/RegFuncArgs/test_l_getPtrPktSize", test_l_getPtrPktSize);
+	g_test_add_func("/RegFuncArgs/test_l_getSize_regFuncArgs", test_l_getSize_regFuncArgs);
+	g_test_add_func("/RegFuncArgs/test_l_packUnpackUint3Ptr", test_l_packUnpackUint3Ptr);
+	g_test_add_func("/RegFuncArgs/test_l_packUnpackDim3Ptr", test_l_packUnpackDim3Ptr);
+	g_test_add_func("/RegFuncArgs/test_l_packUnpackRegFuncArgs", test_l_packUnpackRegFuncArgs);
 
-   pSuiteRegFuncArgs = CU_add_suite("RegFuncArgs Test_Suite", NULL, NULL);
-   if(NULL == pSuiteRegFuncArgs){
-	   CU_cleanup_registry();
-	   return CU_get_error();
-   }
-   /* add the tests to the suite */
-   if ((NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_getPtrPktSize", test_l_getPtrPktSize)) ||
-	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_getSize_regFuncArgs", test_l_getSize_regFuncArgs)) ||
-	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_packUnpackUint3Ptr", test_l_packUnpackUint3Ptr)) ||
-	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_packUnpackDim3Ptr", test_l_packUnpackDim3Ptr)) ||
-	   (NULL == CU_add_test(pSuiteRegFuncArgs, "test of test_l_packUnpackRegFuncArgs", test_l_packUnpackRegFuncArgs))
-   ){
-      CU_cleanup_registry();
-      return CU_get_error();
-   }
+	g_test_add_func("/RegVar/test_l_getSize_regVar", test_l_getSize_regVar);
+	g_test_add_func("/RegVar/test_l_packUnpackRegVar", test_l_packUnpackRegVar);
+	g_test_add_func("/RegVar/test_g_vars_insert", test_g_vars_insert);
+	g_test_add_func("/RegVar/test_g_vars_find", test_g_vars_find);
+	g_test_add_func("/RegVar/test_g_vars_remove", test_g_vars_remove);
+	g_test_add_func("/RegVar/test_g_vars_remove_val", test_g_vars_remove_val);
+	g_test_add_func("/RegVar/test_g_vars_val_newdel", test_g_vars_val_newdel);
 
-   pSuiteRegVar = CU_add_suite("RegVar Test_Suite", NULL, NULL);
-   if(NULL == pSuiteRegVar){
-	   CU_cleanup_registry();
-	   return CU_get_error();
-   }
-   /* add the tests to the suite */
-   if (
-	   (NULL == CU_add_test(pSuiteRegVar, "test of test_l_getSize_regVar", test_l_getSize_regVar)) ||
-	   (NULL == CU_add_test(pSuiteRegVar, "test of test_l_packUnpackRegVar", test_l_packUnpackRegVar)) ||
-	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_insert", test_g_vars_insert)) ||
-	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_find", test_g_vars_find)) ||
-	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_remove", test_g_vars_remove)) ||
-	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_remove_val", test_g_vars_remove_val)) ||
-	   (NULL == CU_add_test(pSuiteRegVar, "test of test_g_vars_val_newdel", test_g_vars_val_newdel))
-   ){
-      CU_cleanup_registry();
-      return CU_get_error();
-   }
+	g_test_add_func("/Fcia/test_g_fcia_idx", test_g_fcia_idx);
+	g_test_add_func("/Fcia/test_g_fcia_elem", test_g_fcia_elem);
+	g_test_add_func("/Fcia/test_g_fcia_elidx", test_g_fcia_elidx);
+	g_test_add_func("/Fcia/test_g_fcia_host_var", test_g_fcia_host_var);
 
-   pSuiteFcia = CU_add_suite("Fcia Test_Suite", NULL, NULL);
-   if(NULL == pSuitePack){
-   	   CU_cleanup_registry();
-   	   return CU_get_error();
-   }
+	g_test_add_func("/Misc/test_methodIdToString", test_methodIdToString);
+	g_test_add_func("/Misc/test_freeBuffer", test_freeBuffer);
 
-   if (
-	   (NULL == CU_add_test(pSuiteFcia, "test_g_fcia_idx", test_g_fcia_idx)) ||
-	   (NULL == CU_add_test(pSuiteFcia, "test_g_fcia_elem", test_g_fcia_elem)) ||
-	   (NULL == CU_add_test(pSuiteFcia, "test_g_fcia_elidx", test_g_fcia_elidx)) ||
-	   (NULL == CU_add_test(pSuiteFcia, "test_g_fcia_host_var", test_g_fcia_host_var))
-      ){
-	   CU_cleanup_registry();
-	   return CU_get_error();
-   }
-
-
-   pSuiteMisc = CU_add_suite("Misc Test_Suite", NULL, NULL);
-   if(NULL == pSuitePack){
-   	   CU_cleanup_registry();
-   	   return CU_get_error();
-   }
-
-   if ((NULL == CU_add_test(pSuiteMisc, "test_methodIdToString", test_methodIdToString)) ||
-	   (NULL == CU_add_test(pSuiteMisc, "test_freeBuffer", test_freeBuffer))
-      ){
-	   CU_cleanup_registry();
-	   return CU_get_error();
-   }
-
-   /* Run all tests using the CUnit Basic interface */
-   CU_basic_set_mode(CU_BRM_VERBOSE);
-   CU_basic_run_tests();
-   CU_cleanup_registry();
-   return CU_get_error();
+	return g_test_run();
 }
