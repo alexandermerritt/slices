@@ -7,8 +7,8 @@
    @brief Building kidron-utils-remote-cuda-exec-2
 """
 import os
-import socket
 import commands
+import sys
 
 Help("""
    Type: 'scons -Q' to build the production program,
@@ -35,6 +35,17 @@ CUDA_ROOT=None
 # points to the directory where the GLIB20 is
 GLIB20=None
 
+def get_platform_characteristic_str():
+    """
+       intended to get the characteristic string to allow for automatic
+       recognition of the platform and applied customized build environment
+       @return: the characteristic string for the platform
+       @rtype: string
+    """
+    nodename = commands.getoutput('uname -n')
+    return nodename
+    
+
 #################################################
 # helper functions
 #################################################
@@ -45,31 +56,34 @@ def build_variables_set():
     """
     global CUDA_ROOT
     global GLIB20
+        
+    nodename = get_platform_characteristic_str()
+    print('The configuration will be applied for: ' + nodename)
     
-    hostname=socket.gethostname()
-    print('The configuration will be applied for: ' + hostname)
     # configuration for keeneland
-    if ( hostname.startswith('kid') ):
+    if ( nodename.startswith('kid') ):
         print('kid prefix detected ...')
         CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary/'
         GLIB20='/nics/d/home/smagg/opt/glib-2.28.7/'
+    
     # custom machine at Georgia Tech configuration for prost
-    if ( hostname.startswith('prost')):
+    if ( nodename.startswith('prost')):
         print('prost prefix detected ...')
         CUDA_ROOT = '/opt/cuda/'
         GLIB20='/opt/glib-2.28.7/'
-    # now we are using commands 
-    nodename = commands.getoutput('uname -n')
+    
     # Custom machine at Georgia Tech
     if nodename.startswith('shiva'):
  	print('shiva prefix detected ...')
         CUDA_ROOT = '/usr/local/cuda/'
         GLIB20 = '/usr/include/glib-2.0/'
+    
     # Custom machine at Georgia Tech, same as shiva
     if nodename.startswith('ifrit') :
 	print('ifrit prefix detected ...')
         CUDA_ROOT = '/usr/local/cuda/'
         GLIB20 = '/usr/include/glib-2.0/'
+
 
 def variable_check_exit(var_name, var):
     """
@@ -78,12 +92,13 @@ def variable_check_exit(var_name, var):
         @param var: The variable that supposed to be a path to the directory 
     """
     if var == None :
-        print(var_name + 'not set. You have to set it in build_variables_set() in this script')
+        print(var_name +  ' not set. You have to set it in build_variables_set() in this script')
         sys.exit(-1)
     if not os.path.exists(var):
         print(var_name + '= ' + var + ' does not exist!')
         sys.exit(-1)
-    print(var_name + '= ' + var)
+    print(var_name + '= ' +  var)
+
 
 def build_variables_print():
     """
@@ -104,7 +119,8 @@ build_variables_print()
 
 # export variables to other scripts
 Export( 'CUDA_ROOT', 
-        'GLIB20' )
+        'GLIB20')
+
 					  
 # call all scripts
 SConscript([

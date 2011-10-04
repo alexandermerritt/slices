@@ -13,10 +13,26 @@ import sys
 Import('CUDA_ROOT', 
        'GLIB20')
 
-nodename = commands.getoutput('uname -n')
 
-if nodename.startswith('prost') :
-    envBackend = Environment(
+def get_platform_characteristic_str():
+    """
+        @todo It should be imported like something
+        from ...SConstruct import get_platform_characteristic
+        but I need time to figure out how to do this
+       intended to get the characteristic string to allow for automatic
+       recognition of the platform and applied customized build environment
+       @return: the characteristic string for the platform
+       @rtype: string
+    """    
+    nodename = commands.getoutput('uname -n') # doesn't work on keeneland
+    return nodename
+    
+
+########################################################333
+# here we define the environments for particular nodes
+#######################################################3
+# environment for the Keeneland and prost
+envBackendKeeneland = Environment(
       LIBS=['pthread', 
             'rt', 
             'dl', 
@@ -33,12 +49,14 @@ if nodename.startswith('prost') :
       GLIB20 + 'include/glib-2.0',
       GLIB20 + 'include/gio-unix-2.0',
       GLIB20 + 'lib/glib-2.0/include'
-      #'/usr/include/glib-2.0',
-      #'/usr/lib64/glib-2.0/include'
       ],
       CCFLAGS='-g -Wall -Wextra')
-elif nodename.startswith('shiva') :
-    envBackend = Environment(
+
+# env for Prost, GT machine
+envBackendProst = envBackendKeeneland
+
+# Shiva, GT machine
+envBackendShiva = Environment(
       LIBS=['pthread', 
             'rt', 
             'dl', 
@@ -56,8 +74,9 @@ elif nodename.startswith('shiva') :
       '/usr/lib/glib-2.0/include'
       ],
       CCFLAGS='-g -Wall -Wextra')
-elif nodename.startswith('ifrit') :
-    envBackend = Environment(
+
+# Ifrit, GT machine
+envBackendIfrit = Environment(
       LIBS=['pthread', 
             'rt', 
             'dl', 
@@ -75,14 +94,49 @@ elif nodename.startswith('ifrit') :
       '/usr/lib/glib-2.0/include'
       ],
       CCFLAGS='-g -Wall -Wextra')
-else :
-    print "Define build variables for this machine in backend/SConstruct"
-    sys.exit()
-			 
-envBackend.Program('backend', [
-			'backend.c',
-			'../interposer/libciutils.c',
-			'../remote/connection.c',
-			'../remote/remote_packet.c',
-			'../remote/remote_api_wrapper.c',
+
+#############################################
+# end of environment definitions
+##########################################3
+
+
+def build_backend(env):
+    """
+        @param env: The environment that will be used to build a backend 
+    """
+    env.Program('backend', [
+            'backend.c',
+            '../interposer/libciutils.c',
+            '../remote/connection.c',
+            '../remote/remote_packet.c',
+            '../remote/remote_api_wrapper.c',
             '../include/kidron_common_f.c'])
+
+
+def build_program():
+    """
+       builds the program depending on the characteristics
+    """
+    global envBackendKeeneland
+    global envBackendProst
+    global envBackendShiva
+    global envBackendIfrit
+    
+    # try to recognize the machine
+    nodename = get_platform_characteristic_str()
+    
+    if nodename.startswith('kid'):
+        build_backend(envBackendKeeneland)
+    elif nodename.startswith('prost'):
+        build_backend(envBackendProst)
+    elif nodename.startswith('shiva'):
+        build_backend(envBackendShiva)
+    elif nodename.startswith('ifrit'):
+        build_backend(envBackendIfrit)
+    else:
+        print("Error: Define build environment for this machine in backend/SConstruct")
+        sys.exit()
+
+
+# build the program
+build_program()
