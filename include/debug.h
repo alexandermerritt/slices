@@ -12,6 +12,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 
 #define DEBUG
 
@@ -168,5 +169,18 @@
       cuptiGetResultString(err, &errstr);                       \
       p_exit("Error %s for CUPTI API function '%s'.\n", errstr, cuptifunc); \
     }
+
+// ------------------------
+// thread related functions
+
+/**
+ * exits if the return code indicates an error
+ * @param ret_code The return code from the pthread_create()
+ */
+
+#define pth_exit(ret_code) \
+	if( 0 != ret_code ) \
+		p_exit("Thread problems. Quitting.... Available errors: EAGAIN = %d, EINVAL = %d, EPERM = %d. Current error number = %d\n", \
+				EAGAIN, EINVAL, EPERM, ret_code);
 
 #endif /* DEBUG_H_ */

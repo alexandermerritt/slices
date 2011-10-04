@@ -5,6 +5,8 @@
    @author Alex Merritt, merritt.alex@gatech.edu
    @date 2011-02-15
    @brief Building kidron-utils-remote-cuda-exec-2
+   
+   @todo The building system is such a mess 
 """
 import os
 import commands

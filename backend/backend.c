@@ -22,7 +22,19 @@
 #include <assert.h>
 
 
-void * backend_thread(){
+#include "kidron_common_s.h"
+
+// kidron_common_f.c
+extern void ini_cmd_parse(int argc, char** argv, ini_t* pIni);
+extern int ini_getIni(ini_t* pIni);
+extern int ini_freeIni(ini_t* pIni);
+extern void ini_print(const ini_t* pIni);
+
+/**
+ * The backend thread routine; listen for incoming connections related to the
+ * execution of the CUDA calls
+ */
+void* backend(){
 	// connection for listening on a port
 	// 2 conn_t cannot be allocated on stack (see comment on conn_t)
 	// since cause a seg faults
@@ -162,16 +174,45 @@ void * backend_thread(){
 	free(pConnListen);
 	free(pConn);
 
+
 	return NULL;
 }
 
-int main(){
-	// thread that listens for the incoming connections
-	pthread_t thread;
+/**
+ * The procedure for the backend_agent_thread
+ */
+void* backend_agent(){
+	p_debug("Here is the backend_agent thread!\n");
 
-	pthread_create(&thread, NULL, &backend_thread, NULL);
-	pthread_join(thread, NULL);
+	return NULL;
+}
+
+
+
+int main(int argc, char** argv){
+	// thread that listens for the incoming connections
+	pthread_t backend_thread;
+	// the backend agent thread
+	pthread_t backend_agent_thread;
+	// stores diagnostic information
+	int ret_code;
+
+	ini_t	ini;
+
+	ini_cmd_parse(argc, argv, &ini);
+	ini_getIni(&ini);
+	ini_print(&ini);
+
+	ret_code = pthread_create(&backend_thread, NULL, &backend, NULL);
+	pth_exit(ret_code);
+	pthread_create(&backend_agent_thread, NULL, &backend_agent, NULL);
+	pth_exit(ret_code);
+
+	pthread_join(backend_thread, NULL);
+	pthread_join(backend_agent_thread, NULL);
+
 
 	printf("server thread says you bye bye!\n");
+	ini_freeIni(&ini);
 	return 0;
 }
