@@ -1,3 +1,5 @@
+#! /usr/bin/env python
+
 """@file SConstruct
    @author Magdalena Slawinska magg@gatech.edu
    @date 2011-02-22
@@ -5,31 +7,54 @@
 """
 
 import os
+import commands
 
 Import('CUDA_ROOT', 
        'GLIB20')
 
-envBackend = Environment(
-  LIBS=['pthread', 
-        'rt', 
-        'dl', 
-        'cudart', 
-        'glib-2.0' ],
-  LIBPATH=[CUDA_ROOT + 'lib64',
-           GLIB20 + 'lib'],
-  CPPPATH=['.',
-  '../remote',
-  '../include',
-  '../interposer',
-  '../backend',
-  CUDA_ROOT + 'include',
-  GLIB20 + 'include/glib-2.0',
-  GLIB20 + 'include/gio-unix-2.0',
-  GLIB20 + 'lib/glib-2.0/include'
-  #'/usr/include/glib-2.0',
-  #'/usr/lib64/glib-2.0/include'
-  ],
-  CCFLAGS='-g -Wall -Wextra')
+nodename = commands.getoutput('uname -n')
+
+if nodename.startswith('prost') :
+    envBackend = Environment(
+      LIBS=['pthread', 
+            'rt', 
+            'dl', 
+            'cudart', 
+            'glib-2.0' ],
+      LIBPATH=[CUDA_ROOT + 'lib64',
+               GLIB20 + 'lib'],
+      CPPPATH=['.',
+      '../remote',
+      '../include',
+      '../interposer',
+      '../backend',
+      CUDA_ROOT + 'include',
+      GLIB20 + 'include/glib-2.0',
+      GLIB20 + 'include/gio-unix-2.0',
+      GLIB20 + 'lib/glib-2.0/include'
+      #'/usr/include/glib-2.0',
+      #'/usr/lib64/glib-2.0/include'
+      ],
+      CCFLAGS='-g -Wall -Wextra')
+elif nodename.startswith('ifrit') :
+    envBackend = Environment(
+      LIBS=['pthread', 
+            'rt', 
+            'dl', 
+            'cudart', 
+            'glib-2.0' ],
+      LIBPATH=[CUDA_ROOT + 'lib64'],
+      CPPPATH=['.',
+      '../remote',
+      '../include',
+      '../interposer',
+      '../backend',
+      CUDA_ROOT + 'include',
+      '/usr/include/glib-2.0',
+      '/usr/include/gio-unix-2.0',
+      '/usr/lib/glib-2.0/include'
+      ],
+      CCFLAGS='-g -Wall -Wextra')
 			 
 envBackend.Program('backend', [
 			'backend.c',

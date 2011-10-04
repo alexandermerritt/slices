@@ -1,10 +1,14 @@
+#! /usr/bin/env python
+
 """@file SConstruct
    @author Magdalena Slawinska magg@gatech.edu
+   @author Alex Merritt, merritt.alex@gatech.edu
    @date 2011-02-15
    @brief Building kidron-utils-remote-cuda-exec-2
 """
 import os
 import socket
+import commands
 
 Help("""
    Type: 'scons -Q' to build the production program,
@@ -12,6 +16,8 @@ Help("""
    Currently automatically detected environments: 
    - keeneland (NICS, UTK) 
    - prost     (Georgia Tech)
+   - shiva     (Georgia TEch)
+   - ifrit     (Georgia TEch)
    If you want to add another environment check the function
    build_variables_set(). Currently it is based on the
    hostnames you are building on.
@@ -47,11 +53,23 @@ def build_variables_set():
         print('kid prefix detected ...')
         CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary/'
         GLIB20='/nics/d/home/smagg/opt/glib-2.28.7/'
-    # configuration for prost
+    # custom machine at Georgia Tech configuration for prost
     if ( hostname.startswith('prost')):
         print('prost prefix detected ...')
         CUDA_ROOT = '/opt/cuda/'
         GLIB20='/opt/glib-2.28.7/'
+    # now we are using commands 
+    nodename = commands.getoutput('uname -n')
+    # Custom machine at Georgia Tech
+    if nodename.startswith('shiva'):
+ 	print('shiva prefix detected ...')
+        CUDA_ROOT = '/usr/local/cuda/'
+        GLIB20 = '/usr/include/glib-2.0/'
+    # Custom machine at Georgia Tech, same as shiva
+    if nodename.startswith('ifrit') :
+	print('ifrit prefix detected ...')
+        CUDA_ROOT = '/usr/local/cuda/'
+        GLIB20 = '/usr/include/glib-2.0/'
 
 def variable_check_exit(var_name, var):
     """
@@ -90,10 +108,8 @@ Export( 'CUDA_ROOT',
 					  
 # call all scripts
 SConscript([
-'cuda-app/SConstruct',		# it doesn't depend on anything
-'interposer/SConstruct',    # it compiles a bunch of stuff
-'backend/SConstruct'			
-])
-                  
+        'cuda-app/SConstruct',	# it doesn't depend on anything
+        'interposer/SConstruct',    # it compiles a bunch of stuff
+        'backend/SConstruct'			
+        ])
 
- 

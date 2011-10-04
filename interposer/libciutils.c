@@ -45,7 +45,7 @@ int mallocCheck(const void * const p, const char * const pFuncName,
  * @param pBuffer the buffer to be released
  * @return NULL (always)
  */
-inline char * freeBuffer(char * pBuffer){
+char * freeBuffer(char * pBuffer){
 	free(pBuffer);
 	return NULL;
 }
@@ -95,7 +95,7 @@ int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo){
  * @param string
  * @return size of the packet for the string
  */
-inline int l_getStringPktSize(const char const * string){
+int l_getStringPktSize(const char const * string){
 	int size = sizeof(size_pkt_field_t);
 
 	if( string == NULL || strlen(string) == 0)
@@ -679,7 +679,7 @@ int printRegVarTab(GHashTable * tab){
  *         update the pDst pointer
  *         ERROR if pDst is NULL
  */
-inline int l_packStr(char * pDst, const char *pSrc){
+int l_packStr(char * pDst, const char *pSrc){
 	int offset;
 	int length;
 
@@ -720,7 +720,7 @@ inline int l_packStr(char * pDst, const char *pSrc){
  *         pSrc is NULL
  *         the pointer to the allocated string
  */
-inline char * l_unpackStr(const char *pSrc, int * pOffset){
+char * l_unpackStr(const char *pSrc, int * pOffset){
 	size_pkt_field_t length;
 	char * pDst;
 
@@ -764,7 +764,7 @@ inline char * l_unpackStr(const char *pSrc, int * pOffset){
  *         NULL if (1) pSrc is NULL or (2) problems with memory
  *              or (3) size == 0;
  */
-inline char * l_unpackChars(char * pSrc, int size){
+char * l_unpackChars(char * pSrc, int size){
 	char * pDst;
 
 	if ( NULL == pSrc || 0 == size )
@@ -1582,7 +1582,7 @@ int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack){
 /**
  * Gets the size of teh packetized pointer to Uint3
  */
-inline int l_getUint3PtrPktSize(uint3 * p){
+int l_getUint3PtrPktSize(uint3 * p){
 	if( p )
 		return sizeof(void*) + sizeof(uint3);
 	else
@@ -1592,7 +1592,7 @@ inline int l_getUint3PtrPktSize(uint3 * p){
 /**
  * Returns the size of the packetized pointer to Dim3
  */
-inline int l_getDim3PtrPktSize(dim3 * p){
+int l_getDim3PtrPktSize(dim3 * p){
 	if( p )
 		return sizeof(void*) + sizeof(dim3);
 	else
@@ -1602,7 +1602,7 @@ inline int l_getDim3PtrPktSize(dim3 * p){
 /**
  * returns the size of the packetized pointer to int
  */
-inline int l_getIntPtrPktSize(int * p){
+int l_getIntPtrPktSize(int * p){
 	if( p )
 		return sizeof(void*) + sizeof(int);
 	else
@@ -1678,7 +1678,7 @@ int l_getSize_regVar(void **fatCubinHandle, char *hostVar, char *deviceAddress,
  * @return offset we need to add to pDst later
  *         ERROR if pDst is NULL
  */
-inline int l_packUint3Ptr(char * pDst, const uint3 *pSrc){
+int l_packUint3Ptr(char * pDst, const uint3 *pSrc){
 	// to allow to count the offset
 	char * pDstOrig = pDst;
 
@@ -1716,7 +1716,7 @@ inline int l_packUint3Ptr(char * pDst, const uint3 *pSrc){
  * @return a pointer to a new uint3
  *         NULL if problems with memory allocation or pSrc is NULL
  */
-inline uint3 * l_unpackUint3Ptr(const char *pSrc, int * pOffset){
+uint3 * l_unpackUint3Ptr(const char *pSrc, int * pOffset){
 
 	uint3 * p;
 
@@ -1763,7 +1763,7 @@ inline uint3 * l_unpackUint3Ptr(const char *pSrc, int * pOffset){
  * @return offset we need to add to pDst later
  *         ERROR if pDst is NULL
  */
-inline int l_packDim3Ptr(char * pDst, const dim3 *pSrc){
+int l_packDim3Ptr(char * pDst, const dim3 *pSrc){
 	// to allow to count the offset
 	char * pDstOrig = pDst;
 
@@ -1801,7 +1801,7 @@ inline int l_packDim3Ptr(char * pDst, const dim3 *pSrc){
  * @return a pointer to a new uint3
  *         NULL if problems with memory allocation or pSrc is NULL
  */
-inline dim3 * l_unpackDim3Ptr(const char *pSrc, int * pOffset){
+dim3 * l_unpackDim3Ptr(const char *pSrc, int * pOffset){
 
 	dim3 * p;
 
@@ -1848,7 +1848,7 @@ inline dim3 * l_unpackDim3Ptr(const char *pSrc, int * pOffset){
  *         ERROR if pDst is NULL
  *
  */
-inline int l_packIntPtr(char * pDst, int *pSrc){
+int l_packIntPtr(char * pDst, int *pSrc){
 	char * pDstOrig = pDst;
 
 	if( !pDst )
@@ -1875,7 +1875,7 @@ inline int l_packIntPtr(char * pDst, int *pSrc){
  * @return a pointer to a new uint3
  *         NULL if problems with memory allocation or pSrc is NULL
  */
-inline int * l_unpackIntPtr(const char *pSrc, int * pOffset){
+int * l_unpackIntPtr(const char *pSrc, int * pOffset){
 	int * p;
 
 	if( !pSrc ){
@@ -2359,7 +2359,7 @@ char * methodIdToString(const int method_id){
  * @param p pointer to be checked
  * @param message the message that needs to be displayed when error occurs
  */
-inline void nullExitChkpt(void *p, char * message){
+void nullExitChkpt(void *p, char * message){
 	if(NULL == p)
 		g_error(message);
 }
@@ -2375,7 +2375,7 @@ inline void nullExitChkpt(void *p, char * message){
  *         FALSE the pointer is not null and the message is
  *               not displayed
  */
-inline gboolean nullDebugChkpt(const void * p, const char * func, char * message){
+gboolean nullDebugChkpt(const void * p, const char * func, char * message){
 	if( NULL == p ){
 		p_debug("%s: The pointer is NULL. %s ", func, message);
 		return TRUE;
@@ -2390,7 +2390,7 @@ inline gboolean nullDebugChkpt(const void * p, const char * func, char * message
  * @param p pointer to be checked
  * @param message the message the needs to be displayed when error occurs
  */
-inline void nullExitChkptMalloc(void *p, char * message){
+void nullExitChkptMalloc(void *p, char * message){
 	if(NULL == p){
 		if( NULL == message)
 			g_error("Problems with memory allocation.\n");
@@ -2419,7 +2419,7 @@ inline void nullExitChkptMalloc(void *p, char * message){
  *         -1 if no entry equal to fatCubinHandle can be found or the fatCubinInfoArr
  *            is NULL
  */
-inline int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle) {
+int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle) {
 	fatcubin_info_t * e = NULL;
 	int index = -1;
 	unsigned int i;
@@ -2454,7 +2454,7 @@ inline int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle) {
  *         NULL if no entry equal to fatCubinHandle can be found or fatCubinInfoArr
  *         is lost
  */
-inline fatcubin_info_t * g_fcia_elidx(GArray * fatCubinInfoArr, void ** fatCubinHandle, int * pIndex){
+fatcubin_info_t * g_fcia_elidx(GArray * fatCubinInfoArr, void ** fatCubinHandle, int * pIndex){
 	*pIndex = g_fcia_idx(fatCubinInfoArr, fatCubinHandle);
 
 	return (-1 == *pIndex ? NULL : &g_array_index(fatCubinInfoArr, fatcubin_info_t, *pIndex));
@@ -2473,7 +2473,7 @@ inline fatcubin_info_t * g_fcia_elidx(GArray * fatCubinInfoArr, void ** fatCubin
  *         NULL if no entry equal to fatCubinHandle can be found or fatCubinInfoArr
  *         is lost
  */
-inline fatcubin_info_t * g_fcia_elem(GArray * fatCubinInfoArr, void ** fatCubinHandle){
+fatcubin_info_t * g_fcia_elem(GArray * fatCubinInfoArr, void ** fatCubinHandle){
 
 	int idx;
 
@@ -2532,7 +2532,7 @@ fatcubin_info_t * g_fcia_host_var(GArray * fatCubinInfoArr, char * hostVar, int 
  *         the value (pointer to array) corresponding to fcHandle in regHostVarsTab where the pValue
  *         has been inserted
  */
-inline GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle, vars_val_t * pValue){
+GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle, vars_val_t * pValue){
 //@todo
 	// the array that holds or will hold the hostVar
 	GPtrArray *varArr = NULL;
@@ -2560,7 +2560,7 @@ inline GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle, 
  * @param fatCubinHandle The handler to be removed
  * @return OK
  */
-inline int g_vars_remove(GHashTable * regHostVarsTab, void** fatCubinHandle){
+int g_vars_remove(GHashTable * regHostVarsTab, void** fatCubinHandle){
 	if( nullDebugChkpt(regHostVarsTab, "g_vars_remove", "regHostVarsTab\n") == TRUE
 		|| nullDebugChkpt(fatCubinHandle, "g_vars_remove", "fatCubinHandle\n") == TRUE)
 		return OK;
@@ -2682,7 +2682,7 @@ gboolean l_g_vars_find_deviceName(gpointer key, gpointer value, gpointer user_da
  *         of the variable) or a string name (i.e. a pointer to the name of the variable)
  *         NULL if symbol has not been found
  */
-inline char * g_vars_find(GHashTable * regHostVarsTab, const char * symbol){
+char * g_vars_find(GHashTable * regHostVarsTab, const char * symbol){
 
 	char * result;
 

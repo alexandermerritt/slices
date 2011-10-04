@@ -1,5 +1,8 @@
+#! /usr/bin/env python
+
 """@file SConstruct
    @author Magdalena Slawinska magg@gatech.edu
+   @author Alex Merritt, merritt.alex@gatech.edu
    @date 2011-02-15
    @brief Building the interposer
 """
@@ -11,29 +14,58 @@
 #   directory ('.') for any files included by C source files (.c or .h files)
 
 import os
+import commands
+import socket
 
 Import( 'CUDA_ROOT', 
         'GLIB20' )
-   
+
+# @todo merge it someday
+# to automatically recognize on what machine we are building 
+nodename = commands.getoutput('uname -n')
+# the same function as nodename; should merge someday
+hostname=socket.gethostname()
+
+
 # for glib options run: glib-config --cflags  for glib1.2 
 # glib2 lacks this thing
 
-interposerEnv = Environment(
- LIBS = ['rt', 'dl', 
-         'glib-2.0'],
- LIBPATH = [CUDA_ROOT + 'lib64', 
-   GLIB20 + 'lib', 
-   '/lib64'],
- CPPPATH = [
-    '.',
-    CUDA_ROOT + 'include', 
-    '../include', 
-    '../remote',
-    '../backend',
-    GLIB20 + 'include/glib-2.0',
-    GLIB20 + 'include/gio-unix-2.0',
-    GLIB20 + 'lib/glib-2.0/include'],                                
- CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
+if hostname.startswith('prost') or hostname.startswith('kid'):
+    interposerEnv = Environment(
+     LIBS = ['rt', 
+             'dl', 
+             'glib-2.0'],
+     LIBPATH = [CUDA_ROOT + 'lib64', 
+       GLIB20 + 'lib', 
+       '/lib64'],
+     CPPPATH = [
+        '.',
+        CUDA_ROOT + 'include', 
+        '../include', 
+        '../remote',
+        '../backend',
+        GLIB20 + 'include/glib-2.0',
+        GLIB20 + 'include/gio-unix-2.0',
+        GLIB20 + 'lib/glib-2.0/include'],
+     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
+elif nodename.startswith('ifrit') :
+    interposerEnv = Environment(
+     LIBS = ['rt', 
+             'dl', 
+             'glib-2.0'],
+     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64'],
+     CPPPATH = [
+        '.',
+        CUDA_ROOT + 'include', 
+        '../include', 
+        '../remote',
+        '../backend',
+        '/usr/include/glib-2.0',
+        '/usr/lib/glib-2.0/include'
+        ],
+     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
+else :
+    print("Define build variables for this host in interposer/SConstruct")
 
 # create a shared library                                         
 interposerEnv.SharedLibrary('libci.so', 
@@ -43,19 +75,34 @@ interposerEnv.SharedLibrary('libci.so',
       '../remote/connection.c',               
       '../remote/remote_packet.c',
       '../include/kidron_common_f.c'])
-                                                                        
+                                                                     
 # building tests
-envTest = Environment(
-  LIBS = [ 'pthread', 'glib-2.0'],
-  LIBPATH= [ '.', GLIB20 + 'lib'],
-  CPPPATH= [CUDA_ROOT + 'include',
+if hostname.startswith('kid')  or hostname.startswith('prost'):
+    # keeneland or prost configuration
+    envTest = Environment(
+    LIBS = [ 'pthread', 'glib-2.0'],
+    LIBPATH= [ '.', GLIB20 + 'lib'],
+    CPPPATH= [CUDA_ROOT + 'include',
             '../include',
             '../remote', 
             '../backend',
             GLIB20 + 'include/glib-2.0',
             GLIB20 + 'include/gio-unix-2.0',
             GLIB20 + 'lib/glib-2.0/include'],
-  CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+    CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+elif nodename.startswith('ifrit') :
+    envTest = Environment(
+      LIBS = ['pthread', 'glib-2.0'],
+      LIBPATH= ['.'],
+      CPPPATH= [CUDA_ROOT + 'include',
+                '../include',
+                '../remote', 
+                '../backend',
+                '/usr/include/glib-2.0',
+                '/usr/include/gio-unix-2.0',
+                '/usr/lib/glib-2.0/include'],
+      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+
 
 # libci and libciutils should be compiled earlier
 envTest.Program('testLibci', ['testLibci.c', 'libci.so' ])
