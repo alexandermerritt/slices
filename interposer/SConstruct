@@ -16,6 +16,7 @@
 import os
 import commands
 import socket
+import sys
 
 Import( 'CUDA_ROOT', 
         'GLIB20' )
@@ -48,6 +49,21 @@ if hostname.startswith('prost') or hostname.startswith('kid'):
         GLIB20 + 'include/gio-unix-2.0',
         GLIB20 + 'lib/glib-2.0/include'],
      CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
+elif nodename.startswith('shiva') :
+    interposerEnv = Environment(
+     LIBS = ['rt', 'dl', 
+             'glib-2.0'],
+     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64'],
+     CPPPATH = [
+        '.',
+        CUDA_ROOT + 'include', 
+        '../include', 
+        '../remote',
+        '../backend',
+        '/usr/include/glib-2.0',
+        '/usr/lib/glib-2.0/include'
+        ],
+     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
 elif nodename.startswith('ifrit') :
     interposerEnv = Environment(
      LIBS = ['rt', 
@@ -66,6 +82,7 @@ elif nodename.startswith('ifrit') :
      CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
 else :
     print("Define build variables for this host in interposer/SConstruct")
+    sys.exit()
 
 # create a shared library                                         
 interposerEnv.SharedLibrary('libci.so', 
@@ -102,6 +119,9 @@ elif nodename.startswith('ifrit') :
                 '/usr/include/gio-unix-2.0',
                 '/usr/lib/glib-2.0/include'],
       CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+else :
+    print("Define build variables for this machine in interposer/SConstruct")
+    sys.exit()
 
 
 # libci and libciutils should be compiled earlier
