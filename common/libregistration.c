@@ -1,0 +1,532 @@
+/**
+ * @file libregistration.c
+ *
+ * @date October 2, 2011
+ * @author Alex Merritt, merritt.alex@gatech.edu
+ *
+ * @brief Code herein defines the protocol used between an interposing library
+ * and the backend process when initializing state to share memory for passing
+ * marshalled CUDA function calls.
+ *
+ * TODO Place larger description here. Move some of the longer comments in the
+ * code below up here so as to not clutter the code too much.
+ */
+
+#include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <glib.h>
+#include <pthread.h>
+#include <string.h>
+#include <sys/inotify.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <debug.h>
+#include <common/libregistration.h>
+
+/*-------------------------------------- DEFINITIONS -------------------------*/
+
+/*
+ * None of the macros or defined structures in this section are intended to be
+ * accessible outside of this file.
+ */
+
+#define REG_DIR		"/tmp/kidron-rce-registration"
+#define REG_PID		REG_DIR "/.backend.pid"
+
+//! Number of events we expect to be queued each time an inotify trigger occurs.
+#define INOTIFY_NUM_EVENTS		32
+#define INOTIFY_EVENT_SZ		(sizeof(struct inotify_event))
+#define INOTIFY_BUFFER_SZ		(INOTIFY_NUM_EVENTS * INOTIFY_EVENT_SZ)
+
+//! Size of the shared memory segment between library and backend.
+#define SHM_SZ_MB		8
+#define SHM_SZ_B		(SHM_SZ_MB << 20)
+
+#define LOWEST_VALID_REGID	1
+
+/**
+ * TODO
+ */
+struct registration {
+	regid_t	id;			//! Library-exposed registration ID.
+	pid_t	pid;		//! PID of process which created the file
+	void	*shm;		//! Address to shared memory area
+	int		fd;			//! File descriptor of mmap'd file
+	// TODO anything else??
+};
+
+/**
+ * State associated with the inotify thread. This thread performs upcalls (it
+ * "calls back") to the backend process via the function the backend provided
+ * whenever its inotification state has been triggered.
+ */
+struct inotify_state {
+	//! Upcall to notify backend of registration
+	void (*func)(enum callback_event e, regid_t id);
+	pthread_t		tid;
+	gboolean		alive;
+};
+
+/**
+ * Registration state maintained by the backend process. No library states
+ * exist in the backend.
+ */
+struct backend_state {
+	gboolean				valid; //! true if state has been initialized
+	struct registration		**all_regs; //! array of registrations
+	unsigned int			max_regs;
+	struct inotify_state	inotify;
+};
+
+/**
+ * Registration state maintained by _each_ process linked with the interposing
+ * library.
+ */
+struct library_state {
+	// TODO
+};
+
+/*-------------------------------------- GLOBAL STATE ------------------------*/
+
+/*
+ * These variables are 'global' with respect to this file only.
+ */
+
+static struct backend_state be_state;
+static struct library_state lib_state;
+static regid_t next_reg_id = LOWEST_VALID_REGID;
+
+/*-------------------------------------- LIBRARY FUNCTIONS --------------------*/
+
+regid_t reg_connect(void) {
+	// write a pid file to REG_DIR
+	// mmap it (backend will simultaneously be mmap'ing)
+}
+
+void* reg_get_shm(regid_t id) {
+	if (id < LOWEST_VALID_REGID) {
+		printd(DBG_DEBUG, "invalid id %d\n", id);
+		return NULL;
+	}
+}
+
+size_t reg_get_shm_size(regid_t id) {
+	if (id < LOWEST_VALID_REGID) {
+		printd(DBG_DEBUG, "invalid id %d\n", id);
+		return 0;
+	}
+}
+
+int reg_disconnect(regid_t id) {
+	if (id < LOWEST_VALID_REGID) {
+		printd(DBG_DEBUG, "invalid id %d\n", id);
+		return -1;
+	}
+}
+
+/*-------------------------------------- BACKEND FUNCTIONS --------------------*/
+
+static int _pid_file_create(void) {
+	int err;
+	struct stat statbuf;
+	memset(&statbuf, 0, sizeof(struct stat));
+
+	// see if the pid file already exists
+	err = stat(REG_PID, &statbuf);
+	if (err < 0) {
+		if (errno != ENOENT) { // okay if doesn't exist
+			perror("stat on REG_PID");
+			goto fail;
+		}
+	} else {
+		fprintf(stderr, "It appears another backend is running."
+				" If not, remove %s and retry.\n", REG_PID);
+		goto fail;
+	}
+
+	// Make the directory. Perms are rwxrwx---
+	err = mkdir(REG_DIR, S_IRWXU | S_IRWXG);
+	if (err < 0) {
+		if (errno != EEXIST) { // okay if already exists
+			perror("mkdir(REG_DIR)");
+			goto fail;
+		}
+	}
+
+	// Create the PID file. Perms are rw-rw----
+	// @todo TODO Put our PID into the PID file
+	err = creat(REG_PID, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+	if (err < 0) {
+		perror("creat(REG_PID)");
+		goto fail;
+	}
+
+	return 0;
+
+fail:
+	return -1;
+}
+
+static int _pid_file_rm(void) {
+	if (unlink(REG_PID) < 0) {
+		perror("unlink(REG_PID)");
+		goto fail;
+	}
+	return 0;
+fail:
+	return -1;
+}
+
+static regid_t _new_registration(const char *filename) {
+	struct registration *reg = NULL;
+	unsigned int idx = 0; //! index of new registration
+	int fd = -1;
+	char *filepath = NULL; //! absolute path to filename
+	int pathlen = 0; //! length of absolute path to filename
+
+	if (!filename) {
+		printd(DBG_ERROR, "NULL filename\n");
+		return -1;
+	}
+	// find first NULL entry to put new registration into
+	for ( ; idx < be_state.max_regs; idx++) {
+		if (!be_state.all_regs[idx])
+			break;
+	}
+	if (idx >= be_state.max_regs) {
+		printd(DBG_ERROR, "Reached max regs\n");
+		goto fail;
+	}
+	reg = calloc(1, sizeof(struct registration));
+	if (!reg) {
+		printd(DBG_ERROR, "Out of memory\n");
+		fprintf(stderr, "Out of memory\n");
+		goto fail;
+	}
+	reg->id = next_reg_id++;
+	reg->pid = strtol(filename, NULL, 10); // assume filename is pid
+
+	// mmap the file to create the shared region; library does this, too
+	pathlen = strlen(REG_DIR) + strlen(filename) + 2; // 2 for / and xtra \0
+	filepath = calloc(pathlen, sizeof(char));
+	if (!filepath) {
+		printd(DBG_ERROR, "Out of memory\n");
+		fprintf(stderr, "Out of memory\n");
+		goto fail;
+	}
+	strcat(filepath, REG_DIR);
+	strcat(filepath, "/");
+	strcat(filepath, filename);
+	fd = open(filepath, O_RDWR);
+	if (fd < 0) {
+		printd(DBG_ERROR, "Could not open %s: %s\n", filepath, strerror(errno));
+		goto fail;
+	}
+	reg->fd = fd;
+	reg->shm = mmap(NULL, SHM_SZ_B, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (reg->shm == MAP_FAILED) {
+		printd(DBG_ERROR, "Could not mmap fd %d: %s\n", fd, strerror(errno));
+		goto fail;
+	}
+	be_state.all_regs[idx] = reg; // an important step!
+	printd(DBG_DEBUG, "id=%d pid=%d shm=%p fd=%d\n",
+			reg->id, reg->pid, reg->shm, reg->fd);
+	if (filepath)
+		free(filepath);
+
+	return reg->id;
+
+fail:
+	if (fd > -1)
+		close(fd);
+	if (filepath)
+		free(filepath);
+	if (reg)
+		free(reg);
+	return -1;
+}
+
+static int _rm_registration(const char *filename) {
+	struct registration *reg = NULL;
+	unsigned int idx = 0;
+	pid_t pid; //! filename is the pid of the process unregistering
+	int err;
+
+	if (!filename) {
+		printd(DBG_ERROR, "NULL filename\n");
+		return -1;
+	}
+	// look for the registration struct, and deallocate it
+	pid = strtol(filename, NULL, 10);
+	for ( ; idx < be_state.max_regs; idx++) {
+		reg = be_state.all_regs[idx];
+		if (!reg)
+			continue;
+		if (pid == reg->pid)
+			break;
+	}
+	if (!reg || idx >= be_state.max_regs) {
+		printd(DBG_ERROR, "%s not registered\n", filename);
+		goto fail;
+	}
+	be_state.all_regs[idx] = NULL; // take it out
+	err = munmap(reg->shm, SHM_SZ_B);
+	if (err < 0) {
+		printd(DBG_ERROR, "munmap of shm failed: %s\n", strerror(errno));
+		goto fail;
+	}
+	err = close(reg->fd);
+	if (err < 0) {
+		printd(DBG_ERROR, "close of shm fd failed: %s\n", strerror(errno));
+		goto fail;
+	}
+	memset(reg, 0, sizeof(struct registration));
+	free(reg);
+	reg = NULL;
+	return 0;
+
+fail:
+	printd(DBG_ERROR, "failed\n");
+	return -1;
+}
+
+static regid_t _find_regid(const char *filename) {
+	struct registration *reg = NULL;
+	unsigned int idx;
+	pid_t pid;
+	regid_t id = -1;
+	if (!filename) {
+		printd(DBG_ERROR, "NULL filename\n");
+		return -1;
+	}
+	pid = strtol(filename, NULL, 10);
+	for (idx = 0; idx < be_state.max_regs; idx++) {
+		reg = be_state.all_regs[idx];
+		if (!reg)
+			continue;
+		if (pid == reg->pid) {
+			id = reg->id;
+			break;
+		}
+	}
+	return id;
+}
+
+static void _inotify_cleanup(void *arg) {
+	printd(DBG_INFO, "Callback thread terminating\n");
+	be_state.inotify.alive = FALSE;
+	// @todo TODO notify someone we died, could have been due to an
+	// unrecoverable error
+}
+
+static void *_inotify_thread(void *arg) {
+	int fd = -1, wd = -1;	//! inotify instance; watch descriptor
+	int len; //! num bytes returned from read on inotify fd
+	char *events = NULL;	//! array of inotify events
+	struct inotify_event *event; //! current event we're processing
+	int err;
+
+	// cleanup function will always be called when thread is killed or exits
+	pthread_cleanup_push(_inotify_cleanup, NULL);
+	be_state.inotify.alive = TRUE;
+	printd(DBG_INFO, "Callback thread is alive\n");
+
+	/*
+	 * Source: www.linuxjournal.com/article/8478
+	 */
+	events = calloc(1, INOTIFY_BUFFER_SZ);
+	if (!events) {
+		printd(DBG_ERROR, "Out of memory\n");
+		fprintf(stderr, "Out of memory\n");
+		goto fail;
+	}
+	fd = inotify_init();
+	if (fd < 0) {
+		printd(DBG_ERROR, "notify_init failed: %s\n", strerror(errno));
+		pthread_exit(NULL);
+	}
+	wd = inotify_add_watch(fd, REG_DIR, IN_CREATE | IN_DELETE);
+	if (wd < 0) {
+		printd(DBG_ERROR, "inotify_add_watch failed: %s\n", strerror(errno));
+		goto fail;
+	}
+	while (1) {
+		printd(DBG_DEBUG, "waiting\n");
+		len = read(fd, events, INOTIFY_BUFFER_SZ); // sleep until next event
+		// check length
+		if (len < 0) {
+			if (errno == EINTR) {
+				printd(DBG_WARNING, "inotify read interrupted by signal\n");
+				continue; // re-issue read()
+			} else {
+				perror("read on inotify fd");
+				break;
+			}
+		} else if (len == 0) {
+			printd(DBG_ERROR, "inotify read 0 bytes\n");
+			break;
+		}
+		// length is okay, loop through all events
+		int i = 0;
+		while (i < len) {
+			event = (struct inotify_event *)(&events[i]);
+			// nameless event... since we trigger ONLY on create/delete this can
+			// signify the directory itself was deleted or something else bad
+			if (event->len == 0) {
+				printd(DBG_WARNING, "bad inotify: wd=%d mask=0x%x, cookie=0x%x"
+						" len=0\n", event->wd, event->mask, event->cookie);
+				break;
+			}
+			printd(DBG_DEBUG, "inotify: wd=%d mask=0x%x, cookie=0x%x len=%u"
+					" name='%s'\n", event->wd, event->mask, event->cookie,
+					event->len, event->name);
+			// double-check the wd is ours...
+			if (event->wd != wd) {
+				printd(DBG_WARNING, "wd doesn't match\n");
+				break;
+			}
+			regid_t regid;
+			switch (event->mask) {
+				case IN_CREATE:
+					regid = _new_registration(event->name);
+					if (regid < 0) {
+						printd(DBG_ERROR, "_new_registration failed\n");
+						goto fail;
+					}
+					be_state.inotify.func(CALLBACK_NEW, regid);
+					break;
+				case IN_DELETE:
+					regid = _find_regid(event->name);
+					if (regid < 0)
+						printd(DBG_WARNING, "%s not registered\n", event->name);
+					else {
+						be_state.inotify.func(CALLBACK_DEL, regid);
+						err = _rm_registration(event->name);
+						if (err < 0) {
+							printd(DBG_ERROR, "Could not remove reg %d\n", regid);
+							break;
+						}
+					}
+					break;
+				default:
+					printd(DBG_ERROR, "inotify: unexpected event mask\n");
+					continue;
+			}
+			i += INOTIFY_EVENT_SZ + event->len;
+		}
+	}
+
+fail:
+	if (fd > -1)
+		close(fd); // removes watches, cleans up inotify instance
+	fd = -1;
+	// @todo TODO Clear each individual registration struct, then array
+	if (!events)
+		free(events);
+	events = NULL;
+
+	pthread_cleanup_pop(1);
+	assert(0); // not reachable
+	__builtin_unreachable();
+}
+
+int reg_init(unsigned int max_regs) {
+	int err;
+
+	if (be_state.valid == TRUE) {
+		printd(DBG_WARNING, "Backend has already initialized registration\n");
+		goto fail;
+	}
+
+	err = _pid_file_create();
+	if (err < 0) {
+		printd(DBG_ERROR, "PID create failed\n");
+		goto fail;
+	}
+
+	if (max_regs == 0) {
+		printd(DBG_ERROR, "max regs is zero\n");
+		goto fail;
+	}
+
+	be_state.all_regs = calloc(max_regs, sizeof(struct registration *));
+	if (!be_state.all_regs) {
+		printd(DBG_ERROR, "Out of memory\n");
+		fprintf(stderr, "Out of memory\n");
+		goto fail;
+	}
+	be_state.max_regs = max_regs;
+
+	printd(DBG_INFO, "SHM size %d MiB\n", SHM_SZ_MB);
+	printd(DBG_INFO, "Reg dir '%s'\n", REG_DIR);
+	printd(DBG_INFO, "Backend PID '%s'\n", REG_PID);
+
+	printd(DBG_INFO, "libregistration initialized\n");
+
+	be_state.valid = TRUE;
+	return 0;
+
+fail:
+	return -1;
+}
+
+int reg_shutdown(void) {
+	int err;
+
+	if (be_state.valid == FALSE) {
+		printd(DBG_WARNING, "init never called\n");
+		return 0;
+	}
+
+	// terminate inotify thread
+	if (be_state.inotify.alive == TRUE) {
+		err = pthread_cancel(be_state.inotify.tid);
+		if (err != 0) {
+			printd(DBG_ERROR, "Could not cancel inotify thread\n");
+		}
+		err = pthread_join(be_state.inotify.tid, NULL);
+		if (err != 0) {
+			printd(DBG_ERROR, "Could not join inotify thread\n");
+		}
+		// the OS will clean up any errors here, so keep going :)
+	}
+
+	// TODO Free memory allocated to reg elements and then the array
+	be_state.valid = FALSE;
+	free(be_state.all_regs);
+	memset(&be_state, 0, sizeof(struct backend_state));
+
+	err = _pid_file_rm();
+	if (err < 0) { // user will have to manually remove the file
+		printd(DBG_ERROR, "PID file removal failed\n");
+	}
+
+	// TODO check to see if any open mmap'd files exist, and what to do if so
+
+	printd(DBG_INFO, "libregistration shutdown\n");
+	return 0;
+}
+
+int reg_callback(void (*callback)(enum callback_event e, regid_t id)) {
+	int err;
+	if (!callback) {
+		printd(DBG_ERROR, "NULL argument\n");
+		goto fail;
+	}
+	printd(DBG_INFO, "Creating inotify thread\n");
+	// @todo TODO Block all signals for this thread.
+	be_state.inotify.func = callback;
+	err = pthread_create(&be_state.inotify.tid, NULL, _inotify_thread, NULL);
+	if (err < 0) {
+		printd(DBG_ERROR, "Could not create inotify thread\n");
+		goto fail;
+	}
+	return 0;
+
+fail:
+	return -1;
+}
