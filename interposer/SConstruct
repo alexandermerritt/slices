@@ -114,6 +114,19 @@ envTestKeeneland = Environment(
 # prost
 envTestProst = envTestKeeneland
 
+# shiva
+envTestShiva = Environment(
+      LIBS = ['pthread', 'glib-2.0'],
+      LIBPATH= ['.'],
+      CPPPATH= [CUDA_ROOT + 'include',
+                '../include',
+                '../remote', 
+                '../backend',
+                '/usr/include/glib-2.0',
+                '/usr/include/gio-unix-2.0',
+                '/usr/lib/glib-2.0/include'],
+      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+
 # ifrit
 envTestIfrit = Environment(
       LIBS = ['pthread', 'glib-2.0'],
@@ -175,11 +188,11 @@ def build_interposer():
     if nodename.startswith('kid'):
         build_interposer_lib(envInterposerKeeneland)
     elif nodename.startswith('prost'):
-        build_backend(envInterposerProst)
+        build_interposer_lib(envInterposerProst)
     elif nodename.startswith('shiva'):
-        build_backend(envInterposerShiva)
+        build_interposer_lib(envInterposerShiva)
     elif nodename.startswith('ifrit'):
-        build_backend(envInterposerIfrit)
+        build_interposer_lib(envInterposerIfrit)
     else:
         print("Error: Define build environment for this machine in interposer/SConstruct")
         sys.exit()
@@ -203,6 +216,8 @@ def build_all_tests():
         build_tests(envTestProst)    
     elif nodename.startswith('ifrit'):
         build_tests(envTestIfrit)
+    elif nodename.startswith('shiva'):
+        build_tests(envTestShiva)
     else:
         print("Error: Define build environment for this machine in interposer/SConstruct")
         sys.exit()
