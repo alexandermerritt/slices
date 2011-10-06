@@ -3,7 +3,8 @@
  *
  * @date Feb 27, 2011
  * @author Magda Slawinska, magg@gatech.edu
-
+ * @author Alex Merritt, merritt.alex@gatech.edu
+ *
  * @brief Interposes the cuda calls and prints arguments of the call. It supports
  * the 3.2 CUDA Toolkit, specifically
  *   CUDA Runtime API Version 3.2
@@ -36,6 +37,8 @@
 // if this file is  .cpp, then you get warning "_GNU_SOURCE" redefined
 #define _GNU_SOURCE
 
+/*-------------------------------------- INCLUDES ----------------------------*/
+
 #include <stdio.h>
 #include <driver_types.h>
 
@@ -51,51 +54,59 @@
 #include "debug.h"			// printd, ERROR, OK
 #include <pthread.h>		// pthread_self()
 #include "method_id.h"		// method identifiers
-#include "remote_api_wrapper.h" // for nvback....rpc/srv functions
-#include "connection.h"
 #include "libciutils.h"
 #include <assert.h>
 
 #include <glib.h>		// for GHashTable
 #include "kidron_common_s.h" // for ini file
 
+#include <util/compiler.h>
+#include <common/libregistration.h>
+
 #include "config.h"
+
+/*-------------------------------------- EXTERNS -----------------------------*/
 
 // from kidron_common_f.c
 extern int ini_getLocal(const ini_t* pIni);
 extern int ini_getIni(ini_t* pIni);
 extern int ini_freeIni(ini_t* pIni);
 
+/*-------------------------------------- DEFINITIONS -------------------------*/
+
+/**
+ * Struct representing the state associated with registration with the backend
+ * process.
+ */
+struct backend_reg {
+	gboolean	valid;		//! True if registration has been done
+	regid_t		regs[5];	//! Library-Backened registration IDs (for SHM)
+};
+
+#define NEED_REGISTRATION	(unlikely(be_reg.valid == FALSE))
+#define NEED_UNREGISTRATION	(be_reg.valid == TRUE)
+
+/*-------------------------------------- GLOBAL STATE ------------------------*/
+
+/*
+ * These variables are 'global' with respect to this file only.
+ */
 
 //! to indicate the error with the dynamic loaded library
 static cudaError_t cudaErrorDL = cudaErrorUnknown;
 
-//! Maintain the last error for cudaGetLastError()
+//! State machine for cudaGetLastError()
 static cudaError_t cuda_err = 0;
 
-#define MAX_REGISTERED_VARS 10
-// \todo Clean it up later. Just need to make sure MemcpySymbol does jazz
-// only when a variable has been registered
-//char *reg_host_vars[MAX_REGISTERED_VARS];
-//static int num_registered_vars = 0;
+static struct backend_reg be_reg;
 
-//! stores information about the fatcubin_info on the client side
-//static fatcubin_info_t fatcubin_info_rpc;
-
-//! the dynamic hashtable for storing info about registered vars
-//! this array is stored on the client side
-//! as key it stores the fatCubinHandles and the values are the arrays of
-//! pointers to the hostVariables (hostVars)
-static GHashTable * regHostVarsTab = NULL;
-
-static int LOCAL_EXEC=1;  // by default local
-
+/*-------------------------------------- STATIC FUNCTIONS --------------------*/
 
 /**
  * @brief Handles errors caused by dlsym()
  * @return true no error - everything ok, otherwise the false
  */
-int l_handleDlError() {
+static int l_handleDlError() {
 	char * error; // handles error description
 	int ret = OK; // return value
 
@@ -112,9 +123,8 @@ int l_handleDlError() {
  * @param pSignature The string describing the function signature
  * @return always true
  */
-int l_printFuncSig(const char* pSignature) {
-	printf(">>>>>>>>>> %s\n", pSignature);
-	//std::cout << ">>>>>>>>>> " << pSignature << std::endl;
+static int l_printFuncSig(const char* pSignature) {
+	printd(DBG_INFO, "CAUGHT: %s\n", pSignature);
 	return OK;
 }
 /**
@@ -123,9 +133,8 @@ int l_printFuncSig(const char* pSignature) {
  * @param pSignature The string describing the function signature
  * @return always true
  */
-int l_printFuncSigImpl(const char* pSignature) {
-	printf(">>>>>>>>>> Implemented >>>>>>>>>>: %s\n", pSignature);
-	//std::cout << ">>>>>>>>>> " << pSignature << std::endl;
+static int l_printFuncSigImpl(const char* pSignature) {
+	printd(DBG_INFO, "CAUGHT: %s\n", pSignature);
 	return OK;
 }
 /**
@@ -134,7 +143,7 @@ int l_printFuncSigImpl(const char* pSignature) {
  * @param methodId The method id you want to set
  *
  */
-int l_setMetThrReq(cuda_packet_t ** const pPacket, const uint16_t methodId){
+static int l_setMetThrReq(cuda_packet_t ** const pPacket, const uint16_t methodId){
 	(*pPacket)->method_id = methodId;
 	(*pPacket)->thr_id = pthread_self();
 	(*pPacket)->flags = CUDA_request;
@@ -153,9 +162,8 @@ int l_setMetThrReq(cuda_packet_t ** const pPacket, const uint16_t methodId){
  *         the error; if calloc gave NULL
  */
 
-int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
+static int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
 		const uint16_t methodId, const char* pSignature){
-	printf(">>>>>>>>>> Implemented >>>>>>>>>>: %s (id = %d)\n", pSignature, methodId);
 
 	// Now make a packet and send
 	if ((*pPacket = callocCudaPacket(pSignature, &cuda_err)) == NULL) {
@@ -170,8 +178,9 @@ int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
 	return OK;
 }
 
-//! This appears in some values of arguments. I took this from /opt/cuda/include/cuda_runtime_api.h
-//! It looks as this comes from a default value (dv)
+//! This appears in some values of arguments. I took this from
+//! /opt/cuda/include/cuda_runtime_api.h ! It looks as this comes from a default
+//! value (dv)
 #if !defined(__dv)
 #	if defined(__cplusplus)
 #		define __dv(v) \
@@ -181,34 +190,56 @@ int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
 #	endif
 #endif
 
-
-// -------------------------------------------------------
-//
-// -------------------------------------------------------
-cudaError_t rcudaThreadExit(void) {
-	cuda_packet_t * pPacket;
-
-	if (l_remoteInitMetThrReq(&pPacket, CUDA_THREAD_EXIT, __FUNCTION__)
-			== ERROR) {
-		return cuda_err;
+static int registerWithBackend(void) {
+	int err;
+	if (be_reg.valid == FALSE) {
+		err = reg_lib_init();
+		if (err < 0) {
+			printed(DBG_ERROR, "Could not initialize registration with backend\n");
+			goto fail;
+		}
+		be_reg.valid = TRUE;
+		be_reg.regs[0] = reg_lib_connect();
+		if (be_reg.regs[0] < 0) {
+			printd(DBG_ERROR, "Could not connect\n");
+			goto fail;
+		}
+		printd(DBG_DEBUG, "id=%d shm=%p sz=%d\n",
+				be_reg.regs[0], reg_lib_get_shm(be_reg.regs[0]),
+				reg_lib_get_shm_size(be_reg.regs[0]));
 	}
+	printd(DBG_INFO, "complete\n");
+	return 0;
 
-	// send the packet
-	if (nvbackCudaThreadExit_rpc(pPacket) == OK) {
-		p_info("__OK__ (asynchronous)\n");
-		cuda_err = pPacket->ret_ex_val.err;
-	} else {
-		p_warn("__ERROR__ Return from asynchronous rpc with the wrong return value.\n");
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-
+fail:
+	return -1;
 }
 
-cudaError_t lcudaThreadExit(void) {
+static int unregisterWithBackend(void) {
+	int err;
+	if (be_reg.valid == TRUE) {
+		err = reg_lib_disconnect(be_reg.regs[0]);
+		if (err < 0) {
+			printd(DBG_ERROR, "Could not disconnect\n");
+			goto fail;
+		}
+		err = reg_lib_shutdown();
+		if (err < 0) {
+			printd(DBG_ERROR, "Could not shutdown\n");
+			goto fail;
+		}
+		be_reg.valid = FALSE;
+	}
+	printd(DBG_INFO, "complete\n");
+	return 0;
+
+fail:
+	return -1;
+}
+
+/*-------------------------------------- INTERPOSING API ---------------------*/
+
+static cudaError_t lcudaThreadExit(void) {
 	typedef cudaError_t (* pFuncType)(void);
 	l_printFuncSigImpl(__FUNCTION__);
 
@@ -225,32 +256,10 @@ cudaError_t lcudaThreadExit(void) {
 }
 
 cudaError_t cudaThreadExit(void) {
-
-	return ((LOCAL_EXEC == 1) ? lcudaThreadExit() : rcudaThreadExit());
+	return lcudaThreadExit();
 }
 
-cudaError_t rcudaThreadSynchronize(void){
-	cuda_packet_t * pPacket;
-
-	if( l_remoteInitMetThrReq(&pPacket, CUDA_THREAD_SYNCHRONIZE, __FUNCTION__) == ERROR){
-		return cuda_err;
-	}
-
-	// send the packet
-	if(nvbackCudaThreadSynchronize_rpc(pPacket) == OK ){
-		p_info( "__OK__ ; return from RPC \n");
-		cuda_err = pPacket->ret_ex_val.err;
-	} else {
-		p_warn("__ERROR__ Return from rpc with the wrong return value.\n");
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-}
-
-cudaError_t lcudaThreadSynchronize(void) {
+static cudaError_t lcudaThreadSynchronize(void) {
 	typedef cudaError_t (* pFuncType)(void);
 	static pFuncType pFunc = NULL;
 
@@ -267,8 +276,7 @@ cudaError_t lcudaThreadSynchronize(void) {
 }
 
 cudaError_t cudaThreadSynchronize(void) {
-
-	return ((LOCAL_EXEC == 1) ? lcudaThreadSynchronize() : rcudaThreadSynchronize());
+	return lcudaThreadSynchronize();
 }
 
 cudaError_t cudaThreadSetLimit(enum cudaLimit limit, size_t value) {
@@ -333,14 +341,8 @@ cudaError_t cudaThreadSetCacheConfig(enum cudaFuncCache cacheConfig) {
 
 	return (pFunc(cacheConfig));
 }
-// -------------------------------------------
-cudaError_t rcudaGetLastError(void) {
-	p_debug(">>>>>>>>>> Implemented >>>>>>>>>>: %s (no id)\n", __FUNCTION__);
 
-	return cuda_err;
-}
-
-cudaError_t lcudaGetLastError(void) {
+static cudaError_t lcudaGetLastError(void) {
 	typedef cudaError_t (* pFuncType)(void);
 		static pFuncType pFunc = NULL;
 
@@ -358,7 +360,7 @@ cudaError_t lcudaGetLastError(void) {
 
 
 cudaError_t cudaGetLastError(void) {
-	return ((LOCAL_EXEC == 1) ? lcudaGetLastError() : rcudaGetLastError());
+	return lcudaGetLastError();
 }
 
 
@@ -392,32 +394,8 @@ const char* cudaGetErrorString(cudaError_t error) {
 
 	return (pFunc(error));
 }
-// ----------------------------------
-cudaError_t rcudaGetDeviceCount(int *count) {
-	cuda_packet_t * pPacket;
 
-	if (l_remoteInitMetThrReq(&pPacket, CUDA_GET_DEVICE_COUNT, __FUNCTION__)
-			== ERROR) {
-		return cuda_err;
-	}
-
-	// send the packet
-	if (nvbackCudaGetDeviceCount_rpc(pPacket) == OK) {
-		p_info(" __OK__ the number of devices is %ld. Got from the RPC call\n",
-				pPacket->args[0].argi);
-		// remember the count number what we get from the remote device
-		*count = pPacket->args[0].argi;
-		cuda_err = pPacket->ret_ex_val.err;
-	} else {
-		p_warn( "__ERROR__ Return from rpc with the wrong return value.\n");
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-}
-cudaError_t lcudaGetDeviceCount(int *count) {
+static cudaError_t lcudaGetDeviceCount(int *count) {
 	typedef cudaError_t (* pFuncType)(int *count);
 	static pFuncType pFunc = NULL;
 
@@ -434,47 +412,10 @@ cudaError_t lcudaGetDeviceCount(int *count) {
 }
 
 cudaError_t cudaGetDeviceCount(int *count) {
-	return ((LOCAL_EXEC == 1) ? lcudaGetDeviceCount(count) : rcudaGetDeviceCount(count));
+	return lcudaGetDeviceCount(count);
 }
 
-cudaError_t rcudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
-	cuda_packet_t *pPacket;
-
-	if( l_remoteInitMetThrReq(&pPacket, CUDA_GET_DEVICE_PROPERTIES, __FUNCTION__) == ERROR){
-			return cuda_err;
-	}
-
-	// override the flags; just following the cudart.c
-	// guessing the CUDA_Copytype means that something needs to be copied
-	// over the network
-	pPacket->flags |= CUDA_Copytype;   // it now should be CUDA_request | CUDA_Copytype
-
-	// @todo (comment) now we are storing this into argp which is of type (void*)
-	// please not that in _rpc counterpart we will interpret this as argui
-	// which is of type uint64_t (unsigned long), actually I do not understand;
-	// I am guessing that maybe because of mixing 32bit and 64bit machines in
-	// original remote_gpu and we want to be sure that
-	// I am sticking to the original implementation
-	pPacket->args[0].argp = (void *) prop; // I do not understand why we do this
-	pPacket->args[1].argi = device;   // I understand this
-	pPacket->args[2].argi = sizeof(struct cudaDeviceProp); // for driver; I do not understand why we do this
-
-	// send the packet
-	if (nvbackCudaGetDeviceProperties_rpc(pPacket) == OK) {
-		l_printCudaDeviceProp(prop);
-		cuda_err = pPacket->ret_ex_val.err;
-	} else {
-		p_warn( "__ERROR__ Return from rpc with the wrong return value.\n");
-		// @todo some cleaning or setting cuda_err
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-}
-
-cudaError_t lcudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
+static cudaError_t lcudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 
 	typedef cudaError_t (* pFuncType)(struct cudaDeviceProp *prop, int device);
 	static pFuncType pFunc = NULL;
@@ -493,7 +434,7 @@ cudaError_t lcudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 }
 
 cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
-	return LOCAL_EXEC == 1 ? lcudaGetDeviceProperties(prop, device) : rcudaGetDeviceProperties(prop, device);
+	return lcudaGetDeviceProperties(prop, device);
 }
 
 cudaError_t cudaChooseDevice(int *device,
@@ -514,30 +455,7 @@ cudaError_t cudaChooseDevice(int *device,
 	return (pFunc(device, prop));
 }
 
-cudaError_t rcudaSetDevice(int device) {
-	cuda_packet_t *pPacket;
-
-	if( l_remoteInitMetThrReq(&pPacket, CUDA_SET_DEVICE, __FUNCTION__) == ERROR){
-		return cuda_err;
-	}
-	pPacket->args[0].argi = device;
-
-	// send the packet
-	if (nvbackCudaSetDevice_rpc(pPacket) == OK) {
-		//cuda_err = pPacket->ret_ex_val.err;
-		// let's assume this is an asynchronous call
-		cuda_err = cudaSuccess;
-	} else {
-		p_warn( "__ERROR__ Return from rpc with the wrong return value.\n");
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-}
-
-cudaError_t lcudaSetDevice(int device) {
+static cudaError_t lcudaSetDevice(int device) {
 	l_printFuncSigImpl(__FUNCTION__);
 
 	typedef cudaError_t (* pFuncType)(int device);
@@ -554,35 +472,10 @@ cudaError_t lcudaSetDevice(int device) {
 }
 
 cudaError_t cudaSetDevice(int device) {
-	return (LOCAL_EXEC == 1 ? lcudaSetDevice(device) : rcudaSetDevice(device));
+	return lcudaSetDevice(device);
 }
 
-
-cudaError_t rcudaGetDevice(int *device) {
-	cuda_packet_t * pPacket;
-
-	if (l_remoteInitMetThrReq(&pPacket, CUDA_GET_DEVICE, __FUNCTION__) == ERROR) {
-		return cuda_err;
-	}
-
-	// send the packet
-	if (nvbackCudaGetDevice_rpc(pPacket) == OK) {
-		p_info("__OK__ RPC call returned: assigned device id = %ld.\n",
-				pPacket->args[0].argi);
-		// remember the count number what we get from the remote device
-		*device = pPacket->args[0].argi;
-		cuda_err = pPacket->ret_ex_val.err;
-	} else {
-		p_warn( "__ERROR__ Return from rpc with the wrong return value.\n");
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-}
-
-cudaError_t lcudaGetDevice(int *device) {
+static cudaError_t lcudaGetDevice(int *device) {
 	typedef cudaError_t (* pFuncType)(int *device);
 	static pFuncType pFunc = NULL;
 
@@ -599,7 +492,7 @@ cudaError_t lcudaGetDevice(int *device) {
 }
 
 cudaError_t cudaGetDevice(int *device) {
-	return (LOCAL_EXEC == 1 ? lcudaGetDevice(device) : rcudaGetDevice(device));
+	return lcudaGetDevice(device);
 }
 
 
@@ -633,7 +526,7 @@ cudaError_t cudaSetDeviceFlags(unsigned int flags) {
 
 	return (pFunc(flags));
 }
-// -----------------------------------------
+
 cudaError_t cudaStreamCreate(cudaStream_t *pStream) {
 	typedef cudaError_t (* pFuncType)(cudaStream_t *pStream);
 	static pFuncType pFunc = NULL;
@@ -711,7 +604,6 @@ cudaError_t cudaStreamQuery(cudaStream_t stream) {
 
 	return (pFunc(stream));
 }
-// --------------------------------
 
 cudaError_t cudaEventCreate(cudaEvent_t *event) {
 	typedef cudaError_t (* pFuncType)(cudaEvent_t *event);
@@ -823,40 +715,7 @@ cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start,
 	return (pFunc(ms, start, end));
 }
 
-// --------------------------------------------
-cudaError_t rcudaConfigureCall(dim3 gridDim, dim3 blockDim,
-		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
-	cuda_packet_t *pPacket;
-
-	if( l_remoteInitMetThrReq(&pPacket, CUDA_CONFIGURE_CALL, __FUNCTION__) == ERROR)
-		return cuda_err;
-
-	pPacket->args[0].arg_dim = gridDim;
-	pPacket->args[1].arg_dim = blockDim;
-	pPacket->args[2].argi = sharedMem;
-	pPacket->args[3].arg_str = stream;
-
-	printf("gridDim(x,y,z)=%u, %u, %u; blockDim(x,y,z)=%u, %u, %u; sharedMem (size) = %ld; stream =%ld\n",
-			pPacket->args[0].arg_dim.x, pPacket->args[0].arg_dim.y, pPacket->args[0].arg_dim.z,
-			pPacket->args[1].arg_dim.x, pPacket->args[1].arg_dim.y, pPacket->args[1].arg_dim.z,
-			pPacket->args[2].argi, (long unsigned) pPacket->args[3].arg_str);
-
-	// send the packet
-	if (nvbackCudaConfigureCall_rpc(pPacket) == OK) {
-		// asynchronous call
-		cuda_err = cudaSuccess;
-	} else {
-		p_warn("__ERROR__: Return from rpc with the wrong return value.\n");
-		// indicate error situation
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-}
-
-cudaError_t lcudaConfigureCall(dim3 gridDim, dim3 blockDim,
+static cudaError_t lcudaConfigureCall(dim3 gridDim, dim3 blockDim,
 		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
 
 	typedef cudaError_t (* pFuncType)(dim3 gridDim, dim3 blockDim,
@@ -876,49 +735,10 @@ cudaError_t lcudaConfigureCall(dim3 gridDim, dim3 blockDim,
 
 cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
-	if( LOCAL_EXEC == 1 )
-		return lcudaConfigureCall(gridDim, blockDim, sharedMem, stream);
-	else
-		return rcudaConfigureCall(gridDim, blockDim, sharedMem, stream);
+	return lcudaConfigureCall(gridDim, blockDim, sharedMem, stream);
 }
 
-cudaError_t rcudaSetupArgument(const void *arg, size_t size, size_t offset) {
-	cuda_packet_t *pPacket;
-
-	if( l_remoteInitMetThrReq(&pPacket, CUDA_SETUP_ARGUMENT, __FUNCTION__) == ERROR){
-				return cuda_err;
-	}
-
-	// override the flags; just following the cudart.c
-	// guessing the CUDA_Copytype means that something needs to be copied
-	// over the network
-	pPacket->flags |= CUDA_Copytype; // it now should be CUDA_request | CUDA_Copytype
-
-	// @todo (comment) now we are storing this into argp which is of type (void*)
-	// please not that in _rpc counterpart we will interpret this as argui
-	// which is of type uint64_t (unsigned long), actually I do not understand;
-	// I am guessing that maybe because of mixing 32bit and 64bit machines in
-	// original remote_gpu and we want to be sure that
-	// I am sticking to the original implementation
-
-	pPacket->args[0].argp = (void *)arg;  // argument to push for a kernel launch
-	pPacket->args[1].argi = size;
-	pPacket->args[2].argi = offset; // for driver; Offset in argument stack to push new arg
-
-	// send the packet
-	if (nvbackCudaSetupArgument_rpc(pPacket) == OK) {
-		cuda_err = cudaSuccess;
-	} else {
-		p_warn( "__ERROR__ Return from rpc with the wrong return value.\n");
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-}
-
-cudaError_t lcudaSetupArgument(const void *arg, size_t size, size_t offset) {
+static cudaError_t lcudaSetupArgument(const void *arg, size_t size, size_t offset) {
 
 	typedef cudaError_t (* pFuncType)(const void *arg, size_t size,
 			size_t offset);
@@ -937,10 +757,7 @@ cudaError_t lcudaSetupArgument(const void *arg, size_t size, size_t offset) {
 }
 
 cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset) {
-	if( LOCAL_EXEC == 1)
-		return lcudaSetupArgument(arg, size, offset);
-	else
-		return rcudaSetupArgument(arg, size, offset);
+	return lcudaSetupArgument(arg, size, offset);
 }
 
 
@@ -962,30 +779,7 @@ cudaError_t cudaFuncSetCacheConfig(const char *func,
 	return (pFunc(func, cacheConfig));
 }
 
-cudaError_t rcudaLaunch(const char *entry) {
-	cuda_packet_t *pPacket;
-
-	if( l_remoteInitMetThrReq(&pPacket, CUDA_LAUNCH, __FUNCTION__) == ERROR){
-				return cuda_err;
-	}
-	pPacket->args[0].argcp = (char *)entry;
-
-	printf("%s, entry: %s\n", __FUNCTION__, entry);
-	// send the packet
-	if (nvbackCudaLaunch_rpc(pPacket) == OK) {
-		cuda_err = cudaSuccess;
-	} else {
-		p_warn("__ERROR__: Return from rpc with the wrong return value.\n");
-		// @todo some cleaning or setting cuda_err
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-}
-
-cudaError_t lcudaLaunch(const char *entry) {
+static cudaError_t lcudaLaunch(const char *entry) {
 
 	typedef cudaError_t (* pFuncType)(const char *entry);
 	static pFuncType pFunc = NULL;
@@ -1002,7 +796,7 @@ cudaError_t lcudaLaunch(const char *entry) {
 }
 
 cudaError_t cudaLaunch(const char *entry) {
-	return (LOCAL_EXEC == 1 ? lcudaLaunch(entry) : rcudaLaunch(entry));
+	return lcudaLaunch(entry);
 }
 
 cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr,
@@ -1053,35 +847,7 @@ cudaError_t cudaSetDoubleForHost(double *d) {
 	return (pFunc(d));
 }
 
-cudaError_t rcudaMalloc(void **devPtr, size_t size) {
-	cuda_packet_t * pPacket;
-
-	if( l_remoteInitMetThrReq(&pPacket, CUDA_MALLOC, __FUNCTION__) == ERROR){
-		return cuda_err;
-	}
-
-	pPacket->args[0].argdp = devPtr;
-	pPacket->args[1].argi = size;
-
-	printf("\ndevPtr %p, *devPtr %p, size %ld\n", devPtr, *devPtr, size);
-
-	if(nvbackCudaMalloc_rpc(pPacket) != OK ){
-		printd(DBG_ERROR, "%s: __ERROR__: Return from the RPC\n", __FUNCTION__);
-		cuda_err = cudaErrorMemoryAllocation;
-		*devPtr = NULL;
-	} else {
-		printd(DBG_INFO, "%s: __OK__:  Return from the RPC call DevPtr %p\n", __FUNCTION__,
-				pPacket->args[0].argp);
-		// unpack what we have got from the packet
-		*devPtr = pPacket->args[0].argp;
-		cuda_err = pPacket->ret_ex_val.err;
-	}
-
-	free(pPacket);
-	return cuda_err;
-}
-
-cudaError_t lcudaMalloc(void **devPtr, size_t size) {
+static cudaError_t lcudaMalloc(void **devPtr, size_t size) {
 
 	typedef cudaError_t (* pFuncType)(void **devPtr, size_t size);
 	static pFuncType pFunc = NULL;
@@ -1098,9 +864,8 @@ cudaError_t lcudaMalloc(void **devPtr, size_t size) {
 	return (pFunc(devPtr, size));
 }
 
-// --------------------------------------------
 cudaError_t cudaMalloc(void **devPtr, size_t size) {
-	return LOCAL_EXEC == 1 ? lcudaMalloc(devPtr, size) : rcudaMalloc(devPtr, size);
+	return lcudaMalloc(devPtr, size);
 }
 
 cudaError_t cudaMallocHost(void **ptr, size_t size) {
@@ -1154,29 +919,6 @@ cudaError_t cudaMallocArray(struct cudaArray **array,
 	return (pFunc(array, desc, width, height, flags));
 }
 
-cudaError_t rcudaFree(void * devPtr) {
-	cuda_packet_t *pPacket;
-
-	if( l_remoteInitMetThrReq(&pPacket, CUDA_FREE, __FUNCTION__) == ERROR){
-				return cuda_err;
-	}
-	pPacket->args[0].argp = devPtr;
-
-	// send the packet
-	if(nvbackCudaFree_rpc(pPacket) == OK ){
-		printd(DBG_DEBUG, "%s: __OK__ The used pointer %p\n", __FUNCTION__,
-						pPacket->args[0].argp);
-		cuda_err = cudaSuccess;
-	} else {
-		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-}
-
 /**
  * @brief The pattern of the functions so far. This function is being interposed
  * via PRE_LOAD. We need the original function; that's
@@ -1185,7 +927,7 @@ cudaError_t rcudaFree(void * devPtr) {
  * Right now, the only thing that interposed function does prints the arguments
  * of this function.
  */
-cudaError_t lcudaFree(void * devPtr) {
+static cudaError_t lcudaFree(void * devPtr) {
 
 	typedef cudaError_t (* pFuncType)(void *);
 	static pFuncType pFunc = NULL;
@@ -1208,7 +950,7 @@ cudaError_t lcudaFree(void * devPtr) {
 }
 
 cudaError_t cudaFree(void * devPtr) {
-	return 1 == LOCAL_EXEC ? lcudaFree(devPtr) : rcudaFree(devPtr);
+	return lcudaFree(devPtr);
 }
 
 
@@ -1243,7 +985,6 @@ cudaError_t cudaFreeArray(struct cudaArray * array) {
 	return (pFunc(array));
 }
 
-// --------------------------------------------------------
 cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags) {
 	typedef cudaError_t (* pFuncType)(void **, size_t, unsigned int);
 	static pFuncType pFunc = NULL;
@@ -1329,7 +1070,7 @@ cudaError_t cudaMalloc3DArray(struct cudaArray** array,
 
 	return (pFunc(array, desc, extent, flags));
 }
-// --------------------------------
+
 cudaError_t cudaMemcpy3D(const struct cudaMemcpy3DParms *p) {
 	typedef cudaError_t (* pFuncType)(const struct cudaMemcpy3DParms *p);
 	static pFuncType pFunc = NULL;
@@ -1376,37 +1117,7 @@ cudaError_t cudaMemGetInfo(size_t *free, size_t *total) {
 	return (pFunc(free, total));
 }
 
-cudaError_t rcudaMemcpy(void *dst, const void *src, size_t count,
-		enum cudaMemcpyKind kind) {
-	cuda_packet_t *pPacket;
-
-	// you need to setup a method id individually
-	if( l_remoteInitMetThrReq(&pPacket, ERROR, __FUNCTION__) == ERROR){
-		return cuda_err;
-	}
-
-	pPacket->args[0].argp = dst;
-	pPacket->args[1].argp = (void *)src;
-	pPacket->args[2].argi = count;
-	pPacket->args[3].argi = kind;
-	pPacket->flags |= CUDA_Copytype;
-
-	// send the packet
-	if(nvbackCudaMemcpy_rpc(pPacket) != OK ){
-		printd(DBG_ERROR, "%s: __ERROR__ Return from rpc with the wrong return value.\n", __FUNCTION__);
-		// @todo some cleaning or setting cuda_err
-		cuda_err = cudaErrorUnknown;
-	} else {
-		printd(DBG_DEBUG, "%s: __OK__ Return from RPC.\n", __FUNCTION__);
-		cuda_err = pPacket->ret_ex_val.err;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-}
-
-cudaError_t lcudaMemcpy(void *dst, const void *src, size_t count,
+static cudaError_t lcudaMemcpy(void *dst, const void *src, size_t count,
 		enum cudaMemcpyKind kind) {
 	typedef cudaError_t (* pFuncType)(void *dst, const void *src, size_t count,
 			enum cudaMemcpyKind kind);
@@ -1427,10 +1138,7 @@ cudaError_t lcudaMemcpy(void *dst, const void *src, size_t count,
 
 cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 		enum cudaMemcpyKind kind) {
-	if( 1 == LOCAL_EXEC )
-		return lcudaMemcpy(dst, (const void *) src, count, kind);
-	else
-		return rcudaMemcpy(dst, (const void *) src, count, kind);
+	return lcudaMemcpy(dst, (const void *) src, count, kind);
 }
 
 
@@ -1571,61 +1279,7 @@ cudaError_t cudaMemcpy2DArrayToArray(struct cudaArray *dst,
 			width, height, kind));
 }
 
-cudaError_t rcudaMemcpyToSymbol(const char *symbol, const void *src,
-		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
-				__dv(cudaMemcpyHostToDevice)) {
-	cuda_packet_t *pPacket;
-	// this will hold the hostVar value (a pointer corresponding
-	// ot a symbol
-	char * hostVar = NULL;
-
-	// symbol might be a pointer or a name of variable (see CUDA API)
-	// can either be a variable that resides in global or constant memory space,
-	// or it can be a character string, naming a variable that resides in global
-	// or constant memory space
-	// we use a trick to find out if symbol is a pointer or
-	// a string; since all pointers are registered during
-	// the __cudaRegisterVar and we store those register
-	// pointers in regHostVarsTab; so if we assume that our
-	// symbol is a pointer is should be stored in regHostVarsTab;
-	// if it is not, then our assumption is wrong and symbol is a string
-	// a name of the variable
-
-	hostVar = g_vars_find(regHostVarsTab, symbol);
-	if ( NULL == hostVar ){
-		p_warn("__ERROR__: The symbol %p has not been found", symbol);
-		cuda_err = cudaErrorInvalidSymbol;
-		return cuda_err;
-	}
-
-	if( l_remoteInitMetThrReq(&pPacket, CUDA_MEMCPY_TO_SYMBOL,__FUNCTION__) == ERROR){
-		return cuda_err;
-	}
-
-	// should be hostVar corresponding to a symbol
-	pPacket->args[0].argcp = (char*)hostVar;
-	pPacket->args[1].argp = (void *)src;
-	pPacket->args[2].arr_argi[0] = count;
-	pPacket->args[2].arr_argi[1] = offset;
-	pPacket->args[3].argi = kind;
-	pPacket->flags |= CUDA_Copytype;
-
-	// send the packet
-	if(nvbackCudaMemcpyToSymbol_rpc(pPacket) == OK ){
-		p_debug( "__OK__: Return from RPC.\n");
-		cuda_err = pPacket->ret_ex_val.err;
-	} else {
-		p_warn("__ERROR__: Return from rpc with the wrong return value.\n");
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-
-}
-
-cudaError_t lcudaMemcpyToSymbol(const char *symbol, const void *src,
+static cudaError_t lcudaMemcpyToSymbol(const char *symbol, const void *src,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 				__dv(cudaMemcpyHostToDevice)) {
 	typedef cudaError_t (* pFuncType)(const char *symbol, const void *src,
@@ -1646,76 +1300,16 @@ cudaError_t lcudaMemcpyToSymbol(const char *symbol, const void *src,
 
 cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
-				__dv(cudaMemcpyHostToDevice)) {
+		__dv(cudaMemcpyHostToDevice)) {
 
 	p_debug("symbol = %p, src = %p, count = %ld, offset = %ld, kind = %u\n",
-			 symbol, src, count, offset, kind);
+			symbol, src, count, offset, kind);
 
-	if( 1 == LOCAL_EXEC )
-		return lcudaMemcpyToSymbol(symbol, src, count, offset, kind);
-	else
-		return rcudaMemcpyToSymbol(symbol, src, count, offset, kind);
+	return lcudaMemcpyToSymbol(symbol, src, count, offset, kind);
 }
 
 
-// new implementation; absent in gvim/pegasus
-cudaError_t rcudaMemcpyFromSymbol(void *dst, const char *symbol,
-		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
-				__dv(cudaMemcpyDeviceToHost)) {
-	cuda_packet_t *pPacket;
-	// this will hold the hostVar value (a pointer corresponding
-	// ot a symbol
-	char * hostVar = NULL;
-
-	// symbol might be a pointer or a name of variable (see CUDA API)
-	// can either be a variable that resides in global or constant memory space,
-	// or it can be a character string, naming a variable that resides in global
-	// or constant memory space
-	// we use a trick to find out if symbol is a pointer or
-	// a string; since all pointers are registered during
-	// the __cudaRegisterVar and we store those register
-	// pointers in regHostVarsTab; so if we assume that our
-	// symbol is a pointer is should be stored in regHostVarsTab;
-	// if it is not, then our assumption is wrong and symbol is a string
-	// a name of the variable
-
-
-	hostVar = g_vars_find(regHostVarsTab, symbol);
-	if ( NULL == hostVar ){
-		p_warn("The symbol %p has not been found!", symbol);
-		cuda_err = cudaErrorInvalidSymbol;
-		return cuda_err;
-	}
-
-	// you need to setup a method id individually
-	if( l_remoteInitMetThrReq(&pPacket, CUDA_MEMCPY_FROM_SYMBOL, __FUNCTION__) == ERROR){
-		return cuda_err;
-	}
-
-	// hostVar (a pointer) corresponding symbol
-	pPacket->args[0].argcp = (char*)hostVar;
-	pPacket->args[1].argp = (void *)dst;
-	pPacket->args[2].arr_argi[0] = count;
-	pPacket->args[2].arr_argi[1] = offset;
-	pPacket->args[3].argi = kind;
-	pPacket->flags |= CUDA_Copytype;
-
-	// send the packet
-	if(nvbackCudaMemcpyFromSymbol_rpc(pPacket) == OK ){
-		p_debug( " __OK__ Return from RPC.\n");
-		cuda_err = pPacket->ret_ex_val.err;
-	} else {
-		p_warn( "__ERROR__ Return from rpc with the wrong return value.\n");
-		// @todo some cleaning or setting cuda_err
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-
-	return cuda_err;
-}
-
-cudaError_t lcudaMemcpyFromSymbol(void *dst, const char *symbol,
+static cudaError_t lcudaMemcpyFromSymbol(void *dst, const char *symbol,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 				__dv(cudaMemcpyDeviceToHost)) {
 	typedef cudaError_t (* pFuncType)(void *dst, const char *symbol,
@@ -1736,14 +1330,11 @@ cudaError_t lcudaMemcpyFromSymbol(void *dst, const char *symbol,
 
 cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
-				__dv(cudaMemcpyDeviceToHost)) {
+		__dv(cudaMemcpyDeviceToHost)) {
 	p_debug("dst = %p, symbol = %p (str %s), count = %ld, offset = %ld, kind = %d\n",
-			 dst, symbol, symbol, count, offset, kind);
+			dst, symbol, symbol, count, offset, kind);
 
-	if( 1 == LOCAL_EXEC )
-		return lcudaMemcpyFromSymbol(dst, symbol, count, offset, kind);
-	else
-		return rcudaMemcpyFromSymbol(dst, symbol, count, offset, kind);
+	return lcudaMemcpyFromSymbol(dst, symbol, count, offset, kind);
 }
 
 // -----------------------------------
@@ -2410,78 +2001,6 @@ cudaError_t cudaGetExportTable(const void **ppExportTable,
 
 void** pFatBinaryHandle = NULL;
 
-
-/**
- * The implementation is taken from __nvback_cudaRegisterFatBinary_rpc from
- * remote_api_wrapper and from cudart.c __cudaRegisterFatBinary
- *
- * @return cuda_err set to cudaErrorMemoryAllocation if I cannot calloc the packet
- *
- */
-void** r__cudaRegisterFatBinary(void* fatC){
-	cuda_packet_t * pPacket;
-	// here we will store the number of entries to spare counting again and again
-	// @todo might be unimportant
-	cache_num_entries_t entries_cached = {0, 0, 0, 0, 0, 0, 0};
-	// the size of the packet for cubin
-	int fb_size;
-	void ** fatCubinHandle = NULL;
-
-	// In original version of the code we created a kind of a structure
-	// in a contiguous thing
-	// in fact we are allocating the contiguous area of memory that should
-	// be treated as a void*, but we want to make it look like the structure
-	// __cudaFatCudaBinary; that's why we put it as a __cudaFatCudaBinary
-	// and not *void; it will be the serialized version of fatC
-
-	// the original cubin to get rid of casting to __cudaFatCudaBinary
-	__cudaFatCudaBinary * pSrcFatC = (__cudaFatCudaBinary *)fatC;
-	// the place where the packed fat binary will be stored
-	char * pPackedFat = NULL;
-
-	nullExitChkpt(fatC, "NULL CUDA fat binary. Have to exit\n.");
-
-	// allocate and initialize a packet
-	if( l_remoteInitMetThrReq(&pPacket, __CUDA_REGISTER_FAT_BINARY, __FUNCTION__) == ERROR){
-		exit(ERROR);
-	}
-
-	fb_size = getFatRecPktSize(pSrcFatC, &entries_cached);
-
-	p_debug( "FatCubin size: %d\n",fb_size);
-	//l_printFatBinary(pSrcFatC);
-
-	pPackedFat = (char*) malloc(fb_size);
-
-	if( mallocCheck(pPackedFat, __FUNCTION__, NULL) == ERROR ){
-		exit(ERROR);
-	}
-
-	if( packFatBinary(pPackedFat, pSrcFatC, &entries_cached) == ERROR ){
-		exit(ERROR);
-	}
-
-	// now update the packets information
-	pPacket->flags |= CUDA_Copytype;
-	pPacket->args[0].argp = pPackedFat;			// start of the request buffer
-	pPacket->args[1].argi = fb_size;			// the size of the request buffer
-
-	p_debug( "pPackedFat, pPacket->args[0].argp = %p, %ld\n",
-			pPacket->args[0].argp, pPacket->args[1].argi);
-	// send the packet
-	if (__nvback_cudaRegisterFatBinary_rpc(pPacket) != OK) {
-		p_critical("Return from rpc with the wrong return value.\n");
-		cuda_err = cudaErrorUnknown;
-	} else {
-		fatCubinHandle = pPacket->ret_ex_val.handle;
-		p_debug( "Returned fatCubinHandle = %p\n", pPacket->ret_ex_val.handle);
-	}
-
-	free(pPacket);
-
-	return fatCubinHandle;
-}
-
 void** l__cudaRegisterFatBinary(void* fatC) {
 
 	static void** (*func)(void* fatC) = NULL;
@@ -2499,7 +2018,7 @@ void** l__cudaRegisterFatBinary(void* fatC) {
 }
 
 void** __cudaRegisterFatBinary(void* fatC) {
-
+#if 0
 	ini_t ini;			// for ini file
 
 	ini.ini_name = KIDRON_INI;
@@ -2513,42 +2032,15 @@ void** __cudaRegisterFatBinary(void* fatC) {
 	p_debug( "LOCAL_EXEC=%d (1-local, 0-remote), faC = %p\n", LOCAL_EXEC, fatC);
 
 	//l_printFatBinary(fatC);
+#endif
 
-	if( LOCAL_EXEC == 1 )
-		return l__cudaRegisterFatBinary(fatC);
-	else
-		return r__cudaRegisterFatBinary(fatC);
-}
+	if (NEED_REGISTRATION)
+		registerWithBackend();
 
+	return l__cudaRegisterFatBinary(fatC);
 
-void r__cudaUnregisterFatBinary(void** fatCubinHandle) {
-	cuda_packet_t * pPacket;
-
-	if (l_remoteInitMetThrReq(&pPacket, __CUDA_UNREGISTER_FAT_BINARY,
-			__FUNCTION__) == ERROR) {
-		exit(ERROR);
-	}
-
-	// update packet
-	pPacket->args[0].argdp = fatCubinHandle;
-
-	if (__nvback_cudaUnregisterFatBinary_rpc(pPacket) == ERROR) {
-		p_warn("__ERROR__ Return from rpc with the wrong return value.\n");
-		// @todo some cleaning or setting cuda_err
-		cuda_err = cudaErrorUnknown;
-	} else {
-		// printRegVarTab(regHostVarsTab);
-
-		p_debug("__OK__ Return from rpc with ok value.\n");
-		// remove the handler;
-		g_vars_remove(regHostVarsTab, fatCubinHandle);
-		// destroy the table if the last handler has been removed
-		if( regHostVarsTab != NULL && g_hash_table_size(regHostVarsTab)  == 0)
-			g_hash_table_destroy(regHostVarsTab);
-			regHostVarsTab = NULL;
-	}
-
-	free(pPacket);
+fail:
+	return NULL;
 }
 
 void l__cudaUnregisterFatBinary(void** fatCubinHandle) {
@@ -2565,56 +2057,13 @@ void l__cudaUnregisterFatBinary(void** fatCubinHandle) {
 	}
 
 	(pFunc(fatCubinHandle));
+
+	if (NEED_UNREGISTRATION)
+		unregisterWithBackend();
 }
 
 void __cudaUnregisterFatBinary(void** fatCubinHandle) {
-	if( LOCAL_EXEC == 1 )
-		l__cudaUnregisterFatBinary(fatCubinHandle);
-	else
-		r__cudaUnregisterFatBinary(fatCubinHandle);
-}
-
-void r__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
-		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
-		uint3* bid, dim3* bDim, dim3* gDim, int* wSize) {
-	cuda_packet_t * pPacket;
-
-	if (l_remoteInitMetThrReq(&pPacket, __CUDA_REGISTER_FUNCTION, __FUNCTION__)
-			== ERROR) {
-		exit(ERROR);
-	}
-
-	l_printRegFunArgs(fatCubinHandle, hostFun, deviceFun, deviceName,
-			thread_limit, tid, bid, bDim, gDim, wSize);
-
-	int size = 0;
-
-	char * p = packRegFuncArgs(fatCubinHandle, hostFun, deviceFun, deviceName,
-			thread_limit, tid, bid, bDim, gDim, wSize, &size);
-
-	if (!p) {
-		p_error("__ERROR__ Problems with allocating the memory. Quitting ... \n");
-	}
-	// update packet; point to the buffer from which you will
-	// take data to send over the network
-	pPacket->flags |= CUDA_Copytype;
-	pPacket->args[0].argp = p; // buffer pointer
-	pPacket->args[1].argi = size; // size of the buffer
-
-	//(void *) packet->args[0].argui, packet->args[1].argi
-
-	if (__nvback_cudaRegisterFunction_rpc(pPacket) == OK) {
-		// do nothing;
-		// @todo don't you need to put some stuff
-		// to fatcubin_info_rpc like the functions registered?
-		cuda_err = pPacket->ret_ex_val.err;
-	} else {
-		p_warn("__ERROR__: Return from the RPC with an error\n");
-		cuda_err = cudaErrorUnknown;
-	}
-
-	free(pPacket);
-	return;
+	l__cudaUnregisterFatBinary(fatCubinHandle);
 }
 
 void l__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
@@ -2642,12 +2091,8 @@ void l__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize) {
-	if( LOCAL_EXEC == 1 )
-		l__cudaRegisterFunction(fatCubinHandle, hostFun, deviceFun,
-				deviceName, thread_limit, tid, bid,  bDim,  gDim, wSize);
-	else
-		r__cudaRegisterFunction(fatCubinHandle, hostFun, deviceFun,
-				deviceName, thread_limit, tid, bid,  bDim,  gDim, wSize);
+	l__cudaRegisterFunction(fatCubinHandle, hostFun, deviceFun,
+			deviceName, thread_limit, tid, bid,  bDim,  gDim, wSize);
 }
 
 void l__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
@@ -2671,62 +2116,6 @@ void l__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 			constant, global));
 }
 
-
-void r__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
-		char *deviceAddress, const char *deviceName, int ext, int vsize,
-		int constant, int global) {
-	cuda_packet_t * pPacket;
-
-	if (l_remoteInitMetThrReq(&pPacket, __CUDA_REGISTER_VARIABLE, __FUNCTION__)
-			== ERROR) {
-			exit(ERROR);
-	}
-
-//	l_printRegVar(fatCubinHandle, hostVar, deviceAddress, deviceName, ext,
-//			vsize, constant, global);
-
-	int size = 0;
-
-	char * p = packRegVar(fatCubinHandle, hostVar, deviceAddress, deviceName, ext,
-			vsize, constant, global, &size);
-
-	if (!p) {
-		p_error( "__ERROR__ Problems with allocating the memory. Exiting ... \n");
-	}
-
-	// do the trick with remembering variables to know if in cudaMemcpyFrom/To
-	// Symbol is used a pointer or a variable
-	if( NULL == regHostVarsTab ){
-		// create a hash table since it doesn't exist
-		regHostVarsTab = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
-				(GDestroyNotify)g_vars_remove);
-	}
-
-	// first check if the key exists
-	assert(fatCubinHandle != NULL); 		// we assume the fatCubinHandle is not NULL
-
-	// update packet; point to the buffer from which you will
-	// take data to send over the network
-	pPacket->flags |= CUDA_Copytype;
-	pPacket->args[0].argp = p; // buffer pointer (packed var)
-	pPacket->args[1].argi = size; // size of the buffer
-
-	if (__nvback_cudaRegisterVar_rpc(pPacket) == OK) {
-		cuda_err = pPacket->ret_ex_val.err;
-	} else {
-		p_warn("__ERROR__: Return from the RPC with an error\n");
-		cuda_err = cudaErrorUnknown;
-	}
-
-	// construct a value we put the the regHostVarsTab
-	g_vars_insert(regHostVarsTab, fatCubinHandle, g_vars_val_new(hostVar, deviceName));
-
-	printRegVarTab(regHostVarsTab);
-
-	free(pPacket);
-	return;
-}
-
 /**
  * Andrew Kerr: "this function establishes a mapping between global variables
  * defined in .ptx or .cu modules and host-side variables. In PTX, global
@@ -2740,12 +2129,8 @@ void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 	l_printRegVar(fatCubinHandle, hostVar, deviceAddress, deviceName, ext,
 			vsize, constant, global);
 
-	if( 1 == LOCAL_EXEC )
-		l__cudaRegisterVar(fatCubinHandle, hostVar,
-		deviceAddress, deviceName, ext, vsize, constant, global);
-	else
-		r__cudaRegisterVar(fatCubinHandle, hostVar,
-				deviceAddress, deviceName, ext, vsize, constant, global);
+	l__cudaRegisterVar(fatCubinHandle, hostVar,
+			deviceAddress, deviceName, ext, vsize, constant, global);
 }
 
 void __cudaRegisterTexture(void** fatCubinHandle,

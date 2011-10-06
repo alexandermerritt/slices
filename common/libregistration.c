@@ -49,14 +49,17 @@
 #define LOWEST_VALID_REGID	1
 
 /**
- * TODO
+ * State representing registration between an interposing library and backend
+ * process. The id is _only_ valid within a specific process. Separate
+ * registration structures will exist for each individual file/mmap, one in the
+ * backend and one in each library (see backend_state and library_state: each
+ * have their own array of these).
  */
 struct registration {
-	regid_t	id;			//! Library-exposed registration ID.
-	pid_t	pid;		//! PID of process which created the file
-	void	*shm;		//! Address to shared memory area
-	int		fd;			//! File descriptor of mmap'd file
-	// TODO anything else??
+	regid_t	id;		//! Client-exposed ID
+	pid_t	pid;	//! PID of process which created the file
+	void	*shm;	//! Address to shared memory area
+	int		fd;		//! File descriptor of mmap'd file
 };
 
 /**
@@ -87,7 +90,9 @@ struct backend_state {
  * library.
  */
 struct library_state {
-	// TODO
+	gboolean				valid;
+	struct registration		**all_regs;
+	unsigned int			max_regs;
 };
 
 /*-------------------------------------- GLOBAL STATE ------------------------*/
@@ -100,32 +105,201 @@ static struct backend_state be_state;
 static struct library_state lib_state;
 static regid_t next_reg_id = LOWEST_VALID_REGID;
 
+/*-------------------------------------- COMMON INTERNAL FUNCTIONS -----------*/
+
+// TODO
+// 			static int _reg_mmap(path, *reg);
+// 			static int _reg_munmap(path, *reg);
+
 /*-------------------------------------- LIBRARY FUNCTIONS --------------------*/
 
-regid_t reg_connect(void) {
-	// write a pid file to REG_DIR
-	// mmap it (backend will simultaneously be mmap'ing)
+int reg_lib_init(void) {
+	memset(&lib_state, 0, sizeof(struct library_state));
+	// @todo TODO don't hard-code size of array
+	lib_state.all_regs = calloc(5, sizeof(struct registration *));
+	if (!lib_state.all_regs) {
+		printd(DBG_ERROR, "Out of memory\n");
+		fprintf(stderr, "Out of memory\n");
+		goto fail;
+	}
+	lib_state.max_regs = 5;
+	lib_state.valid = TRUE;
+	return 0;
+
+fail:
+	return -1;
 }
 
-void* reg_get_shm(regid_t id) {
+/* @todo FIXME this assumes only one file is mmap'd for now, with the pid as the
+ * name of the file. if multiple files are to be mmap'd, then we'd have to come
+ * up with a different naming scheme for them, like <pid>.<N>
+ *
+ * @todo FIXME there is no locking here. think of situations where locking would
+ * be needed (only when the above fixme is done, of course)
+ *
+ * @todo TODO Move all the functionality in this code to invoke an internal
+ * fucntion. That way, shutdown can invoke the internal function for each reg
+ * that still exists.
+ */
+regid_t reg_lib_connect(void) {
+	struct registration *reg = NULL;
+	pid_t pid = getpid();
+	char filepath[512], pid_str[64]; // @todo TODO don't hard-code these
+	int fd, err;
+
+	// FIXME only assume one registration at a time
+	if (lib_state.all_regs[0]) {
+		printd(DBG_ERROR, "Only 1 registration per lib supported\n");
+		goto fail;
+	}
+
+	reg = calloc(1, sizeof(struct registration));
+	if (!reg) {
+		printd(DBG_ERROR, "Out of memory\n");
+		fprintf(stderr, "Out of memory\n");
+		goto fail;
+	}
+	reg->pid = pid;
+	reg->id = next_reg_id++;
+
+	// Write a pid file to REG_DIR, triggers inotify in backend. Not the same as
+	// backend's _pid_file_create as it must also check for existance of dir.
+	// This chunk of code is a mess, TODO clean it up.
+	memset(filepath, 0, sizeof(filepath));
+	memset(pid_str, 0, sizeof(pid_str));
+	sprintf(pid_str, "/%d", pid); // convert pid to string
+	strcat(filepath, REG_DIR);
+	strcat(filepath, pid_str);
+	printd(DBG_DEBUG, "Creating '%s'\n", filepath);
+	err = creat(filepath, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP); // rw-rw----
+	if (err < 0) {
+		printd(DBG_ERROR, "could not creat(%s): %s\n",
+				filepath, strerror(errno));
+		goto fail;
+	}
+	
+	// mmap it (backend will simultaneously be mmap'ing)
+	// TODO pull this out to a common function, like
+	// 			int _reg_mmap(path, *reg)
+	fd = open(filepath, O_RDWR);
+	if (fd < 0) {
+		printd(DBG_ERROR, "Could not open %s: %s\n", filepath, strerror(errno));
+		goto fail;
+	}
+	reg->fd = fd;
+	reg->shm = mmap(NULL, SHM_SZ_B, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (reg->shm == MAP_FAILED) {
+		printd(DBG_ERROR, "Could not mmap fd %d: %s\n", fd, strerror(errno));
+		goto fail;
+	}
+	lib_state.all_regs[0] = reg;
+	printd(DBG_DEBUG, "id=%d pid=%d shm=%p fd=%d\n",
+			reg->id, reg->pid, reg->shm, reg->fd);
+	return reg->id;
+
+fail:
+	if (reg)
+		free(reg);
+	return -1;
+}
+
+void* reg_lib_get_shm(regid_t id) {
+	void *shm = NULL;
 	if (id < LOWEST_VALID_REGID) {
 		printd(DBG_DEBUG, "invalid id %d\n", id);
 		return NULL;
 	}
+	// TODO search for id
+	if (lib_state.valid && lib_state.all_regs[0])
+		shm = lib_state.all_regs[0]->shm;
+	return shm;
 }
 
-size_t reg_get_shm_size(regid_t id) {
+size_t reg_lib_get_shm_size(regid_t id) {
+	size_t size = -1;
 	if (id < LOWEST_VALID_REGID) {
 		printd(DBG_DEBUG, "invalid id %d\n", id);
 		return 0;
 	}
+	// TODO search for id
+	if (lib_state.valid && lib_state.all_regs[0])
+		size = SHM_SZ_B;
+	return size;
 }
 
-int reg_disconnect(regid_t id) {
+int reg_lib_disconnect(regid_t id) {
+	struct registration *reg = NULL;
+	int err;
+	char filepath[256], pid_str[64];
+	memset(filepath, 0, sizeof(filepath));
+	memset(pid_str, 0, sizeof(pid_str));
+
 	if (id < LOWEST_VALID_REGID) {
 		printd(DBG_DEBUG, "invalid id %d\n", id);
-		return -1;
+		goto fail;
 	}
+	if (lib_state.valid == FALSE) {
+		printd(DBG_WARNING, "lib state not valid\n");
+		goto fail;
+	}
+	if (!lib_state.all_regs) {
+		printd(DBG_ERROR, "inconsistent state; valid && !all_regs\n");
+		goto fail;
+	}
+	// TODO search for id
+	// TODO move this to a common function
+	reg = lib_state.all_regs[0];
+	lib_state.all_regs[0] = NULL;
+	err = munmap(reg->shm, SHM_SZ_B);
+	if (err < 0) {
+		printd(DBG_ERROR, "munmap of shm failed: %s\n", strerror(errno));
+		goto fail;
+	}
+	err = close(reg->fd);
+	if (err < 0) {
+		printd(DBG_ERROR, "close of shm fd failed: %s\n", strerror(errno));
+		goto fail;
+	}
+	// remove the file so the backend deletes it, too
+	strcat(filepath, REG_DIR);
+	strcat(filepath, "/");
+	sprintf(pid_str, "%d", reg->pid);
+	strcat(filepath, pid_str);
+	if (unlink(filepath) < 0) {
+		printd(DBG_ERROR, "Could not unlink(%s): %s\n", filepath,
+				strerror(errno));
+		goto fail;
+	}
+	memset(reg, 0, sizeof(struct registration));
+	free(reg);
+	reg = NULL;
+	return 0;
+
+fail:
+	printd(DBG_ERROR, "failed\n");
+	return -1;
+}
+
+int reg_lib_shutdown(void) {
+	int err;
+	struct registration *reg = NULL;
+
+	if (lib_state.all_regs[0]) {
+		err = reg_lib_disconnect(lib_state.all_regs[0]->id);
+		if (err < 0) {
+			printd(DBG_ERROR, "Could not disconnect reg %d\n",
+					lib_state.all_regs[0]->id);
+			goto fail;
+		}
+	}
+	if (lib_state.all_regs)
+		free(lib_state.all_regs);
+	lib_state.all_regs = NULL;
+	lib_state.valid = FALSE;
+	return 0;
+
+fail:
+	return -1;
 }
 
 /*-------------------------------------- BACKEND FUNCTIONS --------------------*/
@@ -211,6 +385,7 @@ static regid_t _new_registration(const char *filename) {
 	reg->pid = strtol(filename, NULL, 10); // assume filename is pid
 
 	// mmap the file to create the shared region; library does this, too
+	// @todo TODO move this code to a common function
 	pathlen = strlen(REG_DIR) + strlen(filename) + 2; // 2 for / and xtra \0
 	filepath = calloc(pathlen, sizeof(char));
 	if (!filepath) {
@@ -284,6 +459,7 @@ static int _rm_registration(const char *filename) {
 		printd(DBG_ERROR, "close of shm fd failed: %s\n", strerror(errno));
 		goto fail;
 	}
+	printd(DBG_DEBUG, "id=%d\n", reg->id);
 	memset(reg, 0, sizeof(struct registration));
 	free(reg);
 	reg = NULL;
@@ -434,7 +610,7 @@ fail:
 	__builtin_unreachable();
 }
 
-int reg_init(unsigned int max_regs) {
+int reg_be_init(unsigned int max_regs) {
 	int err;
 
 	if (be_state.valid == TRUE) {
@@ -474,7 +650,7 @@ fail:
 	return -1;
 }
 
-int reg_shutdown(void) {
+int reg_be_shutdown(void) {
 	int err;
 
 	if (be_state.valid == FALSE) {
@@ -511,7 +687,7 @@ int reg_shutdown(void) {
 	return 0;
 }
 
-int reg_callback(void (*callback)(enum callback_event e, regid_t id)) {
+int reg_be_callback(void (*callback)(enum callback_event e, regid_t id)) {
 	int err;
 	if (!callback) {
 		printd(DBG_ERROR, "NULL argument\n");

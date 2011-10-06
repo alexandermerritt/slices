@@ -10,6 +10,9 @@
  * code shall include this header.
  */
 
+#ifndef __LIB_REGISTRATION_H
+#define __LIB_REGISTRATION_H
+
 /*-------------------------------------- DEFINITIONS -------------------------*/
 
 typedef int regid_t;
@@ -25,13 +28,18 @@ enum callback_event {
 
 /*-------------------------------------- LIBRARY INTERFACE -------------------*/
 
-regid_t reg_connect(void);
-void* reg_get_shm(regid_t id);
-size_t reg_get_shm_size(regid_t id);
-int reg_disconnect(regid_t id);
+int		reg_lib_init(void);
+int		reg_lib_shutdown(void);
+regid_t reg_lib_connect(void);
+int		reg_lib_disconnect(regid_t id);
+void*	reg_lib_get_shm(regid_t id);
+size_t	reg_lib_get_shm_size(regid_t id);
+// @todo TODO support growing the shm
 
 /*-------------------------------------- BACKEND INTERFACE -------------------*/
 
-int reg_init(unsigned int max_regs);
-int reg_shutdown(void);
-int reg_callback(void (*callback)(enum callback_event e, regid_t id));
+int reg_be_init(unsigned int max_regs);
+int reg_be_shutdown(void);
+int reg_be_callback(void (*callback)(enum callback_event e, regid_t id));
+
+#endif

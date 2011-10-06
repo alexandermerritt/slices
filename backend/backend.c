@@ -36,12 +36,12 @@ int main(){
 	int err;
 
 	// Initialize library <--> backend registration.
-	err = reg_init(32); // # processes we expect to register
+	err = reg_be_init(32); // # processes we expect to register
 	if (err < 0) {
 		fprintf(stderr, "Could not initialize library registration\n");
 		return -1;
 	}
-	err = reg_callback(notification_callback);
+	err = reg_be_callback(notification_callback);
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not set registration callback\n");
 	}
@@ -49,9 +49,9 @@ int main(){
 	// TODO
 	// initialize a bunch of other things, such as worker threads, assembly, etc
 	// etc
-	sleep(15);
+	sleep(20);
 
-	err = reg_shutdown();
+	err = reg_be_shutdown();
 	if (err < 0) {
 		fprintf(stderr, "Could not shutdown library registration\n");
 		return -1;
