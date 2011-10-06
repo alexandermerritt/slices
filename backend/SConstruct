@@ -110,7 +110,8 @@ def build_backend(env):
             '../remote/connection.c',
             '../remote/remote_packet.c',
             '../remote/remote_api_wrapper.c',
-            '../include/kidron_common_f.c'])
+            '../include/kidron_common_f.c',
+			'../common/libregistration.c'])
 
 
 def build_program():

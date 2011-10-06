@@ -155,7 +155,8 @@ def build_interposer_lib(env):
       '../remote/remote_api_wrapper.c', 
       '../remote/connection.c',               
       '../remote/remote_packet.c',
-      '../include/kidron_common_f.c'])
+      '../include/kidron_common_f.c',
+	  '../common/libregistration.c'])
     
     
 def build_tests(env):
@@ -228,6 +229,4 @@ def build_all_tests():
 ##########################3333
 # build the interposer library
 build_interposer()
-# build the tests
-build_all_tests()
        
