@@ -81,61 +81,60 @@ else :
 interposerEnv.SharedLibrary('libci.so', 
     [ 'libci.c',
       'libciutils.c', 
-      '../remote/remote_api_wrapper.c', 
-      '../remote/connection.c',               
-      '../remote/remote_packet.c',
-      '../include/kidron_common_f.c'])
+      '../include/kidron_common_f.c',
+	  '../common/libregistration.c'
+	])
                                                                         
 # building tests
-if nodename.startswith('prost') :
-    envTest = Environment(
-      LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
-      LIBPATH= [CUNIT212 + 'lib', '.', GLIB20 + 'lib'],
-      CPPPATH= [CUNIT212 + 'include',
-                CUDA_ROOT + 'include',
-                '../include',
-                '../remote', 
-                '../backend',
-                GLIB20 + 'include/glib-2.0',
-                GLIB20 + 'include/gio-unix-2.0',
-                GLIB20 + 'lib/glib-2.0/include'],
-      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
-elif nodename.startswith('shiva') :
-    envTest = Environment(
-      LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
-      LIBPATH= ['.'],
-      CPPPATH= [CUDA_ROOT + 'include',
-                '../include',
-                '../remote', 
-                '../backend',
-                '/usr/include/glib-2.0',
-                '/usr/include/gio-unix-2.0',
-                '/usr/lib/glib-2.0/include'],
-      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
-elif nodename.startswith('ifrit') :
-    envTest = Environment(
-      LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
-      LIBPATH= ['.'],
-      CPPPATH= [CUDA_ROOT + 'include',
-                '../include',
-                '../remote', 
-                '../backend',
-                '/usr/include/glib-2.0',
-                '/usr/include/gio-unix-2.0',
-                '/usr/lib/glib-2.0/include'],
-      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
-else :
-    print "Define build variables for this machine in interposer/SConstruct"
-    sys.exit()
-
-# libci and libciutils should be compiled earlier
-envTest.Program('testLibci', ['testLibci.c', 'libci.so' ])
-                                                        
-envTest.Program('testLibciutils', ['testLibciutils.c', 'libci.so' ])
-
-# obviously this doesn't require all libci.so functionality, however
-# since there is a mess with dependencies I tried to minimizem, without much
-# success. Maybe next time
-envTest.Program('testConnectionListener', ['testConnectionListener.c', 'libci.so'])
-envTest.Program('testConnectionSender', ['testConnectionSender.c', 'libci.so'])
+#if nodename.startswith('prost') :
+#    envTest = Environment(
+#      LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
+#      LIBPATH= [CUNIT212 + 'lib', '.', GLIB20 + 'lib'],
+#      CPPPATH= [CUNIT212 + 'include',
+#                CUDA_ROOT + 'include',
+#                '../include',
+#                '../remote', 
+#                '../backend',
+#                GLIB20 + 'include/glib-2.0',
+#                GLIB20 + 'include/gio-unix-2.0',
+#                GLIB20 + 'lib/glib-2.0/include'],
+#      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+#elif nodename.startswith('shiva') :
+#    envTest = Environment(
+#      LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
+#      LIBPATH= ['.'],
+#      CPPPATH= [CUDA_ROOT + 'include',
+#                '../include',
+#                '../remote', 
+#                '../backend',
+#                '/usr/include/glib-2.0',
+#                '/usr/include/gio-unix-2.0',
+#                '/usr/lib/glib-2.0/include'],
+#      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+#elif nodename.startswith('ifrit') :
+#    envTest = Environment(
+#      LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
+#      LIBPATH= ['.'],
+#      CPPPATH= [CUDA_ROOT + 'include',
+#                '../include',
+#                '../remote', 
+#                '../backend',
+#                '/usr/include/glib-2.0',
+#                '/usr/include/gio-unix-2.0',
+#                '/usr/lib/glib-2.0/include'],
+#      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+#else :
+#    print "Define build variables for this machine in interposer/SConstruct"
+#    sys.exit()
+#
+## libci and libciutils should be compiled earlier
+#envTest.Program('testLibci', ['testLibci.c', 'libci.so' ])
+#                                                        
+#envTest.Program('testLibciutils', ['testLibciutils.c', 'libci.so' ])
+#
+## obviously this doesn't require all libci.so functionality, however
+## since there is a mess with dependencies I tried to minimizem, without much
+## success. Maybe next time
+#envTest.Program('testConnectionListener', ['testConnectionListener.c', 'libci.so'])
+#envTest.Program('testConnectionSender', ['testConnectionSender.c', 'libci.so'])
        
