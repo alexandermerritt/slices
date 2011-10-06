@@ -6,7 +6,7 @@
  * @author Magda Slawinska (Magic MS), magg __at_ gatech __dot_ edu
  */
  
- 00. Contributors
+ CONTRIBUTORS
  
  This piece of software has been 'compiled' by Magic Magg (Magda Slawinska), 
  as part of the non-virtualized Keeneland standard software. 
@@ -18,6 +18,15 @@
  Abhishek Verma
  
  Magic Magg ported the virtualized-based software to a non-virtualized case.
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
  
  0. Tested configurations:
 
@@ -148,11 +157,8 @@ siblings        : 6
     - libcudart.a (or something)
     - some includes cuda_runtime_api.h, __cuda_format.h
     - nvcc compiler 
- 
- c. cunit212 - for tests
-    http://cunit.sourceforge.net/
- 
- d. glib 
+  
+ c. glib 
  
  	- glib-2.28.7 - developed with this version, at least requires the
  	  decent version that supports key file  	
@@ -208,7 +214,6 @@ The file is called kidron.ini and should be present in the current directory.
 The kidron.ini with example values is as presented below:
 
 # ---------- start of kidron.ini -------------- 
-
 #
 # The configuration file for the kidron system
 #
@@ -217,11 +222,9 @@ The kidron.ini with example values is as presented below:
 
 backend_host=kid091.nics.utk.edu
 
-
 [interposer]
-
+# it can be true or false
 local=false
-
 #
 # --------- end of kidron.ini -----------------
 #
@@ -264,7 +267,6 @@ side. Just the client, i.e., the interposer library (libci.c).
        
  
 4. RUNNING TESTS
-
  
  * standalone
  # go to the main directory
@@ -362,24 +364,6 @@ Segmentation fault
   
   (Set variable CUDA_ROOT in main SConstruct file)
    	
-* if your cunit is missing:
- 
-    wget -c http://sourceforge.net/projects/cunit/files/CUnit/2.1-2/CUnit-2.1-2-src.tar.bz2/download
-    bunzip2 CUnit-2.1-2-src.tar.bz2
-    tar xf CUnit-2.1-2-src.tar 
-    cd CUnit-2.1.2
-
-    ./configure --prefix=/nics/d/home/smagg/opt/cunit212
-    
-	# if you have some troubles you might tried this         
-     ./configure CC=/usr/bin/gcc CPP=/usr/bin/cpp --prefix=/nics/d/home/smagg/opt/cunit212
-    
-     make -j7
-     make install
-     
-     Now, you need to update CUNIT212 in main SConstruct
-     
-     CUNIT212 = '/nics/d/home/smagg/opt/cunit212'
      
 7. RUNNING EXAMPLES ON KEENELAND
 
@@ -446,6 +430,11 @@ Segmentation fault
    with some cleaning after computations are done.
  
  8. HISTORY 
+
+* 2011-10-03 
+  - got rid of the cunit dependency
+  - improved the scons system - the system automatically detects
+    where it is being compiled
 
 * 2011-09-15 
    - Added a test for a connection

@@ -18,17 +18,33 @@ import commands
 import sys
 
 Import( 'CUDA_ROOT', 
-        'CUNIT212', 
         'GLIB20' )
 
-nodename = commands.getoutput('uname -n')
-   
+def get_platform_characteristic_str():
+    """
+        @todo It should be imported like something
+        from ...SConstruct import get_platform_characteristic
+        but I need time to figure out how to do this (likely additional module
+        with util functions if import doesn't work)
+       intended to get the characteristic string to allow for automatic
+       recognition of the platform and applied customized build environment
+       @return: the characteristic string for the platform
+       @rtype: string
+    """    
+    nodename = commands.getoutput('uname -n') # doesn't work on keeneland
+    return nodename
+
+
 # for glib options run: glib-config --cflags  for glib1.2 
 # glib2 lacks this thing
 
-if nodename.startswith('prost') :
-    interposerEnv = Environment(
-     LIBS = ['rt', 'dl', 
+########################################################333
+# here we define the environments for particular nodes
+#######################################################3
+# keeneland node
+envInterposerKeeneland = Environment(
+     LIBS = ['rt', 
+             'dl', 
              'glib-2.0'],
      LIBPATH = [CUDA_ROOT + 'lib64', 
        GLIB20 + 'lib', 
@@ -41,100 +57,162 @@ if nodename.startswith('prost') :
         '../backend',
         GLIB20 + 'include/glib-2.0',
         GLIB20 + 'include/gio-unix-2.0',
-        GLIB20 + 'lib/glib-2.0/include'],                                
-     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
-elif nodename.startswith('shiva') :
-    interposerEnv = Environment(
-     LIBS = ['rt', 'dl', 
-             'glib-2.0'],
-     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64'],
-     CPPPATH = [
-        '.',
-        CUDA_ROOT + 'include', 
-        '../include', 
-        '../remote',
-        '../backend',
-        '/usr/include/glib-2.0',
-        '/usr/lib/glib-2.0/include'
-        ],
-     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
-elif nodename.startswith('ifrit') :
-    interposerEnv = Environment(
-     LIBS = ['rt', 'dl', 
-             'glib-2.0'],
-     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64'],
-     CPPPATH = [
-        '.',
-        CUDA_ROOT + 'include', 
-        '../include', 
-        '../remote',
-        '../backend',
-        '/usr/include/glib-2.0',
-        '/usr/lib/glib-2.0/include'
-        ],
-     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
-else :
-    print "Define build variables for this host in interposer/SConstruct"
-    sys.exit()
+        GLIB20 + 'lib/glib-2.0/include'],
+     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] ) 
 
-# create a shared library                                         
-interposerEnv.SharedLibrary('libci.so', 
+# prost node
+envInterposerProst = envInterposerKeeneland
+
+# shiva
+envInterposerShiva = Environment(
+     LIBS = ['rt', 'dl', 
+             'glib-2.0'],
+     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64'],
+     CPPPATH = [
+        '.',
+        CUDA_ROOT + 'include', 
+        '../include', 
+        '../remote',
+        '../backend',
+        '/usr/include/glib-2.0',
+        '/usr/lib/glib-2.0/include'
+        ],
+     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
+
+# ifrit
+envInterposerIfrit = Environment(
+     LIBS = ['rt', 
+             'dl', 
+             'glib-2.0'],
+     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64'],
+     CPPPATH = [
+        '.',
+        CUDA_ROOT + 'include', 
+        '../include', 
+        '../remote',
+        '../backend',
+        '/usr/include/glib-2.0',
+        '/usr/lib/glib-2.0/include'
+        ],
+     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] ) 
+
+################# test environments
+
+# keeneland
+envTestKeeneland = Environment(
+    LIBS = [ 'pthread', 'glib-2.0'],
+    LIBPATH= [ '.', GLIB20 + 'lib'],
+    CPPPATH= [CUDA_ROOT + 'include',
+            '../include',
+            '../remote', 
+            '../backend',
+            GLIB20 + 'include/glib-2.0',
+            GLIB20 + 'include/gio-unix-2.0',
+            GLIB20 + 'lib/glib-2.0/include'],
+    CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+
+# prost
+envTestProst = envTestKeeneland
+
+# ifrit
+envTestIfrit = Environment(
+      LIBS = ['pthread', 'glib-2.0'],
+      LIBPATH= ['.'],
+      CPPPATH= [CUDA_ROOT + 'include',
+                '../include',
+                '../remote', 
+                '../backend',
+                '/usr/include/glib-2.0',
+                '/usr/include/gio-unix-2.0',
+                '/usr/lib/glib-2.0/include'],
+      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
+
+
+#############################################
+# end of environment definitions
+##########################################3
+
+def build_interposer_lib(env):
+    """
+        @param env: The environment that will be used to build an interposer lib 
+    """
+    env.SharedLibrary('libci.so', 
     [ 'libci.c',
       'libciutils.c', 
-      '../include/kidron_common_f.c',
-	  '../common/libregistration.c'
-	])
-                                                                        
-# building tests
-#if nodename.startswith('prost') :
-#    envTest = Environment(
-#      LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
-#      LIBPATH= [CUNIT212 + 'lib', '.', GLIB20 + 'lib'],
-#      CPPPATH= [CUNIT212 + 'include',
-#                CUDA_ROOT + 'include',
-#                '../include',
-#                '../remote', 
-#                '../backend',
-#                GLIB20 + 'include/glib-2.0',
-#                GLIB20 + 'include/gio-unix-2.0',
-#                GLIB20 + 'lib/glib-2.0/include'],
-#      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
-#elif nodename.startswith('shiva') :
-#    envTest = Environment(
-#      LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
-#      LIBPATH= ['.'],
-#      CPPPATH= [CUDA_ROOT + 'include',
-#                '../include',
-#                '../remote', 
-#                '../backend',
-#                '/usr/include/glib-2.0',
-#                '/usr/include/gio-unix-2.0',
-#                '/usr/lib/glib-2.0/include'],
-#      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
-#elif nodename.startswith('ifrit') :
-#    envTest = Environment(
-#      LIBS = ['cunit', 'ncurses', 'pthread', 'glib-2.0'],
-#      LIBPATH= ['.'],
-#      CPPPATH= [CUDA_ROOT + 'include',
-#                '../include',
-#                '../remote', 
-#                '../backend',
-#                '/usr/include/glib-2.0',
-#                '/usr/include/gio-unix-2.0',
-#                '/usr/lib/glib-2.0/include'],
-#      CCFLAGS = ['-Wall', '-Wextra', '-g', '-std=gnu99'] )
-#else :
-#    print "Define build variables for this machine in interposer/SConstruct"
-#    sys.exit()
-#
-## libci and libciutils should be compiled earlier
-#envTest.Program('testLibci', ['testLibci.c', 'libci.so' ])
-#                                                        
-#envTest.Program('testLibciutils', ['testLibciutils.c', 'libci.so' ])
-#
-## obviously this doesn't require all libci.so functionality, however
-## since there is a mess with dependencies I tried to minimizem, without much
-## success. Maybe next time
-#envTest.Program('testConnectionListener', ['testConnectionListener.c', 'libci.so'])
-#envTest.Program('testConnectionSender', ['testConnectionSender.c', 'libci.so'])
+      '../remote/remote_api_wrapper.c', 
+      '../remote/connection.c',               
+      '../remote/remote_packet.c',
+      '../include/kidron_common_f.c'])
+    
+    
+def build_tests(env):
+    """
+        @param env: the environment that will be used to build a test environment
+    """
+    # libci and libciutils should be compiled earlier
+    env.Program('testLibci', ['testLibci.c', 'libci.so' ])
+    env.Program('testLibciutils', ['testLibciutils.c', 'libci.so' ])
+
+    # obviously this doesn't require all libci.so functionality, however
+    # since there is a mess with dependencies I tried to minimizem, without much
+    # success. Maybe next time
+    env.Program('testConnectionListener', ['testConnectionListener.c', 'libci.so'])
+    env.Program('testConnectionSender', ['testConnectionSender.c', 'libci.so'])
+
+
+def build_interposer():
+    """
+       builds the program depending on the characteristics
+    """
+    global envInterposerKeeneland
+    global envInterposerProst
+    global envInterposerShiva
+    global envInterposerIfrit
+    
+    # try to recognize the machine
+    nodename = get_platform_characteristic_str()
+    
+    if nodename.startswith('kid'):
+        build_interposer_lib(envInterposerKeeneland)
+    elif nodename.startswith('prost'):
+        build_backend(envInterposerProst)
+    elif nodename.startswith('shiva'):
+        build_backend(envInterposerShiva)
+    elif nodename.startswith('ifrit'):
+        build_backend(envInterposerIfrit)
+    else:
+        print("Error: Define build environment for this machine in interposer/SConstruct")
+        sys.exit()
+
+
+def build_all_tests():
+    """
+        builds tests and tries to automatically figure out on what nodes you
+        are running
+    """
+    global envTestKeeneland
+    global envTestProst
+    global envTestIfrit
+
+    # try to recognize the machine
+    nodename = get_platform_characteristic_str()
+    
+    if nodename.startswith('kid'):
+        build_tests(envTestKeeneland)
+    elif nodename.startswith('prost'):
+        build_tests(envTestProst)    
+    elif nodename.startswith('ifrit'):
+        build_tests(envTestIfrit)
+    else:
+        print("Error: Define build environment for this machine in interposer/SConstruct")
+        sys.exit()
+
+
+##############################33
+# the actual logic of the program
+##########################3333
+# build the interposer library
+build_interposer()
+# build the tests
+build_all_tests()
        
