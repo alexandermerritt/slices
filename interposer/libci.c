@@ -79,12 +79,12 @@ extern int ini_freeIni(ini_t* pIni);
  * process.
  */
 struct backend_reg {
-	gboolean	valid;		//! True if registration has been done
-	regid_t		regs[5];	//! Library-Backened registration IDs (for SHM)
+	gboolean	has_registered;
+	regid_t		regs[5];		//! Library-Backened registration IDs (for SHM)
 };
 
-#define NEED_REGISTRATION	(unlikely(be_reg.valid == FALSE))
-#define NEED_UNREGISTRATION	(be_reg.valid == TRUE)
+#define NEED_REGISTRATION	(unlikely(be_reg.has_registered == FALSE))
+#define NEED_UNREGISTRATION	(be_reg.has_registered == TRUE)
 
 /*-------------------------------------- GLOBAL STATE ------------------------*/
 
@@ -192,14 +192,14 @@ static int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
 
 static int registerWithBackend(void) {
 	int err;
-	if (be_reg.valid == FALSE) {
+	if (be_reg.has_registered == FALSE) {
 		err = reg_lib_init();
 		if (err < 0) {
 			printed(DBG_ERROR, "Could not initialize registration with backend\n");
 			goto fail;
 		}
-		be_reg.valid = TRUE;
-		be_reg.regs[0] = reg_lib_connect();
+		be_reg.has_registered = TRUE;
+		be_reg.regs[0] = reg_lib_connect(); // request new mmap region
 		if (be_reg.regs[0] < 0) {
 			printd(DBG_ERROR, "Could not connect\n");
 			goto fail;
@@ -217,7 +217,7 @@ fail:
 
 static int unregisterWithBackend(void) {
 	int err;
-	if (be_reg.valid == TRUE) {
+	if (be_reg.has_registered == TRUE) {
 		err = reg_lib_disconnect(be_reg.regs[0]);
 		if (err < 0) {
 			printd(DBG_ERROR, "Could not disconnect\n");
@@ -228,7 +228,7 @@ static int unregisterWithBackend(void) {
 			printd(DBG_ERROR, "Could not shutdown\n");
 			goto fail;
 		}
-		be_reg.valid = FALSE;
+		be_reg.has_registered = FALSE;
 	}
 	printd(DBG_INFO, "complete\n");
 	return 0;
