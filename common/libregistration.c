@@ -8,8 +8,28 @@
  * and the backend process when initializing state to share memory for passing
  * marshalled CUDA function calls.
  *
- * TODO Place larger description here. Move some of the longer comments in the
- * code below up here so as to not clutter the code too much.
+ * The backend creates a directory it monitors with inotify.  Files created in
+ * REG_DIR by other processes tell the backend a new process wishes to register
+ * with the assembly runtime. Deletion of this file by a process tells the
+ * backend it is withdrawing. Files have the following format:
+ *
+ * 	REG_DIR/pid		where 'pid' is the pid of the requesting process
+ *
+ * Shared memory objects are created by processes requesting participation in
+ * the runtime, and are mapped in by the backend. Files are created by the POSIX
+ * shared memory interface, shm_[open|unlink], and are placed in /dev/shm/. File
+ * names follow the format:
+ *
+ * 	/dev/shm/REG_OBJ_PREFIXpid	where 'pid' is again like above
+ *
+ * The backend will destroy the shm file instead of the participating process,
+ * as munmap must occur before shm_unlink.
+ *
+ * Example: process 12345 creates /tmp/assembly/12345 then opens and maps in
+ * /dev/shm/asm-12345. The backend is triggered by the former, and maps in the
+ * contents of the latter. Process 12345 is done; it munmaps /dev/shm/asm-12345,
+ * then deletes /tmp/assembly/12345. This triggers the backend to munmap the shm
+ * object, and to finally unlink it.
  */
 
 #include <assert.h>
@@ -34,8 +54,9 @@
  * accessible outside of this file.
  */
 
-#define REG_DIR		"/tmp/kidron-rce-registration"
-#define REG_PID		REG_DIR "/.backend.pid"
+#define REG_DIR			"/tmp/assembly"
+#define REG_PID			REG_DIR "/.backend.pid"
+#define REG_OBJ_PREFIX	"/asm-" //! shm obj filename format; ends with PID
 
 //! Number of events we expect to be queued each time an inotify trigger occurs.
 #define INOTIFY_NUM_EVENTS		32
@@ -56,10 +77,12 @@
  * have their own array of these).
  */
 struct registration {
-	regid_t	id;		//! Client-exposed ID
-	pid_t	pid;	//! PID of process which created the file
-	void	*shm;	//! Address to shared memory area
-	int		fd;		//! File descriptor of mmap'd file
+	regid_t	id;				//! Client-exposed ID
+	pid_t	pid;			//! PID of process which created the file
+	void	*shm;			//! Address to shared memory area
+	int		fd;				//! File descriptor of mmap'd file
+	char	shmfile[255];	//! Name of POSIX shm obj
+	char	regfile[255];	//! Name of file used to register with backend
 };
 
 /**
@@ -144,7 +167,7 @@ fail:
 regid_t reg_lib_connect(void) {
 	struct registration *reg = NULL;
 	pid_t pid = getpid();
-	char filepath[512], pid_str[64]; // @todo TODO don't hard-code these
+	char filename[256], pid_str[64]; // @todo TODO don't hard-code these
 	int fd, err;
 
 	// FIXME only assume one registration at a time
@@ -162,34 +185,47 @@ regid_t reg_lib_connect(void) {
 	reg->pid = pid;
 	reg->id = next_reg_id++;
 
-	// Write a pid file to REG_DIR, triggers inotify in backend. Not the same as
-	// backend's _pid_file_create as it must also check for existance of dir.
-	// This chunk of code is a mess, TODO clean it up.
-	memset(filepath, 0, sizeof(filepath));
+	// 1. Create the shm object file.
+	memset(filename, 0, sizeof(filename));
 	memset(pid_str, 0, sizeof(pid_str));
-	sprintf(pid_str, "/%d", pid); // convert pid to string
-	strcat(filepath, REG_DIR);
-	strcat(filepath, pid_str);
-	printd(DBG_DEBUG, "Creating '%s'\n", filepath);
-	err = creat(filepath, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP); // rw-rw----
-	if (err < 0) {
-		printd(DBG_ERROR, "could not creat(%s): %s\n",
-				filepath, strerror(errno));
-		goto fail;
-	}
-	
-	// mmap it (backend will simultaneously be mmap'ing)
-	// TODO pull this out to a common function, like
-	// 			int _reg_mmap(path, *reg)
-	fd = open(filepath, O_RDWR);
+	sprintf(pid_str, "%d", pid); // convert pid to string
+	strcat(filename, REG_OBJ_PREFIX);
+	strcat(filename, pid_str);
+	strncpy(reg->shmfile, filename, sizeof(filename));
+	printd(DBG_DEBUG, "Creating shm obj '%s'\n", reg->shmfile);
+	fd = shm_open(reg->shmfile, O_RDWR | O_CREAT | O_EXCL, S_IRWXU | S_IRWXG);
 	if (fd < 0) {
-		printd(DBG_ERROR, "Could not open %s: %s\n", filepath, strerror(errno));
+		printd(DBG_ERROR, "could not open shm object '%s'\n", reg->shmfile);
+		perror("shm_open");
 		goto fail;
 	}
+	err = ftruncate(fd, SHM_SZ_B); // resize it
+	if (err < 0) {
+		printd(DBG_ERROR, "could not resize shm obj '%s'\n", reg->shmfile);
+		perror("ftruncate");
+		goto fail;
+	}
+
+	// 2. Write a pid file to REG_DIR, triggers inotify in backend.
+	memset(filename, 0, sizeof(filename));
+	strcat(filename, REG_DIR);
+	strcat(filename, "/");
+	strcat(filename, pid_str);
+	strncpy(reg->regfile, filename, sizeof(filename));
+	printd(DBG_DEBUG, "Creating reg file '%s'\n", reg->regfile);
+	err = creat(reg->regfile, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP); // rw-rw----
+	if (err < 0) {
+		printd(DBG_ERROR, "could not creat(%s)\n", reg->regfile);
+		perror("creat");
+		goto fail;
+	}
+
+	// 3. mmap it (backend will simultaneously be mmap'ing)
 	reg->fd = fd;
 	reg->shm = mmap(NULL, SHM_SZ_B, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (reg->shm == MAP_FAILED) {
-		printd(DBG_ERROR, "Could not mmap fd %d: %s\n", fd, strerror(errno));
+		printd(DBG_ERROR, "Could not mmap fd %d\n", fd);
+		perror("mmap");
 		goto fail;
 	}
 	lib_state.all_regs[0] = reg;
@@ -230,8 +266,8 @@ size_t reg_lib_get_shm_size(regid_t id) {
 int reg_lib_disconnect(regid_t id) {
 	struct registration *reg = NULL;
 	int err;
-	char filepath[256], pid_str[64];
-	memset(filepath, 0, sizeof(filepath));
+	char shmfile[256], pid_str[64];
+	memset(shmfile, 0, sizeof(shmfile));
 	memset(pid_str, 0, sizeof(pid_str));
 
 	if (id < LOWEST_VALID_REGID) {
@@ -255,18 +291,18 @@ int reg_lib_disconnect(regid_t id) {
 		printd(DBG_ERROR, "munmap of shm failed: %s\n", strerror(errno));
 		goto fail;
 	}
-	err = close(reg->fd);
+	err = shm_unlink(reg->shmfile);
 	if (err < 0) {
 		printd(DBG_ERROR, "close of shm fd failed: %s\n", strerror(errno));
 		goto fail;
 	}
-	// remove the file so the backend deletes it, too
-	strcat(filepath, REG_DIR);
-	strcat(filepath, "/");
+	// remove the registration file so the backend deletes it, too
+	strcat(shmfile, REG_DIR);
+	strcat(shmfile, "/");
 	sprintf(pid_str, "%d", reg->pid);
-	strcat(filepath, pid_str);
-	if (unlink(filepath) < 0) {
-		printd(DBG_ERROR, "Could not unlink(%s): %s\n", filepath,
+	strcat(shmfile, pid_str);
+	if (unlink(shmfile) < 0) {
+		printd(DBG_ERROR, "Could not unlink(%s): %s\n", shmfile,
 				strerror(errno));
 		goto fail;
 	}
@@ -282,8 +318,6 @@ fail:
 
 int reg_lib_shutdown(void) {
 	int err;
-	struct registration *reg = NULL;
-
 	if (lib_state.all_regs[0]) {
 		err = reg_lib_disconnect(lib_state.all_regs[0]->id);
 		if (err < 0) {
@@ -355,15 +389,13 @@ fail:
 	return -1;
 }
 
-static regid_t _new_registration(const char *filename) {
+static regid_t _new_registration(const char *pid_str) {
 	struct registration *reg = NULL;
 	unsigned int idx = 0; //! index of new registration
 	int fd = -1;
-	char *filepath = NULL; //! absolute path to filename
-	int pathlen = 0; //! length of absolute path to filename
 
-	if (!filename) {
-		printd(DBG_ERROR, "NULL filename\n");
+	if (!pid_str) {
+		printd(DBG_ERROR, "NULL pid_str\n");
 		return -1;
 	}
 	// find first NULL entry to put new registration into
@@ -382,26 +414,27 @@ static regid_t _new_registration(const char *filename) {
 		goto fail;
 	}
 	reg->id = next_reg_id++;
-	reg->pid = strtol(filename, NULL, 10); // assume filename is pid
+	reg->pid = strtol(pid_str, NULL, 10);
 
-	// mmap the file to create the shared region; library does this, too
-	// @todo TODO move this code to a common function
-	pathlen = strlen(REG_DIR) + strlen(filename) + 2; // 2 for / and xtra \0
-	filepath = calloc(pathlen, sizeof(char));
-	if (!filepath) {
-		printd(DBG_ERROR, "Out of memory\n");
-		fprintf(stderr, "Out of memory\n");
-		goto fail;
-	}
-	strcat(filepath, REG_DIR);
-	strcat(filepath, "/");
-	strcat(filepath, filename);
-	fd = open(filepath, O_RDWR);
+	// Construct the filenames for the shm obj and reg file.
+	memset(reg->shmfile, 0, sizeof(reg->shmfile));
+	strcat(reg->shmfile, REG_OBJ_PREFIX);
+	strcat(reg->shmfile, pid_str);
+	memset(reg->regfile, 0, sizeof(reg->regfile));
+	strcat(reg->regfile, REG_DIR);
+	strcat(reg->regfile, "/");
+	strcat(reg->regfile, pid_str);
+
+	// 1. open the shm object
+	fd = shm_open(reg->shmfile, O_RDWR, S_IRWXU | S_IRWXG);
 	if (fd < 0) {
-		printd(DBG_ERROR, "Could not open %s: %s\n", filepath, strerror(errno));
-		goto fail;
+		printd(DBG_ERROR, "could not open shm obj '%s'\n", reg->shmfile);
+		perror("shm_open");
+		return -1;
 	}
 	reg->fd = fd;
+
+	// 2. mmap the file to create the shared region
 	reg->shm = mmap(NULL, SHM_SZ_B, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (reg->shm == MAP_FAILED) {
 		printd(DBG_ERROR, "Could not mmap fd %d: %s\n", fd, strerror(errno));
@@ -410,33 +443,30 @@ static regid_t _new_registration(const char *filename) {
 	be_state.all_regs[idx] = reg; // an important step!
 	printd(DBG_DEBUG, "id=%d pid=%d shm=%p fd=%d\n",
 			reg->id, reg->pid, reg->shm, reg->fd);
-	if (filepath)
-		free(filepath);
+	strcpy(reg->shm, "success");
 
 	return reg->id;
 
 fail:
 	if (fd > -1)
-		close(fd);
-	if (filepath)
-		free(filepath);
+		shm_unlink(reg->shmfile);
 	if (reg)
 		free(reg);
 	return -1;
 }
 
-static int _rm_registration(const char *filename) {
+static int _rm_registration(const char *pid_str) {
 	struct registration *reg = NULL;
 	unsigned int idx = 0;
 	pid_t pid; //! filename is the pid of the process unregistering
 	int err;
 
-	if (!filename) {
-		printd(DBG_ERROR, "NULL filename\n");
+	if (!pid_str) {
+		printd(DBG_ERROR, "NULL pid_str\n");
 		return -1;
 	}
 	// look for the registration struct, and deallocate it
-	pid = strtol(filename, NULL, 10);
+	pid = strtol(pid_str, NULL, 10);
 	for ( ; idx < be_state.max_regs; idx++) {
 		reg = be_state.all_regs[idx];
 		if (!reg)
@@ -445,7 +475,7 @@ static int _rm_registration(const char *filename) {
 			break;
 	}
 	if (!reg || idx >= be_state.max_regs) {
-		printd(DBG_ERROR, "%s not registered\n", filename);
+		printd(DBG_ERROR, "%s not registered\n", pid_str);
 		goto fail;
 	}
 	be_state.all_regs[idx] = NULL; // take it out
@@ -454,9 +484,9 @@ static int _rm_registration(const char *filename) {
 		printd(DBG_ERROR, "munmap of shm failed: %s\n", strerror(errno));
 		goto fail;
 	}
-	err = close(reg->fd);
+	err = shm_unlink(reg->shmfile);
 	if (err < 0) {
-		printd(DBG_ERROR, "close of shm fd failed: %s\n", strerror(errno));
+		printd(DBG_ERROR, "unlink of shm obj failed: %s\n", strerror(errno));
 		goto fail;
 	}
 	printd(DBG_DEBUG, "id=%d\n", reg->id);
@@ -470,16 +500,16 @@ fail:
 	return -1;
 }
 
-static regid_t _find_regid(const char *filename) {
+static regid_t _find_regid(const char *pid_str) {
 	struct registration *reg = NULL;
 	unsigned int idx;
 	pid_t pid;
 	regid_t id = -1;
-	if (!filename) {
-		printd(DBG_ERROR, "NULL filename\n");
+	if (!pid_str) {
+		printd(DBG_ERROR, "NULL pid_str\n");
 		return -1;
 	}
-	pid = strtol(filename, NULL, 10);
+	pid = strtol(pid_str, NULL, 10);
 	for (idx = 0; idx < be_state.max_regs; idx++) {
 		reg = be_state.all_regs[idx];
 		if (!reg)
@@ -705,4 +735,28 @@ int reg_be_callback(void (*callback)(enum callback_event e, regid_t id)) {
 
 fail:
 	return -1;
+}
+
+void* reg_be_get_shm(regid_t id) {
+	void *shm = NULL;
+	if (id < LOWEST_VALID_REGID) {
+		printd(DBG_DEBUG, "invalid id %d\n", id);
+		return NULL;
+	}
+	// TODO search for id
+	if (be_state.valid && be_state.all_regs[0])
+		shm = be_state.all_regs[0]->shm;
+	return shm;
+}
+
+size_t reg_be_get_shm_size(regid_t id) {
+	size_t size = -1;
+	if (id < LOWEST_VALID_REGID) {
+		printd(DBG_DEBUG, "invalid id %d\n", id);
+		return 0;
+	}
+	// TODO search for id
+	if (be_state.valid && be_state.all_regs[0])
+		size = SHM_SZ_B;
+	return size;
 }

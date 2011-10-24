@@ -41,5 +41,6 @@ size_t	reg_lib_get_shm_size(regid_t id);
 int reg_be_init(unsigned int max_regs);
 int reg_be_shutdown(void);
 int reg_be_callback(void (*callback)(enum callback_event e, regid_t id));
+void* reg_be_get_shm(regid_t id);
 
 #endif
