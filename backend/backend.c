@@ -9,27 +9,38 @@
  * @author Magda Slawinska, magg __at_ gatech __dot_ edu
  */
 
-#include <pthread.h>
-#include "connection.h"
-#include <stdlib.h>			// malloc
-#include "libciutils.h"		// mallocCheck
-#include <stdio.h>			// fprintf
-#include <string.h>
-#include "debug.h"
-#include "remote_packet.h"
-#include "remote_api_wrapper.h"
-#include <unistd.h>
 #include <assert.h>
+#include <pthread.h>
+#include <stdio.h>			// fprintf
+#include <stdlib.h>			// malloc
+#include <string.h>
+#include <unistd.h>
 
+#include "debug.h"
+#include "libciutils.h"		// mallocCheck
 #include <common/libregistration.h>
 
 /**
  * called when an interposed cuda process starts up and registers itself with us
  */
 void notification_callback(enum callback_event e, regid_t id) {
+	void *region;
+	size_t size;
 	// libregistration should set up the shared memory areas
 	// the regid can be used to obtain the shared memory areas
 	printd(DBG_INFO, "INVOKED type=%u id=%u\n", e, id);
+	switch (e) {
+		case CALLBACK_NEW:
+			region = reg_be_get_shm(id);
+			size = reg_be_get_shm_size(id);
+			printd(DBG_DEBUG, "new reg; shm=%p sz=%uB\n", region, size);
+			printf("read: %s\n", region);
+			break;
+		case CALLBACK_DEL:
+			break;
+		default:
+			break;
+	}
 }
 
 int main(){
@@ -49,7 +60,7 @@ int main(){
 	// TODO
 	// initialize a bunch of other things, such as worker threads, assembly, etc
 	// etc
-	sleep(20);
+	sleep(120);
 
 	err = reg_be_shutdown();
 	if (err < 0) {
