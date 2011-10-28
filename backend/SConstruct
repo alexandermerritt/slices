@@ -106,6 +106,8 @@ def build_backend(env):
     """
     env.Program('runtime', [
             'runtime.c',
+            'assembly.c',
+            'localsink.c',
             '../interposer/libciutils.c',
             '../include/kidron_common_f.c',
 			'../common/libregistration.c'])

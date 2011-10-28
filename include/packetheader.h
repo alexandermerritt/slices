@@ -30,8 +30,18 @@ typedef uint32_t grant_ref_t;
 
 typedef pthread_t tid_t;
 
-
 #define MAX_ARGS 4       // most cuda calls so far
+
+enum cuda_packet_flags
+{
+	CUDA_PKT_REQUEST = 0x1,		/* This packet is flowing from app to assembly. */
+	CUDA_PKT_RESPONSE  = 0x2,	/* Assembly -> app; RPC already executed somewhere. */
+	//CUDA_PKT_MORE_DATA = 0x4, /* Not used. */
+	CUDA_PKT_ERROR    = 0x8,	/* Used to indicate if the RPC produced an error. */
+	//CUDA_PKT_PTR_DATA = 0x10, /* Not used. */
+	//CUDA_PKT_ADDR_MAPPED = 0x20, /* Not used. */
+	//CUDA_PKT_MEM_SHARED = 0x40, /* Not used. */
+};
 
 // Possible flag values
 // request - from DomU to Dom0
@@ -63,10 +73,6 @@ typedef pthread_t tid_t;
 // malloc. If former, then no copying of buffer is required for the calls that
 // need to use this
 #define CUDA_Addrshared 0x40
-
-// Values within the driver to indicate whether mapping of buffer was done or not
-#define ADDR_ALREADY_MAPPED 0x1
-#define ADDR_UNMAPPED 0x2
 
 // Possible data size units. These are used to mark the ret_ex_val field as and
 // when needed in calls from frontend to backend. The reason the field is not
@@ -155,23 +161,22 @@ typedef struct {
 // Arguments will be filled in the order as in function declaration
 // Currently this union has the possible arguments seen in common CUDA calls
 typedef union args {
-	int arr_argii[4];
-	unsigned int arr_arguii[4];
-	int64_t argi;
-	uint64_t argui;
-	float argf;
-	void *argp;
-	void **argdp;
-	char *argcp;
-	size_t arr_argi[2];  // to combine multiple args wherever possible to keep total
-				// args restricted to 4
-	uint64_t arr_argui[2];  // anyway the union is of size 128 due to tf_args
-	tf_args_t tf_args;
-	dim3 arg_dim;      // This does increase the size of the union but what to do
+	int arr_argii[4];                   // int[4]
+	unsigned int arr_arguii[4];         // unsigned int[4]
+	int64_t argll;                      // signed long long (64-bit)
+	uint64_t argull;                    // unsigned long long (64-bit)
+	float argf;                         // float
+	void *argp;                         // void pointer
+	void **argdp;                       // double void pointer
+	char *argcp;                        // char pointer
+	size_t arr_argi[2];                 // size_t[2]
+	uint64_t arr_argui[2];              // unsigned int64[2]
+	tf_args_t tf_args;                  // ?
+	dim3 arg_dim;                       // 3D point
 	cudaStream_t arg_str;
-	reg_func_args_t *reg_func_args;
-	reg_var_args_t *reg_vars;
-	reg_tex_args_t *reg_texs;
+	reg_func_args_t *reg_func_args;     // for __cudaRegisterFunction()
+	reg_var_args_t *reg_vars;           // for __cudaRegisterVar()
+	reg_tex_args_t *reg_texs;           // for __cudaRegisterTexture()
 } args_t;
 
 // Possible return types in a response or some extra information on the way to

@@ -26,10 +26,26 @@
  * The question is if this has any impact on the interposed calls. I guess not.
  * But I might be wrong.
  *
- * To use that library you can do
- * [magg@prost release]$ LD_PRELOAD=/home/magg/libs/libci.so ./deviceQuery
+ * FIXME Make this library thread-safe.
  *
- * The library interposes calls and delegates the execution to the other machine
+ * As of right now, the format of the shared memory regions with the backend is
+ * as follows:
+ *
+ * 	byte	data
+ * 	0		struct cuda_packet
+ * 	[n		data associated with packet, void *]
+ *
+ * Any data associated with a packet is generally a result of a pointer
+ * argument. Either data is being copied in, or used as an output argument.
+ * Pointer arguments are either associated with a known data type, in which case
+ * no extra metadata is needed to describe the size of data, or a copy of
+ * generic memory. For the latter, extra arguments are present in the argument
+ * list that describe the region size.
+ *
+ * When constructing packets, arguments that represent pointers are replaced
+ * with values representing offsets into the shared memory region. Actual
+ * addresses are useless, as they are virtual (processes have different virtual
+ * address spaces). See cudaGetDeviceCount as a simple example.
  */
 
 // if this file is .c, if you do not define _GNU_SOURCE then it complains
@@ -60,6 +76,8 @@
 #include <glib.h>		// for GHashTable
 #include "kidron_common_s.h" // for ini file
 
+#include <util/x86_system.h> // memory barriers
+#include <assembly.h>
 #include <util/compiler.h>
 #include <common/libregistration.h>
 
@@ -76,17 +94,24 @@ extern int ini_freeIni(ini_t* pIni);
 
 /**
  * Struct representing the state associated with registration with the backend
- * process.
+ * process. Just a place to store this local collection of information. Each
+ * registration ID is associated with a different memory region. TODO Currently
+ * the registration library does not support more than one. When it does, each
+ * may be used by a different application thread to store packets.
  */
 struct backend_reg {
 	gboolean	has_registered;
 	regid_t		regs[5];		//! Library-Backened registration IDs (for SHM)
+	void		*shm[5];		//! Memory regions shared with the backend
+	size_t		sizes[5];		//! Sizes of each region.
 };
 
 #define NEED_REGISTRATION	(unlikely(be_reg.has_registered == FALSE))
 #define NEED_UNREGISTRATION	(be_reg.has_registered == TRUE)
 
-/*-------------------------------------- GLOBAL STATE ------------------------*/
+#define PRINT_FUNC	printf("CAUGHT %s\n", __func__)
+
+/*-------------------------------------- INTENRAL STATE ----------------------*/
 
 /*
  * These variables are 'global' with respect to this file only.
@@ -100,83 +125,7 @@ static cudaError_t cuda_err = 0;
 
 static struct backend_reg be_reg;
 
-/*-------------------------------------- STATIC FUNCTIONS --------------------*/
-
-/**
- * @brief Handles errors caused by dlsym()
- * @return true no error - everything ok, otherwise the false
- */
-static int l_handleDlError() {
-	char * error; // handles error description
-	int ret = OK; // return value
-
-	if ((error = dlerror()) != NULL) {
-		printf("%s.%d: %s\n", __FUNCTION__, __LINE__, error);
-		ret = ERROR;
-	}
-
-	return ret;
-}
-
-/**
- * Prints function signature
- * @param pSignature The string describing the function signature
- * @return always true
- */
-static int l_printFuncSig(const char* pSignature) {
-	printd(DBG_INFO, "CAUGHT: %s\n", pSignature);
-	return OK;
-}
-/**
- * Prints function signature; should be used for the
- * implemented functions
- * @param pSignature The string describing the function signature
- * @return always true
- */
-static int l_printFuncSigImpl(const char* pSignature) {
-	printd(DBG_INFO, "CAUGHT: %s\n", pSignature);
-	return OK;
-}
-/**
- * sets the method_id, thr_id, flags in the packet structure to default values
- * @param pPacket The packet to be changed
- * @param methodId The method id you want to set
- *
- */
-static int l_setMetThrReq(cuda_packet_t ** const pPacket, const uint16_t methodId){
-	(*pPacket)->method_id = methodId;
-	(*pPacket)->thr_id = pthread_self();
-	(*pPacket)->flags = CUDA_request;
-	(*pPacket)->ret_ex_val.err = cudaErrorUnknown;
-
-	return OK;
-}
-
-/**
- * sets the method_id, thr_id, flags in the packet structure to default values
- * @param pPacket The packet to be changed
- * @param methodId The method id you want to set
- * @param pSignature The string describing the function signature
- * @return OK everything is fine
- *         ERROR there is a problem with memory and cuda error contains
- *         the error; if calloc gave NULL
- */
-
-static int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
-		const uint16_t methodId, const char* pSignature){
-
-	// Now make a packet and send
-	if ((*pPacket = callocCudaPacket(pSignature, &cuda_err)) == NULL) {
-		return ERROR;
-	}
-
-	(*pPacket)->method_id = methodId;
-	(*pPacket)->thr_id = pthread_self();
-	(*pPacket)->flags = CUDA_request;
-	(*pPacket)->ret_ex_val.err = cudaErrorUnknown;
-
-	return OK;
-}
+/*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
 //! This appears in some values of arguments. I took this from
 //! /opt/cuda/include/cuda_runtime_api.h ! It looks as this comes from a default
@@ -192,21 +141,24 @@ static int l_remoteInitMetThrReq(cuda_packet_t ** const pPacket,
 
 static int registerWithBackend(void) {
 	int err;
+
 	if (be_reg.has_registered == FALSE) {
 		err = reg_lib_init();
 		if (err < 0) {
-			printed(DBG_ERROR, "Could not initialize registration with backend\n");
+			printd(DBG_ERROR, "Could not initialize registration with backend\n");
 			goto fail;
 		}
 		be_reg.has_registered = TRUE;
-		be_reg.regs[0] = reg_lib_connect(); // request new mmap region
+		// request new mmap region, initialize with hint struct
+		be_reg.regs[0] = reg_lib_connect();
 		if (be_reg.regs[0] < 0) {
 			printd(DBG_ERROR, "Could not connect\n");
 			goto fail;
 		}
-		printd(DBG_DEBUG, "id=%d shm=%p sz=%d\n",
-				be_reg.regs[0], reg_lib_get_shm(be_reg.regs[0]),
-				reg_lib_get_shm_size(be_reg.regs[0]));
+		be_reg.shm[0] = reg_lib_get_shm(be_reg.regs[0]);
+		be_reg.sizes[0] = reg_lib_get_shm_size(be_reg.regs[0]);
+		printd(DBG_DEBUG, "id=%d shm=%p sz=%lu\n",
+				be_reg.regs[0], be_reg.shm[0], be_reg.sizes[0]);
 	}
 	printd(DBG_INFO, "complete\n");
 	return 0;
@@ -239,40 +191,154 @@ fail:
 
 /*-------------------------------------- INTERPOSING API ---------------------*/
 
-static cudaError_t lcudaThreadExit(void) {
-	typedef cudaError_t (* pFuncType)(void);
-	l_printFuncSigImpl(__FUNCTION__);
+/* Updates needed in the future:
+ *
+ * TODO Each function need to choose which shm region it must use. This will
+ * depend on the thread ID making the call.
+ *
+ * TODO Support placing multiple calls into a shm region. This will require
+ * using some sort of queueing data structure within it.
+ */
 
-	static pFuncType pFunc = NULL;
+cudaError_t cudaGetDeviceCount(int *count) {
+	int err;
+	volatile struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	PRINT_FUNC;
 
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaThreadExit");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
+	// Most CUDA programs call __registerFatBinary first, this is here to catch
+	// deviceQuery in the SDK. Better would be to check for registration in
+	// every function call.
+	if (NEED_REGISTRATION) {
+		err = registerWithBackend();
+		if (err < 0) {
+			fprintf(stderr, "Error registering with backend\n");
+			return -1;
+		}
+		shmpkt = (struct cuda_packet *)be_reg.shm[0];
 	}
 
-	return (pFunc());
+	/* Directly write the cuda packet into the shared memory region. Indicate
+	 * where the output argument's data should be stored.
+	 *
+	 *   shm	Offset
+	 * +------+ 0
+	 * + cuda +
+	 * + pkt  +
+	 * +------+	sizeof(struct cuda_packet)
+	 * + int  + 
+	 * +------+ sizeof(int) + sizeof(struct cuda_packet)
+	 *
+	 * Give the packet one argument indicating the offset into the shared memory
+	 * region where it expects the value of 'count' to reside. This will be
+	 * copied into the user-provided address before returning. For functions
+	 * with additional pointer arguments, append them to the bottom and do
+	 * additional copying before returning.
+	 */
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_GET_DEVICE_COUNT;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(struct cuda_packet); // offset
+	shmpkt->flags = CUDA_PKT_REQUEST; // set this last FIXME sink spins on this
+
+	wmb(); // flush writes from caches
+
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*count = *((int *)((void *)shmpkt + shmpkt->args[0].argull));
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	struct cudaDeviceProp *prop_shm = NULL;
+	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_GET_DEVICE_PROPERTIES;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(struct cuda_packet); // offset
+	shmpkt->args[1].argll = device;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	prop_shm = (struct cudaDeviceProp*)((void*)shmpkt + shmpkt->args[0].argull);
+	memcpy(prop, prop_shm, sizeof(struct cudaDeviceProp));
+	return shmpkt->ret_ex_val.err;
+}
+
+#if 0
+
+cudaError_t cudaSetDevice(int device) {
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_SET_DEVICE;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argll = device;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		;
+
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaGetDevice(int *device) {
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_GET_DEVICE;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(struct cuda_packet);
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		;
+
+	*device = *((int *)shmpkt->args[0].argull);
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
+		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
+	return lcudaConfigureCall(gridDim, blockDim, sharedMem, stream);
+}
+
+cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset) {
+	return lcudaSetupArgument(arg, size, offset);
+}
+
+
+cudaError_t cudaLaunch(const char *entry) {
+	return lcudaLaunch(entry);
+}
+
+cudaError_t cudaChooseDevice(int *device, const struct cudaDeviceProp *prop) {
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_CHOOSE_DEVICE;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argp = (void *)device;
+	shmpkt->args[1].argp = prop;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		;
+
+	return shmpkt->ret_ex_val.err;
 }
 
 cudaError_t cudaThreadExit(void) {
-	return lcudaThreadExit();
-}
-
-static cudaError_t lcudaThreadSynchronize(void) {
-	typedef cudaError_t (* pFuncType)(void);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaThreadSynchronize");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc());
+	dlsym(RTLD_NEXT, __func__);
 }
 
 cudaError_t cudaThreadSynchronize(void) {
@@ -342,23 +408,6 @@ cudaError_t cudaThreadSetCacheConfig(enum cudaFuncCache cacheConfig) {
 	return (pFunc(cacheConfig));
 }
 
-static cudaError_t lcudaGetLastError(void) {
-	typedef cudaError_t (* pFuncType)(void);
-		static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetLastError");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc());
-}
-
-
 cudaError_t cudaGetLastError(void) {
 	return lcudaGetLastError();
 }
@@ -394,107 +443,6 @@ const char* cudaGetErrorString(cudaError_t error) {
 
 	return (pFunc(error));
 }
-
-static cudaError_t lcudaGetDeviceCount(int *count) {
-	typedef cudaError_t (* pFuncType)(int *count);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetDeviceCount");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc(count));
-}
-
-cudaError_t cudaGetDeviceCount(int *count) {
-	return lcudaGetDeviceCount(count);
-}
-
-static cudaError_t lcudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
-
-	typedef cudaError_t (* pFuncType)(struct cudaDeviceProp *prop, int device);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetDeviceProperties");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc(prop, device));
-
-}
-
-cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
-	return lcudaGetDeviceProperties(prop, device);
-}
-
-cudaError_t cudaChooseDevice(int *device,
-		const struct cudaDeviceProp *prop) {
-	typedef cudaError_t (* pFuncType)(int *device,
-			const struct cudaDeviceProp *prop);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaChooseDevice");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(device, prop));
-}
-
-static cudaError_t lcudaSetDevice(int device) {
-	l_printFuncSigImpl(__FUNCTION__);
-
-	typedef cudaError_t (* pFuncType)(int device);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaSetDevice");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc(device));
-}
-
-cudaError_t cudaSetDevice(int device) {
-	return lcudaSetDevice(device);
-}
-
-static cudaError_t lcudaGetDevice(int *device) {
-	typedef cudaError_t (* pFuncType)(int *device);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetDevice");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc(device));
-}
-
-cudaError_t cudaGetDevice(int *device) {
-	return lcudaGetDevice(device);
-}
-
 
 cudaError_t cudaSetValidDevices(int *device_arr, int len) {
 	typedef cudaError_t (* pFuncType)(int *device_arr, int len);
@@ -714,53 +662,6 @@ cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start,
 
 	return (pFunc(ms, start, end));
 }
-
-static cudaError_t lcudaConfigureCall(dim3 gridDim, dim3 blockDim,
-		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
-
-	typedef cudaError_t (* pFuncType)(dim3 gridDim, dim3 blockDim,
-			size_t sharedMem, cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaConfigureCall");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc(gridDim, blockDim, sharedMem, stream));
-}
-
-cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
-		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
-	return lcudaConfigureCall(gridDim, blockDim, sharedMem, stream);
-}
-
-static cudaError_t lcudaSetupArgument(const void *arg, size_t size, size_t offset) {
-
-	typedef cudaError_t (* pFuncType)(const void *arg, size_t size,
-			size_t offset);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaSetupArgument");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc(arg, size, offset));
-}
-
-cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset) {
-	return lcudaSetupArgument(arg, size, offset);
-}
-
-
 cudaError_t cudaFuncSetCacheConfig(const char *func,
 		enum cudaFuncCache cacheConfig) {
 	typedef cudaError_t (* pFuncType)(const char *func,
@@ -777,26 +678,6 @@ cudaError_t cudaFuncSetCacheConfig(const char *func,
 	l_printFuncSig(__FUNCTION__);
 
 	return (pFunc(func, cacheConfig));
-}
-
-static cudaError_t lcudaLaunch(const char *entry) {
-
-	typedef cudaError_t (* pFuncType)(const char *entry);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaLaunch");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc(entry));
-}
-
-cudaError_t cudaLaunch(const char *entry) {
-	return lcudaLaunch(entry);
 }
 
 cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr,
@@ -845,23 +726,6 @@ cudaError_t cudaSetDoubleForHost(double *d) {
 	}
 
 	return (pFunc(d));
-}
-
-static cudaError_t lcudaMalloc(void **devPtr, size_t size) {
-
-	typedef cudaError_t (* pFuncType)(void **devPtr, size_t size);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMalloc");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc(devPtr, size));
 }
 
 cudaError_t cudaMalloc(void **devPtr, size_t size) {
@@ -917,36 +781,6 @@ cudaError_t cudaMallocArray(struct cudaArray **array,
 	l_printFuncSig(__FUNCTION__);
 
 	return (pFunc(array, desc, width, height, flags));
-}
-
-/**
- * @brief The pattern of the functions so far. This function is being interposed
- * via PRE_LOAD. We need the original function; that's
- * why we call dlsym that seeks to find the next call of this signature. So first
- * we find that call, store in a function pointer and later call it eventually.
- * Right now, the only thing that interposed function does prints the arguments
- * of this function.
- */
-static cudaError_t lcudaFree(void * devPtr) {
-
-	typedef cudaError_t (* pFuncType)(void *);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		// find next occurence of the cudaFree() call,
-		// C++ requires casting void to the func ptr
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaFree");
-
-		if (l_handleDlError() != 0)
-			// problems with the dynamic library
-			return cudaErrorDL;
-	}
-
-	// call the function that was found by the dlsym - we hope this is
-	// the original function
-	return (pFunc(devPtr));
 }
 
 cudaError_t cudaFree(void * devPtr) {
@@ -1117,25 +951,6 @@ cudaError_t cudaMemGetInfo(size_t *free, size_t *total) {
 	return (pFunc(free, total));
 }
 
-static cudaError_t lcudaMemcpy(void *dst, const void *src, size_t count,
-		enum cudaMemcpyKind kind) {
-	typedef cudaError_t (* pFuncType)(void *dst, const void *src, size_t count,
-			enum cudaMemcpyKind kind);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpy");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-
-	return (pFunc(dst, src, count, kind));
-}
-
 cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 		enum cudaMemcpyKind kind) {
 	return lcudaMemcpy(dst, (const void *) src, count, kind);
@@ -1279,25 +1094,6 @@ cudaError_t cudaMemcpy2DArrayToArray(struct cudaArray *dst,
 			width, height, kind));
 }
 
-static cudaError_t lcudaMemcpyToSymbol(const char *symbol, const void *src,
-		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
-				__dv(cudaMemcpyHostToDevice)) {
-	typedef cudaError_t (* pFuncType)(const char *symbol, const void *src,
-			size_t count, size_t offset, enum cudaMemcpyKind kind);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpyToSymbol");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc(symbol, src, count, offset, kind));
-}
-
 cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 		__dv(cudaMemcpyHostToDevice)) {
@@ -1306,26 +1102,6 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
 			symbol, src, count, offset, kind);
 
 	return lcudaMemcpyToSymbol(symbol, src, count, offset, kind);
-}
-
-
-static cudaError_t lcudaMemcpyFromSymbol(void *dst, const char *symbol,
-		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
-				__dv(cudaMemcpyDeviceToHost)) {
-	typedef cudaError_t (* pFuncType)(void *dst, const char *symbol,
-			size_t count, size_t offset, enum cudaMemcpyKind kind);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpyFromSymbol");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc(dst, symbol, count, offset, kind));
 }
 
 cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
@@ -1763,10 +1539,11 @@ cudaError_t cudaGetChannelDesc(struct cudaChannelFormatDesc *desc,
 
 }
 /**
- * This call returns something different than cudaError_t so we must use different something
- * else than cudaErrorDL
+ * This call returns something different than cudaError_t so we must use
+ * different something else than cudaErrorDL
  * @todo better handle DL error
- * @return empty cudaChannelFormatDesc if there is a problem with DL, as well (maybe other NULL might means something else)
+ * @return empty cudaChannelFormatDesc if there is a problem with DL, as well
+ * (maybe other NULL might means something else)
  */
 struct cudaChannelFormatDesc cudaCreateChannelDesc(int x, int y, int z,
 		int w, enum cudaChannelFormatKind f) {
@@ -2017,6 +1794,31 @@ void** l__cudaRegisterFatBinary(void* fatC) {
 	return (func(fatC));
 }
 
+static void printFatBinary(void *fatC) {
+	if (!fatC) {
+		printd(DBG_ERROR, "NULL argument\n");
+		return;
+	}
+
+	__cudaFatCudaBinary *fatbin = (__cudaFatCudaBinary *)fatC;
+
+	printf("\tmagic=%lu\n", fatbin->magic);
+	printf("\tversion=%lu\n", fatbin->version);
+	printf("\tgpuInfoVersion=%lu\n", fatbin->gpuInfoVersion);
+
+	printf("\tkey='%s'\n", fatbin->key);
+	printf("\tident='%s'\n", fatbin->ident);
+	printf("\tusageMode='%s'\n", fatbin->usageMode);
+
+	printf("\tptx=%p\n", fatbin->ptx);
+	if (fatbin->ptx) {
+		printf("\tptx:\t\tgpuProfileName='%s'\n", fatbin->ptx->gpuProfileName);
+		printf("\tptx:\t\tptx='%s'\n", fatbin->ptx->ptx);
+	} else {
+		printf("\tptx=%p\n", fatbin->ptx);
+	}
+}
+
 void** __cudaRegisterFatBinary(void* fatC) {
 #if 0
 	ini_t ini;			// for ini file
@@ -2036,6 +1838,8 @@ void** __cudaRegisterFatBinary(void* fatC) {
 
 	if (NEED_REGISTRATION)
 		registerWithBackend();
+
+	printFatBinary(fatC);
 
 	return l__cudaRegisterFatBinary(fatC);
 
@@ -2168,6 +1972,5 @@ void __cudaRegisterShared(void** fatCubinHandle, void** devicePtr) {
 
 	(pFunc(fatCubinHandle, devicePtr));
 }
-// ---------------------------
-// end
-// ---------------------------
+#endif
+
