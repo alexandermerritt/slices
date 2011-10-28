@@ -206,7 +206,29 @@ regid_t reg_lib_connect(void) {
 		goto fail;
 	}
 
-	// 2. Write a pid file to REG_DIR, triggers inotify in backend.
+	// 2. mmap it
+	reg->fd = fd;
+	reg->shm = mmap(NULL, SHM_SZ_B, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (reg->shm == MAP_FAILED) {
+		printd(DBG_ERROR, "Could not mmap fd %d\n", fd);
+		perror("mmap");
+		goto fail;
+	}
+	lib_state.all_regs[0] = reg;
+	printd(DBG_DEBUG, "id=%d pid=%d shm=%p fd=%d\n",
+			reg->id, reg->pid, reg->shm, reg->fd);
+
+	memset(reg->shm, 0, SHM_SZ_B);
+#if 0
+	// 3. Clear region, then write data that caller specified in arguments.
+	if (init_data && bytes > 0 && bytes < SHM_SZ_B)
+		memcpy(reg->shm, init_data, bytes);
+	else
+		printd(DBG_WARNING, "Ignoring init data; void or invalid size %lu\n",
+				bytes);
+#endif
+
+	// 4. Write a pid file to REG_DIR, triggers inotify in backend.
 	memset(filename, 0, sizeof(filename));
 	strcat(filename, REG_DIR);
 	strcat(filename, "/");
@@ -220,17 +242,6 @@ regid_t reg_lib_connect(void) {
 		goto fail;
 	}
 
-	// 3. mmap it (backend will simultaneously be mmap'ing)
-	reg->fd = fd;
-	reg->shm = mmap(NULL, SHM_SZ_B, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (reg->shm == MAP_FAILED) {
-		printd(DBG_ERROR, "Could not mmap fd %d\n", fd);
-		perror("mmap");
-		goto fail;
-	}
-	lib_state.all_regs[0] = reg;
-	printd(DBG_DEBUG, "id=%d pid=%d shm=%p fd=%d\n",
-			reg->id, reg->pid, reg->shm, reg->fd);
 	return reg->id;
 
 fail:
@@ -443,7 +454,6 @@ static regid_t _new_registration(const char *pid_str) {
 	be_state.all_regs[idx] = reg; // an important step!
 	printd(DBG_DEBUG, "id=%d pid=%d shm=%p fd=%d\n",
 			reg->id, reg->pid, reg->shm, reg->fd);
-	strcpy(reg->shm, "success");
 
 	return reg->id;
 
@@ -637,7 +647,6 @@ fail:
 
 	pthread_cleanup_pop(1);
 	assert(0); // not reachable
-	__builtin_unreachable();
 }
 
 int reg_be_init(unsigned int max_regs) {
