@@ -57,7 +57,7 @@
 #define printd(level, fmt, args...)                                     \
     do {                                                                \
         if((level) <= DBG_LEVEL) {                                      \
-            printf("<%d> %s[%d]: ", (level), __FUNCTION__, __LINE__);   \
+            printf("<%d> %s::%s[%d]: ", (level), __FILE__, __func__, __LINE__);   \
             printf(fmt, ##args);                                        \
             fflush(stdout);                                             \
         }                                                               \
