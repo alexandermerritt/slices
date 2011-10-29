@@ -9,8 +9,9 @@
 
 #include <assembly.h>
 #include <debug.h>
-#include <util/list.h>
+#include <method_id.h>
 #include <util/compiler.h>
+#include <util/list.h>
 
 /*-------------------------------------- INTERNAL STRUCTURES -----------------*/
 
@@ -35,6 +36,7 @@ struct vgpu_mapping
 	int pgpu_id; //! physical gpu ID assigned by the local driver
 	char pgpu_hostname[255];
 	char pgpu_ip[255];
+	struct cudaDeviceProp cudaDevProp;
 };
 
 #define ASSEMBLY_MAX_MAPPINGS	24U
@@ -53,6 +55,8 @@ struct assembly
 	// TODO location of node containing application
 };
 
+#define PARTICIPANT_MAX_GPUS	4
+
 /**
  * State describing a node that has registered to participate in the assembly
  * runtime. Minions send RPCs to the main node to register.
@@ -63,6 +67,7 @@ struct node_participant
 	char hostname[255];
 	char ip[255];
 	unsigned int num_gpus;
+	struct cudaDeviceProp dev_prop[PARTICIPANT_MAX_GPUS];
 	enum node_type type;
 };
 
@@ -117,8 +122,6 @@ static struct assembly* find_assembly(asmid_t id)
 	if (unlikely(!assm))
 		printd(DBG_ERROR, "unknown assembly id %lu\n", id);
 	return assm;
-fail:
-	return NULL;
 }
 
 /**
@@ -189,6 +192,8 @@ static struct assembly* compose_assembly(const struct assembly_cap_hint *hint)
 			memcpy(vgpu->pgpu_hostname, node->hostname, 255);
 			memcpy(vgpu->vgpu_ip, node->ip, 255);
 			memcpy(vgpu->pgpu_ip, node->ip, 255);
+			memcpy(&vgpu->cudaDevProp, &node->dev_prop[vgpu_id],
+					sizeof(struct cudaDeviceProp));
 		}
 	}
 	if (vgpu_id <= assm->num_gpus) {
@@ -209,6 +214,8 @@ fail:
 static int node_main_init(void)
 {
 	struct node_participant *p;
+	int dev;
+	cudaError_t cerr;
 
 	internals->n.main.next_asmid = 1UL;
 	INIT_LIST_HEAD(&internals->n.main.participants);
@@ -223,7 +230,20 @@ static int node_main_init(void)
 	
 	// FIXME don't hardcode, figure out at runtime
 	strcpy(p->ip, "10.0.0.1");
-	p->num_gpus = 2; // tesla and quadro
+	cerr = cudaGetDeviceCount(&p->num_gpus);
+	if (cerr != cudaSuccess) {
+		printd(DBG_ERROR, "error calling cudaGetDeviceCount: %d\n", cerr);
+		goto fail;
+	}
+	printd(DBG_DEBUG, "node has %d GPUs\n", p->num_gpus);
+	for (dev = 0; dev < p->num_gpus; dev++) {
+		cerr = cudaGetDeviceProperties(&p->dev_prop[dev], dev);
+		if (cerr != cudaSuccess) {
+			printd(DBG_ERROR, "error calling cudaGetDeviceProperties: %d\n",
+					cerr);
+			goto fail;
+		}
+	}
 	strcpy(p->hostname, "ifrit"); // just for identification, not routing
 	p->type = NODE_TYPE_MAIN;
 
@@ -429,6 +449,7 @@ int assembly_rpc(asmid_t id, int vgpu, struct cuda_packet *pkt)
 	// packet to it.
 	assm = find_assembly(id);
 	if (unlikely(!assm)) {
+		printd(DBG_ERROR, "could not locate assembly %lu\n", id);
 		err = pthread_mutex_unlock(&internals->lock);
 		if (err < 0)
 			printd(DBG_ERROR, "Could not unlock internals\n");
@@ -437,6 +458,39 @@ int assembly_rpc(asmid_t id, int vgpu, struct cuda_packet *pkt)
 	err = pthread_mutex_unlock(&internals->lock);
 	if (err < 0)
 		printd(DBG_ERROR, "Could not unlock internals\n");
+	// Execute calls. Some return data specific to the assembly, others can go
+	// directly to NVIDIA's runtime.
+	switch (pkt->method_id) {
+
+		case CUDA_GET_DEVICE_COUNT:
+			{
+				int *devs = ((void*)pkt + pkt->args[0].argull);
+				*devs = assm->num_gpus;
+				break;
+			}
+
+		case CUDA_GET_DEVICE_PROPERTIES:
+			{
+				int dev;
+				struct cudaDeviceProp *prop;
+				dev = pkt->args[1].argll;
+				prop = ((void*)pkt + pkt->args[0].argull);
+				if (unlikely(dev >= assm->num_gpus)) {
+					pkt->ret_ex_val.err = cudaErrorInvalidDevice;
+					break;
+				}
+				memcpy(prop, &assm->mappings[dev].cudaDevProp,
+						sizeof(struct cudaDeviceProp));
+				break;
+			}
+
+		default:
+			// Send to NVIDIA runtime.
+			printd(DBG_ERROR, "Method %d not implemented yet.\n",
+					pkt->method_id);
+			goto fail;
+			break;
+	}
 	return 0;
 fail:
 	return -1;

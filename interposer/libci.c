@@ -98,6 +98,7 @@ extern int ini_freeIni(ini_t* pIni);
  * registration ID is associated with a different memory region. TODO Currently
  * the registration library does not support more than one. When it does, each
  * may be used by a different application thread to store packets.
+ * TODO Use a thread ID to index into the correct shm.
  */
 struct backend_reg {
 	gboolean	has_registered;
@@ -272,8 +273,6 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 	return shmpkt->ret_ex_val.err;
 }
 
-#if 0
-
 cudaError_t cudaSetDevice(int device) {
 	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
 	PRINT_FUNC;
@@ -320,6 +319,8 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset) {
 cudaError_t cudaLaunch(const char *entry) {
 	return lcudaLaunch(entry);
 }
+
+#if 0
 
 cudaError_t cudaChooseDevice(int *device, const struct cudaDeviceProp *prop) {
 	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
@@ -1776,24 +1777,6 @@ cudaError_t cudaGetExportTable(const void **ppExportTable,
 //! Unlisted CUDA calls for state registration
 // ----------------------------------------
 
-void** pFatBinaryHandle = NULL;
-
-void** l__cudaRegisterFatBinary(void* fatC) {
-
-	static void** (*func)(void* fatC) = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!func) {
-		func = dlsym(RTLD_NEXT, "__cudaRegisterFatBinary");
-
-		if (l_handleDlError() != 0)
-			exit(-1);
-	}
-
-	return (func(fatC));
-}
-
 static void printFatBinary(void *fatC) {
 	if (!fatC) {
 		printd(DBG_ERROR, "NULL argument\n");
@@ -1819,57 +1802,46 @@ static void printFatBinary(void *fatC) {
 	}
 }
 
-void** __cudaRegisterFatBinary(void* fatC) {
-#if 0
-	ini_t ini;			// for ini file
+void** __cudaRegisterFatBinary(void* cubin) {
+	int err;
+	volatile struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	PRINT_FUNC;
 
-	ini.ini_name = KIDRON_INI;
-	// get the ini file
-	ini_getIni(&ini);
+	if (NEED_REGISTRATION) {
+		err = registerWithBackend();
+		if (err < 0) {
+			fprintf(stderr, "Error registering with backend\n");
+			return -1;
+		}
+		shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	}
 
-	LOCAL_EXEC = ini_getLocal(&ini);
-	ini_freeIni(&ini);
+	//printFatBinary(fatC);
 
-	//LOCAL_EXEC = l_getLocalFromConfig();
-	p_debug( "LOCAL_EXEC=%d (1-local, 0-remote), faC = %p\n", LOCAL_EXEC, fatC);
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = __CUDA_REGISTER_FAT_BINARY;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(struct cuda_packet); // offset
+	shmpkt->flags = CUDA_PKT_REQUEST; // set this last FIXME sink spins on this
 
-	//l_printFatBinary(fatC);
-#endif
+	wmb(); // flush writes from caches
 
-	if (NEED_REGISTRATION)
-		registerWithBackend();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
 
-	printFatBinary(fatC);
-
-	return l__cudaRegisterFatBinary(fatC);
+	*count = *((int *)((void *)shmpkt + shmpkt->args[0].argull));
+	return shmpkt->ret_ex_val.err;
 
 fail:
 	return NULL;
 }
-
-void l__cudaUnregisterFatBinary(void** fatCubinHandle) {
-	typedef void** (* pFuncType)(void** fatCubinHandle);
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "__cudaUnregisterFatBinary");
-
-		if (l_handleDlError() != 0)
-			exit(-1);
-	}
-
-	(pFunc(fatCubinHandle));
-
-	if (NEED_UNREGISTRATION)
-		unregisterWithBackend();
-}
+#endif
 
 void __cudaUnregisterFatBinary(void** fatCubinHandle) {
-	l__cudaUnregisterFatBinary(fatCubinHandle);
+	return;
 }
 
+#if 0
 void l__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize) {

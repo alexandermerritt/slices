@@ -84,45 +84,15 @@ void localsink(asmid_t asmid, regid_t regid)
 		while (!(cpkt_shm->flags & CUDA_PKT_REQUEST))
 			rmb();
 
-#if 0
-		// tell assembly to execute the packet for us
+		// Tell assembly to execute the packet for us
+		// TODO Use a thread pool to associate with each thread in the
+		// application.
 		err = assembly_rpc(asmid, 0, cpkt_shm); // FIXME don't hardcode vgpu 0
 		if (err < 0) {
-			printd(DBG_ERROR, "error executing assembly_rpc\n");
-			// what else to do?
+			printd(DBG_ERROR, "assembly_rpc returned error\n");
+			// what else to do? this is supposed to be an error of the assembly
+			// module, not an error of the call specifically
 			assert(0);
-		}
-#endif
-
-		// FIXME Remove execution of packet from here.
-		switch (cpkt_shm->method_id) {
-
-			case CUDA_GET_DEVICE_COUNT:
-				{
-					int *devs = (int*)((void*)cpkt_shm + cpkt_shm->args[0].argull);
-					printd(DBG_INFO, "executing cudaGetDeviceCount(%p)\n", devs);
-					cudaGetDeviceCount(devs);
-					printd(DBG_DEBUG, "cudaGetDevieCount returned %d\n", *devs);
-				}
-				break;
-
-			case CUDA_GET_DEVICE_PROPERTIES:
-				{
-					struct cudaDeviceProp *prop_shm =
-						(struct cudaDeviceProp*)((void*)cpkt_shm +
-								cpkt_shm->args[0].argull);
-					int dev = cpkt_shm->args[1].argll;
-					printd(DBG_INFO, "executing cudaGetDeviceProperties(%p, %d)\n",
-							prop_shm, dev);
-					cudaGetDeviceProperties(prop_shm, dev);
-					printd(DBG_DEBUG, "cudaGetDevieCount returned\n");
-				}
-				break;
-
-			default:
-				printd(DBG_ERROR, "unhandled method: %d\n", cpkt_shm->method_id);
-				assert(0);
-				break;
 		}
 
 		// Don't forget! Indicate packet is executed and on return path.
