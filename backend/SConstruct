@@ -26,7 +26,8 @@ def get_platform_characteristic_str():
     """    
     nodename = commands.getoutput('uname -n') # doesn't work on keeneland
     return nodename
-    
+
+GLOBAL_CCFLAGS='-ggdb -Wall -Wextra -Werror'
 
 ########################################################333
 # here we define the environments for particular nodes
@@ -50,7 +51,7 @@ envBackendKeeneland = Environment(
       GLIB20 + 'include/gio-unix-2.0',
       GLIB20 + 'lib/glib-2.0/include'
       ],
-      CCFLAGS='-g -Wall -Wextra')
+	  CCFLAGS=GLOBAL_CCFLAGS)
 
 # env for Prost, GT machine
 envBackendProst = envBackendKeeneland
@@ -73,7 +74,7 @@ envBackendShiva = Environment(
       '/usr/include/gio-unix-2.0',
       '/usr/lib/glib-2.0/include'
       ],
-      CCFLAGS='-g -Wall -Wextra')
+	  CCFLAGS=GLOBAL_CCFLAGS)
 
 # Ifrit, GT machine
 envBackendIfrit = Environment(
@@ -93,7 +94,7 @@ envBackendIfrit = Environment(
       '/usr/include/gio-unix-2.0',
       '/usr/lib/glib-2.0/include'
       ],
-      CCFLAGS='-g -Wall -Wextra')
+	  CCFLAGS=GLOBAL_CCFLAGS)
 
 #############################################
 # end of environment definitions
