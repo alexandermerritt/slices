@@ -50,7 +50,7 @@ asmid_t assembly_request(const struct assembly_cap_hint *hint);
 int assembly_num_vgpus(asmid_t id);
 int assembly_vgpu_is_remote(asmid_t id, int vgpu);
 int assembly_set_batch_size(asmid_t id, int vgpu, unsigned int size);
-int assembly_rpc(asmid_t id, int vgpu, struct cuda_packet *pkt);
+int assembly_rpc(asmid_t id, int vgpu, volatile struct cuda_packet *pkt);
 int assembly_teardown(asmid_t id);
 
 #endif

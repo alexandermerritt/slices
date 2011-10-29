@@ -236,7 +236,7 @@ cudaError_t cudaGetDeviceCount(int *count) {
 	 * additional copying before returning.
 	 */
 
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset((void*)shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_GET_DEVICE_COUNT;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argull = sizeof(struct cuda_packet); // offset
@@ -306,6 +306,7 @@ cudaError_t cudaGetDevice(int *device) {
 	return shmpkt->ret_ex_val.err;
 }
 
+#if 0
 cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
 	return lcudaConfigureCall(gridDim, blockDim, sharedMem, stream);
@@ -320,7 +321,6 @@ cudaError_t cudaLaunch(const char *entry) {
 	return lcudaLaunch(entry);
 }
 
-#if 0
 
 cudaError_t cudaChooseDevice(int *device, const struct cudaDeviceProp *prop) {
 	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];

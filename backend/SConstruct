@@ -27,7 +27,7 @@ def get_platform_characteristic_str():
     nodename = commands.getoutput('uname -n') # doesn't work on keeneland
     return nodename
 
-GLOBAL_CCFLAGS='-ggdb -Wall -Wextra -Werror'
+GLOBAL_CCFLAGS='-ggdb -Wall -Wextra -Werror -Wno-unused-parameter'
 
 ########################################################333
 # here we define the environments for particular nodes

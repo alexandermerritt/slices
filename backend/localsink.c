@@ -55,17 +55,14 @@
  */
 void localsink(asmid_t asmid, regid_t regid)
 {
-	int num_gpus, err;
+	int err;
 	void *shm = NULL;
-	size_t shm_sz;
 	volatile struct cuda_packet *cpkt_shm = NULL;
 
 	printd(DBG_INFO, "localsink spawned, pid=%d asm=%lu regid=%d\n",
 			getpid(), asmid, regid);
 
-	num_gpus = assembly_num_vgpus(asmid);
 	shm = reg_be_get_shm(regid);
-	shm_sz = reg_be_get_shm_size(regid);
 
 	// Process the shm for cuda packets.
 	// TODO Once the lib uses multiple threads, we will need to consider state
@@ -101,5 +98,4 @@ void localsink(asmid_t asmid, regid_t regid)
 	}
 
 	assert(0);
-	__builtin_unreachable();
 }

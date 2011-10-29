@@ -6,12 +6,18 @@
  */
 
 #include <string.h>
+#include <cuda.h>
 
 #include <assembly.h>
 #include <debug.h>
 #include <method_id.h>
 #include <util/compiler.h>
 #include <util/list.h>
+
+// FIXME
+// Defining prototypes here. Compiler complains despite including cuda.h
+extern cudaError_t cudaGetDeviceCount(unsigned int* dev);
+extern cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int dev);
 
 /*-------------------------------------- INTERNAL STRUCTURES -----------------*/
 
@@ -236,7 +242,7 @@ static int node_main_init(void)
 		goto fail;
 	}
 	printd(DBG_DEBUG, "node has %d GPUs\n", p->num_gpus);
-	for (dev = 0; dev < p->num_gpus; dev++) {
+	for (dev = 0; (unsigned int)dev < p->num_gpus; dev++) {
 		cerr = cudaGetDeviceProperties(&p->dev_prop[dev], dev);
 		if (cerr != cudaSuccess) {
 			printd(DBG_ERROR, "error calling cudaGetDeviceProperties: %d\n",
@@ -436,7 +442,7 @@ int assembly_rpc_nolock(asmid_t id, int vgpu, struct cuda_packet *pkt)
 	return -1;
 }
 
-int assembly_rpc(asmid_t id, int vgpu, struct cuda_packet *pkt)
+int assembly_rpc(asmid_t id, int vgpu, volatile struct cuda_packet *pkt)
 {
 	int err;
 	struct assembly *assm = NULL;
@@ -475,7 +481,7 @@ int assembly_rpc(asmid_t id, int vgpu, struct cuda_packet *pkt)
 				struct cudaDeviceProp *prop;
 				dev = pkt->args[1].argll;
 				prop = ((void*)pkt + pkt->args[0].argull);
-				if (unlikely(dev >= assm->num_gpus)) {
+				if (unlikely((unsigned int)dev >= assm->num_gpus)) {
 					pkt->ret_ex_val.err = cudaErrorInvalidDevice;
 					break;
 				}
