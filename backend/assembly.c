@@ -119,7 +119,7 @@ static struct assembly* find_assembly(asmid_t id)
 	list_for_each_entry(assm, &internals->assembly_list, list)
 		if (assm->id == id)
 			break;
-	if (unlikely(!assm))
+	if (unlikely(!assm || assm->id != id))
 		printd(DBG_ERROR, "unknown assembly id %lu\n", id);
 	return assm;
 }
