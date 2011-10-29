@@ -38,6 +38,8 @@ def get_platform_characteristic_str():
 # for glib options run: glib-config --cflags  for glib1.2 
 # glib2 lacks this thing
 
+GLOBAL_CCFLAGS='-fPIC -ggdb -Wall -Wextra -Werror -Wno-unused-parameter'
+
 ########################################################333
 # here we define the environments for particular nodes
 #######################################################3
@@ -58,7 +60,7 @@ envInterposerKeeneland = Environment(
         GLIB20 + 'include/glib-2.0',
         GLIB20 + 'include/gio-unix-2.0',
         GLIB20 + 'lib/glib-2.0/include'],
-     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] ) 
+     CCFLAGS=GLOBAL_CCFLAGS)
 
 # prost node
 envInterposerProst = envInterposerKeeneland
@@ -77,7 +79,7 @@ envInterposerShiva = Environment(
         '/usr/include/glib-2.0',
         '/usr/lib/glib-2.0/include'
         ],
-     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] )
+     CCFLAGS=GLOBAL_CCFLAGS)
 
 # ifrit
 envInterposerIfrit = Environment(
@@ -94,7 +96,7 @@ envInterposerIfrit = Environment(
         '/usr/include/glib-2.0',
         '/usr/lib/glib-2.0/include'
         ],
-     CCFLAGS = ['-fPIC', '-g', '-Wall', '-Wextra', '-std=gnu99'] ) 
+     CCFLAGS=GLOBAL_CCFLAGS)
 
 ################# test environments
 

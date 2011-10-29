@@ -119,10 +119,10 @@ struct backend_reg {
  */
 
 //! to indicate the error with the dynamic loaded library
-static cudaError_t cudaErrorDL = cudaErrorUnknown;
+//static cudaError_t cudaErrorDL = cudaErrorUnknown;
 
 //! State machine for cudaGetLastError()
-static cudaError_t cuda_err = 0;
+//static cudaError_t cuda_err = 0;
 
 static struct backend_reg be_reg;
 
@@ -1838,7 +1838,13 @@ fail:
 #endif
 
 void __cudaUnregisterFatBinary(void** fatCubinHandle) {
-	return;
+	int err;
+	PRINT_FUNC;
+	if (NEED_UNREGISTRATION) {
+		err = unregisterWithBackend();
+		if (err < 0)
+			fprintf(stderr, "Error unregistering with backend\n");
+	}
 }
 
 #if 0
