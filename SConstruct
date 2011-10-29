@@ -124,7 +124,7 @@ Export( 'CUDA_ROOT',
 					  
 # call all scripts
 SConscript([
-        #'cuda-app/SConstruct', # it doesn't depend on anything
+#        'cuda-app/SConstruct', # it doesn't depend on anything
         'interposer/SConstruct',    # it compiles a bunch of stuff
         'backend/SConstruct'			
         ])
