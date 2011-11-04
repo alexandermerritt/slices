@@ -4,6 +4,7 @@
  *
  * @date Apr 12, 2011
  * @author Magda Slawinska (Magic MS), magg __at_ gatech __dot_ edu
+ * @author Alex Merritt, merritt.alex@gatech.edu
  */
  
  CONTRIBUTORS
@@ -17,13 +18,26 @@
  Alex Merritt
  Abhishek Verma
  
- Magic Magg ported the virtualized-based software to a non-virtualized case.
+Alex Merritt and Magda Slawinska ported the virtualized-based software to a
+non-virtualized case. Magda's work targets supporting the actual deployment of
+this codebase on large-scale GPU clusters, as well as the networking code.
+Alex's work contributes to the assembly runtime, making it possible to map
+applications across the cluster.
  
  
- 
- 
- 
- 
+Assumptions and limitations of the system as of current commit
+==============================================================
+- Applications cannot be multi-threaded.
+- Applications cannot have more than one __cudaRegisterFatBinary call
+- Runtime must be restarted for each application
+	/tmp/assembly/ and /dev/shm/asm-* must be removed each time
+- Only one node can participate in the assembly runtime (no networking interface available yet) 
+- A limited number of CUDA Runtime calls are interposed. SDK apps that have been
+tested with local assemblies include:
+	deviceQuery
+	matrixMul
+  Executing other CUDA applications may generate SEGV faults, as some calls may
+  be interposed and others invoked in the NVIDIA runtime, which is not correct.
  
  
  

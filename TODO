@@ -1,8 +1,7 @@
 - 2011-10-03
   1. clean up README - currently it is a total mess
   2. add kidron.ini as a file option
-  
-- 2011-05-03, done
+  - 2011-05-03, done
   add GLIB variable in the build system; right now it is hard coded
   
 - 2011-04-12; 2011-05-02 done
@@ -14,3 +13,30 @@
     interposer/SConstruct
     backend/SConstruct
     
+
+IMPLEMENTATION AND FEATURES
+--------------------------------------------------------------------------------
+Legend
+[ ]		not started
+[L]		works, but some limitations (noted with feature)
+[C]		complete
+
+Items
+[L]		implement libregistration
+[ ]			multi-process (able to support multiple process reg without restart)
+[ ]			multi-threading (?)
+[ ]			multiple watches
+[ ]			convert to self-contained library
+
+[ ]		support multiple fat cubin binaries
+[ ]		all hidden register calls need to be duplicated for across nodes in assm
+
+[L]		assembly interface
+[ ]			assembly RPC (ability for node to be included in runtime)
+[ ]			add monitoring data to assembly composition
+
+[ ]		networking interface
+
+[ ]		scheduling interface
+
+[ ]		support execution of CUDA apps on machines without GPUs? (all remote)

@@ -161,16 +161,16 @@ typedef struct {
 // Arguments will be filled in the order as in function declaration
 // Currently this union has the possible arguments seen in common CUDA calls
 typedef union args {
-	int arr_argii[4];                   // int[4]
-	unsigned int arr_arguii[4];         // unsigned int[4]
-	int64_t argll;                      // signed long long (64-bit)
-	uint64_t argull;                    // unsigned long long (64-bit)
-	float argf;                         // float
-	void *argp;                         // void pointer
-	void **argdp;                       // double void pointer
-	char *argcp;                        // char pointer
-	size_t arr_argi[2];                 // size_t[2]
-	uint64_t arr_argui[2];              // unsigned int64[2]
+	int arr_argii[4];
+	unsigned int arr_arguii[4];
+	long long argll;
+	unsigned long long argull;          // for pointers and such
+	float argf;
+	void *argp;
+	void **argdp;
+	char *argcp;
+	size_t arr_argi[2];
+	unsigned long long arr_argui[2];
 	tf_args_t tf_args;                  // ?
 	dim3 arg_dim;                       // 3D point
 	cudaStream_t arg_str;

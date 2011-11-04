@@ -11,6 +11,7 @@
 #include <common/libregistration.h>
 
 void localsink(asmid_t asmid, regid_t regid);
+int nv_exec_pkt(volatile struct cuda_packet *pkt);
 
 // TODO remote sink? something
 

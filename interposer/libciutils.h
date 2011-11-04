@@ -93,14 +93,19 @@ int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 		cache_num_entries_t * const pEntriesCache);
 int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack);
 
-char * packRegFuncArgs(void** fatCubinHandle, const char* hostFun,
+int getSize_regFuncArgs(void** fatCubinHandle, const char* hostFun,
+        char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
+        uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
+int packRegFuncArgs(void *dst, void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
-		uint3* bid, dim3* bDim, dim3* gDim, int* wSize, int *pSize);
+		uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
 int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket);
 
-char * packRegVar(void **fatCubinHandle, char *hostVar, char *deviceAddress,
-		const char *deviceName, int ext, int vsize, int constant, int global,
-		int * pSize);
+int getSize_regVar(void **fatCubinHandle, char *hostVar, char *deviceAddress,
+		const char *deviceName, int ext, int vsize,int constant, int global);
+int packRegVar(void *dst, void **fatCubinHandle, char *hostVar,
+		char *deviceAddress, const char *deviceName, int ext, int vsize, int
+		constant, int global);
 int unpackRegVar(reg_var_args_t * pRegVar, char *pPacket);
 
 int freeRegFunc(reg_func_args_t *args);

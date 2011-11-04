@@ -58,9 +58,11 @@ typedef enum METHOD_ID {
     __CUDA_REGISTER_TEXTURE,
     __CUDA_REGISTER_SHARED,
     __CUDA_UNREGISTER_FAT_BINARY,
+	CUDA_DRIVER_GET_VERSION,
+	CUDA_RUNTIME_GET_VERSION,
     // TODO If we start the first entry at zero, then this would be correct.
     MAX_METHODS
-} method_id;
+} method_id_t;
 
 
 // Defining this in general even when not profiling calls

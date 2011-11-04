@@ -10,6 +10,8 @@
 #ifndef FATCUBININFO_H_
 #define FATCUBININFO_H_
 
+#include <__cudaFatFormat.h>
+
 //! the maximum number of fatcubins structures we support
 //! in general it should be a vector with dynamic length as
 //! all those MAX_REGISTERED_THINGS

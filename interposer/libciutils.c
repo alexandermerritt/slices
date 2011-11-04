@@ -1617,7 +1617,7 @@ int l_getIntPtrPktSize(int * p){
  *
  * @return total size in bytes
  */
-int l_getSize_regFuncArgs(void** fatCubinHandle, const char* hostFun,
+int getSize_regFuncArgs(void** fatCubinHandle, const char* hostFun,
         char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
         uint3* bid, dim3* bDim, dim3* gDim, int* wSize){
 
@@ -1647,7 +1647,7 @@ int l_getSize_regFuncArgs(void** fatCubinHandle, const char* hostFun,
  *
  * @return total size of bytes required to create a packet from all those arguments
  */
-int l_getSize_regVar(void **fatCubinHandle, char *hostVar, char *deviceAddress,
+int getSize_regVar(void **fatCubinHandle, char *hostVar, char *deviceAddress,
 		const char *deviceName, int ext, int vsize,int constant, int global){
 	int size = 0;
 
@@ -1914,31 +1914,19 @@ int * l_unpackIntPtr(const char *pSrc, int * pOffset){
  * Allocates memory to hold the all this packed stuff and packs the stuff
  * to that memory.
  *
+ * @param dst destination memory location to write the serialized arguments
  * @param all parameters are taken from ____cudaRegisterFunction
- * @param pSize (out) returns the size of the packet pointed by pPack
  *
- * @return pPack the pointer to the packed arguments
- *         NULL if some memory allocation problems or copying files
+ * @return 0 OKAY, <0 NOT OKAY
  */
-char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
+int packRegFuncArgs(void *dst, void** fatCubinHandle, const char* hostFun,
         char* deviceFun, const char* deviceName, int thread_limit,
-        uint3* tid, uint3* bid, dim3* bDim, dim3* gDim, int* wSize,
-	int *pSize){
+        uint3* tid, uint3* bid, dim3* bDim, dim3* gDim, int* wSize) {
 	// where we are
 	int offset=0;
-	char * pPack; // for the contiguous space with packed arguments up
-	char * pPackStart; // the beginning
+	char * pPack = dst; // for the contiguous space with packed arguments up
 
-	*pSize = l_getSize_regFuncArgs(fatCubinHandle, hostFun,
-	         deviceFun,  deviceName, thread_limit,  tid,
-	         bid, bDim,  gDim,  wSize);
-
-	pPack = malloc(*pSize);
-	if( mallocCheck(pPack, __FUNCTION__, NULL) == ERROR )
-		return NULL;
-
-	// remember the beginning of the packet
-	pPackStart = pPack;
+	if (!dst) return -1;
 
 	void *** p = (void ***) pPack;
 	p[0] = fatCubinHandle;
@@ -1946,7 +1934,7 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
 
 
 	offset = l_packStr(pPack, hostFun);
-	if( ERROR == offset ) return NULL; else pPack += offset;
+	if( ERROR == offset ) return -1; else pPack += offset;
 
 	// pack the value of the pointer
 	const char ** c = (const char**) pPack;
@@ -1954,31 +1942,31 @@ char * packRegFuncArgs( void** fatCubinHandle, const char* hostFun,
 	pPack += sizeof(char*);
 
 	offset = l_packStr(pPack, deviceFun);
-	if( ERROR == offset ) return NULL; else pPack += offset;
+	if( ERROR == offset ) return -1; else pPack += offset;
 
 	offset = l_packStr(pPack, deviceName);
-	if( ERROR == offset ) return NULL; else pPack += offset;
+	if( ERROR == offset ) return -1; else pPack += offset;
 
 	int * pInt = (int*) pPack;
 	pInt[0] = thread_limit;
 	pPack += sizeof(int);
 
 	offset = l_packUint3Ptr(pPack, tid);
-	if( ERROR == offset ) return NULL; else pPack += offset;
+	if( ERROR == offset ) return -1; else pPack += offset;
 
 	offset = l_packUint3Ptr(pPack, bid);
-	if( ERROR == offset ) return NULL; else pPack += offset;
+	if( ERROR == offset ) return -1; else pPack += offset;
 
 	offset = l_packDim3Ptr(pPack, bDim);
-	if( ERROR == offset ) return NULL; else pPack += offset;
+	if( ERROR == offset ) return -1; else pPack += offset;
 
 	offset = l_packDim3Ptr(pPack, gDim);
-	if( ERROR == offset ) return NULL; else pPack += offset;
+	if( ERROR == offset ) return -1; else pPack += offset;
 
 	offset = l_packIntPtr(pPack, wSize);
-	if( ERROR == offset ) return NULL; else pPack += offset;
+	if( ERROR == offset ) return -1; else pPack += offset;
 
-	return pPackStart;
+	return 0;
 }
 
 /**
@@ -2038,24 +2026,14 @@ int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
 	return OK;
 }
 
-char * packRegVar( void **fatCubinHandle, char *hostVar,
-		char *deviceAddress, const char *deviceName, int ext, int vsize,
-		int constant, int global, int * pSize ){
+int packRegVar(void * const dst, void **fatCubinHandle, char *hostVar, char
+		*deviceAddress, const char *deviceName, int ext, int vsize, int
+		constant, int global){
 	// where we are
 	int offset = 0;
-	char * pPack; // for the contiguous space with packed arguments up
-	char * pPackStart; // the beginning
+	char * pPack = dst; // for the contiguous space with packed arguments up
 
-	*pSize = l_getSize_regVar(fatCubinHandle, hostVar, deviceAddress,
-			deviceName, ext, vsize, constant, global);
-
-	pPack = malloc(*pSize);
-
-	if (mallocCheck(pPack, __FUNCTION__, NULL) == ERROR)
-		return NULL;
-
-	// remember the beginning of the packet
-	pPackStart = pPack;
+	if (!dst) return -1;
 
 	void *** p = (void ***) pPack;
 	p[0] = fatCubinHandle;
@@ -2074,10 +2052,10 @@ char * packRegVar( void **fatCubinHandle, char *hostVar,
 	// This variable actually is just the address of deviceName variable. But
 	// the adjustment is done in Dom0
 	offset = l_packStr(pPack, deviceAddress);
-	if( ERROR == offset ) return NULL; else pPack += offset;
+	if( ERROR == offset ) return -1; else pPack += offset;
 
 	offset = l_packStr(pPack, deviceName);
-	if( ERROR == offset ) return NULL; else pPack += offset;
+	if( ERROR == offset ) return -1; else pPack += offset;
 
 	int * pInt = (int*) pPack;
 	pInt[0] = ext;
@@ -2092,7 +2070,7 @@ char * packRegVar( void **fatCubinHandle, char *hostVar,
 	pInt[3] = global;
 	pPack += sizeof(int);
 
-	return pPackStart;
+	return 0;
 }
 
 int unpackRegVar(reg_var_args_t * pRegVar, char *pPacket){

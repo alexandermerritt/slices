@@ -122,15 +122,14 @@ struct backend_reg {
 //static cudaError_t cudaErrorDL = cudaErrorUnknown;
 
 //! State machine for cudaGetLastError()
-//static cudaError_t cuda_err = 0;
+static cudaError_t cuda_err = cudaSuccess;
 
 static struct backend_reg be_reg;
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
-//! This appears in some values of arguments. I took this from
-//! /opt/cuda/include/cuda_runtime_api.h ! It looks as this comes from a default
-//! value (dv)
+//! This appears in some values of arguments. I took this from /opt/cuda/include/cuda_runtime_api.h
+//! It looks as this comes from a default value (dv)
 #if !defined(__dv)
 #	if defined(__cplusplus)
 #		define __dv(v) \
@@ -243,11 +242,11 @@ cudaError_t cudaGetDeviceCount(int *count) {
 	shmpkt->flags = CUDA_PKT_REQUEST; // set this last FIXME sink spins on this
 
 	wmb(); // flush writes from caches
-
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
 	*count = *((int *)((void *)shmpkt + shmpkt->args[0].argull));
+	printd(DBG_DEBUG, "%d\n", *count);
 	return shmpkt->ret_ex_val.err;
 }
 
@@ -255,6 +254,8 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
 	struct cudaDeviceProp *prop_shm = NULL;
 	PRINT_FUNC;
+
+	printd(DBG_DEBUG, "dev=%d\n", device);
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_GET_DEVICE_PROPERTIES;
@@ -264,7 +265,6 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
-
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
@@ -277,14 +277,17 @@ cudaError_t cudaSetDevice(int device) {
 	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
 	PRINT_FUNC;
 
+	printd(DBG_DEBUG, "device=%d\n", device);
+
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_SET_DEVICE;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argll = device;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
+	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		;
+		rmb();
 
 	return shmpkt->ret_ex_val.err;
 }
@@ -293,35 +296,138 @@ cudaError_t cudaGetDevice(int *device) {
 	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
 	PRINT_FUNC;
 
+	printd(DBG_DEBUG, "thread=%lu\n", pthread_self());
+
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_GET_DEVICE;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argull = sizeof(struct cuda_packet);
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
+	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		;
+		rmb();
 
-	*device = *((int *)shmpkt->args[0].argull);
+	*device = *((int*)((void*)shmpkt + shmpkt->args[0].argull));
 	return shmpkt->ret_ex_val.err;
 }
 
-#if 0
 cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
-	return lcudaConfigureCall(gridDim, blockDim, sharedMem, stream);
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	PRINT_FUNC;
+
+	printd(DBG_DEBUG, "grid={%d,%d,%d} block={%d,%d,%d} shmem=%lu strm=%p\n",
+			gridDim.x, gridDim.y, gridDim.z,
+			blockDim.x, blockDim.y, blockDim.z,
+			sharedMem, stream);
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_CONFIGURE_CALL;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].arg_dim = gridDim; // = on structs works :)
+	shmpkt->args[1].arg_dim = blockDim;
+	shmpkt->args[2].arr_argi[0] = sharedMem;
+	// NOTE: cudaStream_t is some shitty typedef'd pointer to an undefined
+	// struct somewhere, so I can't memcpy it to the shared memory region
+	// 		cuda v2.3 cudaStream_t: integer
+	// 		cuda v3.2 cudaStream_t: pointer
+	shmpkt->args[3].argull = (uint64_t)stream;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	printd(DBG_DEBUG, "ret err = %d\n", shmpkt->ret_ex_val.err);
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaLaunch(const char *entry) {
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	void *shm_ptr;
+	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_LAUNCH;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(struct cuda_packet);
+	shm_ptr = ((void*)shmpkt + shmpkt->args[0].argull);
+	memcpy(shm_ptr, entry, strlen(entry));
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaDriverGetVersion(int *driverVersion) {
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_DRIVER_GET_VERSION;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(struct cuda_packet);
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*driverVersion = *((int*)((void*)shmpkt + shmpkt->args[0].argull));
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaRuntimeGetVersion(int *runtimeVersion) {
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_RUNTIME_GET_VERSION;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(struct cuda_packet);
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*runtimeVersion = *((int*)((void*)shmpkt + shmpkt->args[0].argull));
+	return shmpkt->ret_ex_val.err;
 }
 
 cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset) {
-	return lcudaSetupArgument(arg, size, offset);
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	void *shm_ptr;
+	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_SETUP_ARGUMENT;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(struct cuda_packet);
+	shm_ptr = ((void*)shmpkt + shmpkt->args[0].argull);
+	memcpy(shm_ptr, arg, size);
+	shmpkt->args[1].arr_argi[0] = size;
+	shmpkt->args[1].arr_argi[1] = offset;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	printd(DBG_DEBUG, "arg=%p size=%lu offset=%lu\n",
+			arg, size, offset);
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
 }
 
 
-cudaError_t cudaLaunch(const char *entry) {
-	return lcudaLaunch(entry);
-}
 
-
+#if 0
 cudaError_t cudaChooseDevice(int *device, const struct cudaDeviceProp *prop) {
 	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
 
@@ -337,15 +443,41 @@ cudaError_t cudaChooseDevice(int *device, const struct cudaDeviceProp *prop) {
 
 	return shmpkt->ret_ex_val.err;
 }
+#endif
 
 cudaError_t cudaThreadExit(void) {
-	dlsym(RTLD_NEXT, __func__);
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_THREAD_EXIT;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
 }
 
 cudaError_t cudaThreadSynchronize(void) {
-	return lcudaThreadSynchronize();
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_THREAD_SYNCHRONIZE;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
 }
 
+#if 0
 cudaError_t cudaThreadSetLimit(enum cudaLimit limit, size_t value) {
 	typedef cudaError_t (* pFuncType)(enum cudaLimit limit, size_t value);
 	static pFuncType pFunc = NULL;
@@ -408,12 +540,14 @@ cudaError_t cudaThreadSetCacheConfig(enum cudaFuncCache cacheConfig) {
 
 	return (pFunc(cacheConfig));
 }
+#endif
 
 cudaError_t cudaGetLastError(void) {
-	return lcudaGetLastError();
+	return cuda_err; // ??
 }
 
 
+#if 0
 cudaError_t cudaPeekAtLastError(void) {
 	typedef cudaError_t (* pFuncType)(void);
 	static pFuncType pFunc = NULL;
@@ -429,22 +563,23 @@ cudaError_t cudaPeekAtLastError(void) {
 
 	return (pFunc());
 }
+#endif
+
 const char* cudaGetErrorString(cudaError_t error) {
-	typedef const char* (* pFuncType)(cudaError_t error);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetErrorString");
-
-		if (l_handleDlError() != 0)
-			return "DL error";
+	// Doesn't need to be forwarded anywhere. Call the function in the NVIDIA
+	// runtime (FIXME an assumption we maybe shouldn't make?)
+	const char *dl_err_str;
+	typedef const char * (*func)(cudaError_t err);
+	func f = (func)dlsym(RTLD_NEXT, "cudaGetErrorString");
+	dl_err_str = dlerror();
+	if (dl_err_str) {
+		fprintf(stderr, "Error: No NVIDIA runtime exists: %s\n", dl_err_str);
+		return NULL;
 	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(error));
+	return f(error);
 }
 
+#if 0
 cudaError_t cudaSetValidDevices(int *device_arr, int len) {
 	typedef cudaError_t (* pFuncType)(int *device_arr, int len);
 	static pFuncType pFunc = NULL;
@@ -728,11 +863,30 @@ cudaError_t cudaSetDoubleForHost(double *d) {
 
 	return (pFunc(d));
 }
+#endif
 
 cudaError_t cudaMalloc(void **devPtr, size_t size) {
-	return lcudaMalloc(devPtr, size);
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_MALLOC;
+	shmpkt->thr_id = pthread_self();
+	// We expect the sink to write the value of devPtr to args[0].argull
+	shmpkt->args[1].arr_argi[0] = size;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*devPtr = (void*)shmpkt->args[0].argull;
+	printd(DBG_DEBUG, "devPtr=%p\n", *devPtr);
+
+	return shmpkt->ret_ex_val.err;
 }
 
+#if 0
 cudaError_t cudaMallocHost(void **ptr, size_t size) {
 	typedef cudaError_t (* pFuncType)(void **ptr, size_t size);
 	static pFuncType pFunc = NULL;
@@ -783,12 +937,29 @@ cudaError_t cudaMallocArray(struct cudaArray **array,
 
 	return (pFunc(array, desc, width, height, flags));
 }
+#endif
 
 cudaError_t cudaFree(void * devPtr) {
-	return lcudaFree(devPtr);
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_FREE;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argp = devPtr;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	printd(DBG_DEBUG, "devPtr=%p\n", devPtr);
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
 }
 
 
+#if 0
 cudaError_t cudaFreeHost(void * ptr) {
 	typedef cudaError_t (* pFuncType)(void *);
 	static pFuncType pFunc = NULL;
@@ -920,6 +1091,7 @@ cudaError_t cudaMemcpy3D(const struct cudaMemcpy3DParms *p) {
 
 	return (pFunc(p));
 }
+
 cudaError_t cudaMemcpy3DAsync(const struct cudaMemcpy3DParms *p,
 		cudaStream_t stream __dv(0)) {
 	typedef cudaError_t (* pFuncType)(const struct cudaMemcpy3DParms *p,
@@ -951,13 +1123,73 @@ cudaError_t cudaMemGetInfo(size_t *free, size_t *total) {
 
 	return (pFunc(free, total));
 }
+#endif
 
 cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 		enum cudaMemcpyKind kind) {
-	return lcudaMemcpy(dst, (const void *) src, count, kind);
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	void *shm_ptr;
+	PRINT_FUNC;
+
+	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d\n",
+			dst, src, count, kind);
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->thr_id = pthread_self();
+	switch (kind) {
+		case cudaMemcpyHostToHost:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_H2H; // why would you call this?
+			memcpy(dst, src, count); // right?!
+		}
+		break;
+		case cudaMemcpyHostToDevice:
+		{
+			// Need to push data DOWN to the gpu
+			shmpkt->method_id = CUDA_MEMCPY_H2D;
+			shmpkt->args[0].argull = (unsigned long long)dst; // gpu ptr
+			shmpkt->args[1].argull = sizeof(struct cuda_packet);
+			shm_ptr = ((void*)shmpkt + shmpkt->args[1].argull);
+			memcpy(shm_ptr, src, count);
+		}
+		break;
+		case cudaMemcpyDeviceToHost:
+		{
+			// Need to pull data UP from the gpu
+			shmpkt->method_id = CUDA_MEMCPY_D2H;
+			shmpkt->args[0].argull = sizeof(struct cuda_packet);
+			// We will expect to read 'count' bytes at this ^ offset into dst
+			shmpkt->args[1].argull = (unsigned long long)src; // gpu ptr
+		}
+		break;
+		case cudaMemcpyDeviceToDevice:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_D2D;
+			shmpkt->args[0].argull = (unsigned long long)dst; // gpu ptr
+			shmpkt->args[1].argull = (unsigned long long)src; // gpu ptr
+		}
+		break;
+	}
+	shmpkt->args[2].arr_argi[0] = count;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d\n",
+			dst, src, count, kind);
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	// copy data to user-space region
+	if (shmpkt->method_id == CUDA_MEMCPY_D2H) {
+		shm_ptr = ((void*)shmpkt + shmpkt->args[0].argull);
+		memcpy(dst, shm_ptr, count);
+	}
+
+	return shmpkt->ret_ex_val.err;
 }
 
-
+#if 0
 cudaError_t cudaMemcpyToArray(struct cudaArray *dst, size_t wOffset,
 		size_t hOffset, const void *src, size_t count, enum cudaMemcpyKind kind) {
 	typedef cudaError_t (* pFuncType)(struct cudaArray *dst, size_t wOffset,
@@ -1094,26 +1326,69 @@ cudaError_t cudaMemcpy2DArrayToArray(struct cudaArray *dst,
 	return (pFunc(dst, wOffsetDst, hOffsetDst, src, wOffsetSrc, hOffsetSrc,
 			width, height, kind));
 }
+#endif
 
 cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 		__dv(cudaMemcpyHostToDevice)) {
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	void *shm_ptr;
+	PRINT_FUNC;
 
-	p_debug("symbol = %p, src = %p, count = %ld, offset = %ld, kind = %u\n",
-			symbol, src, count, offset, kind);
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL;
+	shmpkt->thr_id = pthread_self();
+	// FIXME We assume symbols are ptr values, not strings.
+	// CUDA API states it may be either.
+	shmpkt->args[0].argcp = (char *)symbol;
+	shmpkt->args[1].argull = sizeof(struct cuda_packet);
+	shm_ptr = (shmpkt + shmpkt->args[1].argull);
+	memcpy(shm_ptr, src, count);
+	shmpkt->args[2].arr_argi[0] = count;
+	shmpkt->args[2].arr_argi[1] = offset;
+	shmpkt->args[3].argll = kind;
+	shmpkt->flags = CUDA_PKT_REQUEST;
 
-	return lcudaMemcpyToSymbol(symbol, src, count, offset, kind);
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
 }
 
 cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 		__dv(cudaMemcpyDeviceToHost)) {
-	p_debug("dst = %p, symbol = %p (str %s), count = %ld, offset = %ld, kind = %d\n",
-			dst, symbol, symbol, count, offset, kind);
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	void *shm_ptr;
+	PRINT_FUNC;
 
-	return lcudaMemcpyFromSymbol(dst, symbol, count, offset, kind);
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_MEMCPY_FROM_SYMBOL;
+	shmpkt->thr_id = pthread_self();
+	// 'dst' is an output parameter, indicate offset we'll copy from
+	shmpkt->args[0].argull = sizeof(struct cuda_packet);
+	shm_ptr = ((void*)shmpkt + shmpkt->args[0].argull);
+	// FIXME We assume symbols are ptr values, not strings.
+	// CUDA API states it may be either.
+	shmpkt->args[1].argcp = (char *)symbol;
+	shmpkt->args[2].arr_argi[0] = count;
+	shmpkt->args[2].arr_argi[1] = offset;
+	shmpkt->args[3].argll = kind;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	// copy data to dst
+	shm_ptr = (shmpkt + shmpkt->args[0].argull);
+	memcpy(dst, shm_ptr, count);
+
+	return shmpkt->ret_ex_val.err;
 }
 
+#if 0
 // -----------------------------------
 cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 		enum cudaMemcpyKind kind, cudaStream_t stream __dv(0)) {
@@ -1722,38 +1997,6 @@ cudaError_t cudaGetSurfaceReference(
 }
 
 // --------------------------
-cudaError_t cudaDriverGetVersion(int *driverVersion) {
-	typedef cudaError_t (* pFuncType)(int *driverVersion);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaDriverGetVersion");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(driverVersion));
-
-}
-cudaError_t cudaRuntimeGetVersion(int *runtimeVersion) {
-	typedef cudaError_t (* pFuncType)(int *runtimeVersion);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaRuntimeGetVersion");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(runtimeVersion));
-}
-
 // --------------------------
 cudaError_t cudaGetExportTable(const void **ppExportTable,
 		const cudaUUID_t *pExportTableId) {
@@ -1801,101 +2044,109 @@ static void printFatBinary(void *fatC) {
 		printf("\tptx=%p\n", fatbin->ptx);
 	}
 }
+#endif
 
 void** __cudaRegisterFatBinary(void* cubin) {
-	int err;
+	int err, cubin_size;
 	volatile struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	void *cubin_shm; // pointer to serialized copy of argument
+	cache_num_entries_t entries_in_cubin;
+
 	PRINT_FUNC;
 
 	if (NEED_REGISTRATION) {
 		err = registerWithBackend();
 		if (err < 0) {
 			fprintf(stderr, "Error registering with backend\n");
-			return -1;
+			return NULL;
 		}
 		shmpkt = (struct cuda_packet *)be_reg.shm[0];
 	}
 
-	//printFatBinary(fatC);
-
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset((void*)shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = __CUDA_REGISTER_FAT_BINARY;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argull = sizeof(struct cuda_packet); // offset
+
+	// Serialize the complex cubin structure into the shared memory region,
+	// immediately after the location of the cuda packet.
+	cubin_shm = ((void*)shmpkt + shmpkt->args[0].argull);
+	memset(&entries_in_cubin, 0, sizeof(entries_in_cubin));
+	cubin_size = getFatRecPktSize(cubin, &entries_in_cubin);
+	printd(DBG_DEBUG, "size of cubin: %d bytes\n", cubin_size);
+	err = packFatBinary((char *)cubin_shm, cubin, &entries_in_cubin);
+	if (err < 0) {
+		printd(DBG_ERROR, "error calling packFatBinary\n");
+		return NULL;
+	}
+
+	shmpkt->args[1].argll = cubin_size;
 	shmpkt->flags = CUDA_PKT_REQUEST; // set this last FIXME sink spins on this
 
 	wmb(); // flush writes from caches
-
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
-	*count = *((int *)((void *)shmpkt + shmpkt->args[0].argull));
-	return shmpkt->ret_ex_val.err;
-
-fail:
-	return NULL;
+	return (void**)(shmpkt->ret_ex_val.handle);
 }
-#endif
 
 void __cudaUnregisterFatBinary(void** fatCubinHandle) {
 	int err;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
 	PRINT_FUNC;
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = __CUDA_UNREGISTER_FAT_BINARY;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argdp = fatCubinHandle;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
 	if (NEED_UNREGISTRATION) {
 		err = unregisterWithBackend();
 		if (err < 0)
 			fprintf(stderr, "Error unregistering with backend\n");
 	}
-}
 
-#if 0
-void l__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
-		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
-		uint3* bid, dim3* bDim, dim3* gDim, int* wSize) {
-	typedef void** (* pFuncType)(void** fatCubinHandle, const char* hostFun,
-			char* deviceFun, const char* deviceName, int thread_limit,
-			uint3* tid, uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
-
-	static pFuncType pFunc = NULL;
-
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "__cudaRegisterFunction");
-
-		if (l_handleDlError() != 0)
-			exit(-1);
-	}
-
-	(pFunc(fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit, tid,
-			bid, bDim, gDim, wSize));
+	return;
 }
 
 void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize) {
-	l__cudaRegisterFunction(fatCubinHandle, hostFun, deviceFun,
-			deviceName, thread_limit, tid, bid,  bDim,  gDim, wSize);
-}
+	int err;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	void *var = NULL;
+	size_t var_size = 0;
+	PRINT_FUNC;
 
-void l__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
-		char *deviceAddress, const char *deviceName, int ext, int vsize,
-		int constant, int global) {
-	typedef void** (* pFuncType)(void **fatCubinHandle, char *hostVar,
-			char *deviceAddress, const char *deviceName, int ext, int vsize,
-			int constant, int global);
-	static pFuncType pFunc = NULL;
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = __CUDA_REGISTER_FUNCTION;
+	shmpkt->thr_id = pthread_self();
 
-	l_printFuncSigImpl(__FUNCTION__);
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "__cudaRegisterVar");
-
-		if (l_handleDlError() != 0)
-			exit(-1);
+	shmpkt->args[0].argull = sizeof(struct cuda_packet);
+	var_size = getSize_regFuncArgs(fatCubinHandle, hostFun, deviceFun,
+			deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
+	printd(DBG_DEBUG, "size of serialized args: %lu bytes\n", var_size);
+	// now pack it into the shm
+	var = ((void*)shmpkt + shmpkt->args[0].argull);
+	err = packRegFuncArgs(var, fatCubinHandle, hostFun, deviceFun,
+			deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
+	if (err < 0) {
+		printd(DBG_ERROR, "Error packing arguments\n");
+		assert(0); // FIXME Is there a better strategy to failing?
 	}
 
-	(pFunc(fatCubinHandle, hostVar, deviceAddress, deviceName, ext, vsize,
-			constant, global));
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return;
 }
 
 /**
@@ -1908,13 +2159,39 @@ void l__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global) {
-	l_printRegVar(fatCubinHandle, hostVar, deviceAddress, deviceName, ext,
-			vsize, constant, global);
+	int err;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	void *var = NULL;
+	size_t var_size = 0;
+	PRINT_FUNC;
 
-	l__cudaRegisterVar(fatCubinHandle, hostVar,
-			deviceAddress, deviceName, ext, vsize, constant, global);
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = __CUDA_REGISTER_VARIABLE;
+	shmpkt->thr_id = pthread_self();
+
+	shmpkt->args[0].argull = sizeof(struct cuda_packet);
+	var_size = getSize_regVar(fatCubinHandle, hostVar, deviceAddress,
+			deviceName, ext, vsize, constant, global); // how big var is
+	printd(DBG_DEBUG, "size of serialized args: %lu bytes\n", var_size);
+	// now pack it into the shm
+	var = ((void*)shmpkt + shmpkt->args[0].argull);
+	err = packRegVar(var, fatCubinHandle, hostVar, deviceAddress, deviceName,
+			ext, vsize, constant, global);
+	if (err < 0) {
+		printd(DBG_ERROR, "Error packing arguments\n");
+		assert(0); // FIXME Is there a better strategy to failing?
+	}
+
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return;
 }
 
+#if 0
 void __cudaRegisterTexture(void** fatCubinHandle,
 		const struct textureReference* hostVar, const void** deviceAddress,
 		const char* deviceName, int dim, int norm, int ext) {
