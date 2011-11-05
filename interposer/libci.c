@@ -83,6 +83,10 @@
 
 #include "config.h"
 
+/* preprocess out debug statements */
+//#undef printd
+//#define printd(level, fmt, args...)
+
 /*-------------------------------------- EXTERNS -----------------------------*/
 
 // from kidron_common_f.c
@@ -110,7 +114,8 @@ struct backend_reg {
 #define NEED_REGISTRATION	(unlikely(be_reg.has_registered == FALSE))
 #define NEED_UNREGISTRATION	(be_reg.has_registered == TRUE)
 
-#define PRINT_FUNC	printf("CAUGHT %s\n", __func__)
+//#define PRINT_FUNC	printf("CAUGHT %s\n", __func__)
+#define PRINT_FUNC	/* preprocess it out */
 
 /*-------------------------------------- INTENRAL STATE ----------------------*/
 
@@ -345,15 +350,14 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 
 cudaError_t cudaLaunch(const char *entry) {
 	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	void *shm_ptr;
 	PRINT_FUNC;
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_LAUNCH;
 	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(struct cuda_packet);
-	shm_ptr = ((void*)shmpkt + shmpkt->args[0].argull);
-	memcpy(shm_ptr, entry, strlen(entry));
+	// FIXME We assume entry is just a memory pointer, not a string.
+	shmpkt->args[0].argull = (unsigned long long)entry;
+	printd(DBG_DEBUG, "entry=%p\n", (void*)shmpkt->args[0].argull);
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1169,6 +1173,8 @@ cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 			shmpkt->args[1].argull = (unsigned long long)src; // gpu ptr
 		}
 		break;
+		default:
+			return cudaErrorInvalidMemcpyDirection;
 	}
 	shmpkt->args[2].arr_argi[0] = count;
 	shmpkt->flags = CUDA_PKT_REQUEST;
@@ -1335,15 +1341,33 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
 	void *shm_ptr;
 	PRINT_FUNC;
 
+	printd(DBG_DEBUG, "symb %p\n", symbol);
+
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
-	shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL;
 	shmpkt->thr_id = pthread_self();
-	// FIXME We assume symbols are ptr values, not strings.
-	// CUDA API states it may be either.
-	shmpkt->args[0].argcp = (char *)symbol;
-	shmpkt->args[1].argull = sizeof(struct cuda_packet);
-	shm_ptr = (shmpkt + shmpkt->args[1].argull);
-	memcpy(shm_ptr, src, count);
+	shmpkt->args[0].argcp = (char*)symbol;
+	switch (kind) {
+		case cudaMemcpyHostToDevice:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_H2D;
+			// FIXME We assume symbols are ptr values, not strings.
+			// CUDA API states it may be either.
+			shmpkt->args[1].argull = sizeof(struct cuda_packet);
+			shm_ptr = ((void*)shmpkt + shmpkt->args[1].argull);
+			memcpy(shm_ptr, src, count);
+		}
+		break;
+		case cudaMemcpyDeviceToDevice:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_D2D;
+			// FIXME We assume symbols are ptr values, not strings.
+			// CUDA API states it may be either.
+			shmpkt->args[1].argull = (unsigned long long)src;
+		}
+		break;
+		default:
+			return cudaErrorInvalidMemcpyDirection;
+	}
 	shmpkt->args[2].arr_argi[0] = count;
 	shmpkt->args[2].arr_argi[1] = offset;
 	shmpkt->args[3].argll = kind;
@@ -1363,15 +1387,27 @@ cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 	void *shm_ptr;
 	PRINT_FUNC;
 
+	printd(DBG_DEBUG, "symb %p\n", symbol);
+
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
-	shmpkt->method_id = CUDA_MEMCPY_FROM_SYMBOL;
 	shmpkt->thr_id = pthread_self();
-	// 'dst' is an output parameter, indicate offset we'll copy from
-	shmpkt->args[0].argull = sizeof(struct cuda_packet);
-	shm_ptr = ((void*)shmpkt + shmpkt->args[0].argull);
-	// FIXME We assume symbols are ptr values, not strings.
-	// CUDA API states it may be either.
-	shmpkt->args[1].argcp = (char *)symbol;
+	switch (kind) {
+		case cudaMemcpyDeviceToHost:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_FROM_SYMBOL_D2H;
+			shmpkt->args[0].argull = sizeof(struct cuda_packet);
+		}
+		break;
+		case cudaMemcpyDeviceToDevice:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_FROM_SYMBOL_D2D;
+			shmpkt->args[0].argull = (unsigned long long)dst;
+		}
+		break;
+		default:
+			return cudaErrorInvalidMemcpyDirection;
+	}
+	shmpkt->args[1].argcp = (char*)symbol;
 	shmpkt->args[2].arr_argi[0] = count;
 	shmpkt->args[2].arr_argi[1] = offset;
 	shmpkt->args[3].argll = kind;
@@ -1381,9 +1417,10 @@ cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
-	// copy data to dst
-	shm_ptr = (shmpkt + shmpkt->args[0].argull);
-	memcpy(dst, shm_ptr, count);
+	if (kind == cudaMemcpyDeviceToHost) {
+		shm_ptr = ((void*)shmpkt + shmpkt->args[0].argull);
+		memcpy(dst, shm_ptr, count);
+	}
 
 	return shmpkt->ret_ex_val.err;
 }
@@ -2087,6 +2124,7 @@ void** __cudaRegisterFatBinary(void* cubin) {
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
+	printd(DBG_DEBUG, "handle=%p\n", shmpkt->ret_ex_val.handle);
 	return (void**)(shmpkt->ret_ex_val.handle);
 }
 
@@ -2120,7 +2158,6 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	int err;
 	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
 	void *var = NULL;
-	size_t var_size = 0;
 	PRINT_FUNC;
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
@@ -2128,9 +2165,6 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	shmpkt->thr_id = pthread_self();
 
 	shmpkt->args[0].argull = sizeof(struct cuda_packet);
-	var_size = getSize_regFuncArgs(fatCubinHandle, hostFun, deviceFun,
-			deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
-	printd(DBG_DEBUG, "size of serialized args: %lu bytes\n", var_size);
 	// now pack it into the shm
 	var = ((void*)shmpkt + shmpkt->args[0].argull);
 	err = packRegFuncArgs(var, fatCubinHandle, hostFun, deviceFun,
@@ -2162,17 +2196,15 @@ void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 	int err;
 	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
 	void *var = NULL;
-	size_t var_size = 0;
 	PRINT_FUNC;
+
+	printd(DBG_DEBUG, "symbol=%p\n", hostVar);
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = __CUDA_REGISTER_VARIABLE;
 	shmpkt->thr_id = pthread_self();
 
 	shmpkt->args[0].argull = sizeof(struct cuda_packet);
-	var_size = getSize_regVar(fatCubinHandle, hostVar, deviceAddress,
-			deviceName, ext, vsize, constant, global); // how big var is
-	printd(DBG_DEBUG, "size of serialized args: %lu bytes\n", var_size);
 	// now pack it into the shm
 	var = ((void*)shmpkt + shmpkt->args[0].argull);
 	err = packRegVar(var, fatCubinHandle, hostVar, deviceAddress, deviceName,

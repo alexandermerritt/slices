@@ -143,8 +143,9 @@ static struct assembly* find_assembly(asmid_t id)
 	list_for_each_entry(assm, &internals->assembly_list, list)
 		if (assm->id == id)
 			break;
-	if (unlikely(!assm || assm->id != id))
+	if (unlikely(!assm || assm->id != id)) {
 		printd(DBG_ERROR, "unknown assembly id %lu\n", id);
+	}
 	return assm;
 }
 
@@ -483,9 +484,10 @@ static int node_main_shutdown(void)
 		list_for_each_entry_safe(asm_pos, asm_tmp,
 				&internals->assembly_list, list) {
 			err = assembly_teardown(asm_pos->id);
-			if (err < 0)
+			if (err < 0) {
 				printd(DBG_ERROR, "could not teardown assembly %lu\n",
 						asm_pos->id);
+			}
 			list_del(&asm_pos->list);
 			free(asm_pos);
 		}
@@ -594,8 +596,9 @@ int assembly_num_vgpus(asmid_t id)
 	// assemblies, we could check that first, but given the data sent (asmid and
 	// int for size) is small, all that work may not be necessary.
 	err = pthread_mutex_lock(&internals->lock);
-	if (err < 0)
+	if (err < 0) {
 		printd(DBG_ERROR, "Could not lock internals\n");
+	}
 	list_for_each_entry(assm, &internals->assembly_list, list) {
 		if (assm->id == id) {
 			num_gpus = assm->num_gpus;
@@ -603,9 +606,9 @@ int assembly_num_vgpus(asmid_t id)
 		}
 	}
 	err = pthread_mutex_unlock(&internals->lock);
-	if (err < 0)
+	if (err < 0) {
 		printd(DBG_ERROR, "Could not unlock internals\n");
-
+	}
 	return num_gpus;
 
 fail:
@@ -665,21 +668,24 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 	// doesn't involve main node
 	// data paths should already be configured and set up
 	err = pthread_mutex_lock(&internals->lock);
-	if (err < 0)
+	if (err < 0) {
 		printd(DBG_ERROR, "Could not lock internals\n");
+	}
 	// search assembly list for the id, search for indicated vgpu, then RPC CUDA
 	// packet to it.
 	assm = find_assembly(id);
 	if (unlikely(!assm)) {
 		printd(DBG_ERROR, "could not locate assembly %lu\n", id);
 		err = pthread_mutex_unlock(&internals->lock);
-		if (err < 0)
+		if (err < 0) {
 			printd(DBG_ERROR, "Could not unlock internals\n");
+		}
 		goto fail;
 	}
 	err = pthread_mutex_unlock(&internals->lock);
-	if (err < 0)
+	if (err < 0) {
 		printd(DBG_ERROR, "Could not unlock internals\n");
+	}
 	// Execute calls. Some return data specific to the assembly, others can go
 	// directly to NVIDIA's runtime.
 	switch (pkt->method_id) {
@@ -793,8 +799,9 @@ asmid_t assembly_request(const struct assembly_cap_hint *hint)
 		goto fail;
 	}
 	err = pthread_mutex_lock(&internals->lock);
-	if (err < 0)
+	if (err < 0) {
 		printd(DBG_ERROR, "Could not lock internals\n");
+	}
 	assm = compose_assembly(hint);
 	if (!assm) {
 		printd(DBG_ERROR, "Could not compose assembly\n");
@@ -803,8 +810,9 @@ asmid_t assembly_request(const struct assembly_cap_hint *hint)
 	}
 	list_add(&assm->list, &internals->assembly_list);
 	err = pthread_mutex_unlock(&internals->lock);
-	if (err < 0)
+	if (err < 0) {
 		printd(DBG_ERROR, "Could not unlock internals\n");
+	}
 	return assm->id;
 
 fail:

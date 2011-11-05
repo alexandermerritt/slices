@@ -30,10 +30,16 @@ Items
 
 [ ]		support multiple fat cubin binaries
 [ ]		all hidden register calls need to be duplicated for across nodes in assm
+[ ]		registered variables (the symbols) are assumed at the moment to be
+		memory addresses; the runtime says they may also be strings: remove this
+		assumption
+			libci.c : cudaMemcpy[To|From]Symbol
+			localsink.c : nv_exec_pkt
 
 [L]		assembly interface
 [ ]			assembly RPC (ability for node to be included in runtime)
 [ ]			add monitoring data to assembly composition
+[ ]			support notion of group membership for MPI codes
 
 [ ]		networking interface
 

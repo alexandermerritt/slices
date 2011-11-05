@@ -4,6 +4,11 @@
  *
  * @date Feb 23, 2011
  * @author Magda Slawinska, magg@gatech.edu
+ *
+ * @date 2011-11-04
+ * @author Alex Merritt, merritt.alex@gatech.edu
+ * Updated registration structures (tex, var, func) to contain list variables
+ * for linking together.
  */
 
 #ifndef PACKETHEADER_H_
@@ -16,17 +21,14 @@ typedef long int64_t;
 typedef unsigned long uint64_t;
 typedef uint32_t grant_ref_t;
 
-// if including from driver, manually define. but ***make sure*** it
-// remains consistent with nvidia definition
-// Assuming enum is defined as int everywhere
-//typedef int cudaError_t;
-
 // include this file when not compiling from frontend driver
 // some crappy make issues due to include dependencies and path messup
 #include <driver_types.h>
 #include <vector_types.h>
 
+#include <util/list.h>
 #include <pthread.h>
+#include <method_id.h>
 
 typedef pthread_t tid_t;
 
@@ -42,78 +44,14 @@ enum cuda_packet_flags
 	//CUDA_PKT_ADDR_MAPPED = 0x20, /* Not used. */
 	//CUDA_PKT_MEM_SHARED = 0x40, /* Not used. */
 };
-
-// Possible flag values
-// request - from DomU to Dom0
-// response - from Dom0 to DomU
-// \todo Possible to define 4 more flags - may correspond to type of error
-#define CUDA_response 0x1
-#define CUDA_request 0x2
-#define CUDA_more_data 0x4
-#define CUDA_error 0x8
-
-// For faster checking for {Memcpy, SetupArgument, Launch, GetDevice props}
-// mark the flags value with this. The actual function can then be retrieved
-// using the method id
-#define CUDA_Copytype 0x10
-
-// Sometimes it may not be required from the backend that it map the pages being
-// passed because they have already been mapped at handshake time
-// Since ret_ex_val in cuda_packet_t is the only field in the packet which is
-// not interpreted at the time of frontend calling backend,
-// using this field to indicate to the backend whether it should
-// bother calling xc_map_foreign_range or not.
-// And this needs to be looked at only in cases of those calls which require
-// a buffer passing
-// Therefore, if this position in flag is set, it would mean address is already
-// mapped else mapping needs to be done
-#define CUDA_Addrmapped 0x20
-
-// Indicate whether this buffer was allocated with cudaMallocHost or usual
-// malloc. If former, then no copying of buffer is required for the calls that
-// need to use this
-#define CUDA_Addrshared 0x40
-
-// Possible data size units. These are used to mark the ret_ex_val field as and
-// when needed in calls from frontend to backend. The reason the field is not
-// getting used as size itself is that their could be more than one argument
-// that needs to specify the size. So leaving size in the args array instead
-// of putting in ret_ex_val. Also, the unit will be constant for any number of
-// fields that specify data. Therefore use the max granularity possible to avoid
-// extra copy and wrong arguments. These units can be used as multiplies to get
-// the real size whenever needed. There are multiple granularities to avoid
-// extra copying as far as possible
-#define DATA_UNIT_1BYTE 1
-#define DATA_UNIT_2BYTE 2
-#define DATA_UNIT_3BYTE 3
-#define DATA_UNIT_4BYTE 4
-#define DATA_UNIT_5BYTE 5
-#define DATA_UNIT_6BYTE 6
-#define DATA_UNIT_7BYTE 7
-#define DATA_UNIT_8BYTE 8
-#define DATA_UNIT_PAGES 4096
-#define DATA_UNIT_KB 1024
-#define DATA_UNIT_MB (1024 * 1024)
-#define DATA_UNIT_GB (1024 * 1024 * 1024)
-
-#define MAX_SIZE_SIZE 65535   // max number that size var can take
-
-typedef struct tf_arg {
-	// \todo For now following ring mechanism and using mfns straight
-//	grant_ref_t gref;   // Reference to page with data
-	unsigned long mfn;  // Granted mfn
-	uint32_t ref;       // need to maintain grant ref for ending foreign access
-	uint16_t offset;    // offset within the page
-	// This size can be in different units as indicated by the extra info
-	// and should be interpreted accordingly
-	uint16_t size;      // size from offset, if it goes beyond a page,
-			// means those pages will also be granted already
-} tf_args_t;
+// TODO Create macros to access and modify the value of 'flags' in a cuda packet
+// instead of having code manually do raw bit ops everywhere.
 
 // The cudaRegisterFunction() has 10 arguments. Instead of passing them in multiple
 // packet rounds, it is serialized onto as many pages and can be accessed by
 // using this struct
 typedef struct {
+	struct list_head link;
 	void** fatCubinHandle;
 	char* hostFun;
 	// the hostFEaddr is used to keep the local pointer to the hostFun
@@ -132,6 +70,7 @@ typedef struct {
 
 // The __cudaRegisterVar() has 8 arguments. Pass them in one page
 typedef struct {
+	struct list_head link;
 	void **fatCubinHandle;
 	char *hostVar;  // Address coming from Guest thru RegisterVar
 	char *dom0HostAddr;  // This addr will be registered with cuda driver instead
@@ -145,6 +84,7 @@ typedef struct {
 
 // The __cudaRegisterTex() has 8 arguments. Pass them in one page
 typedef struct {
+	struct list_head link;
 	void **fatCubinHandle;
 	struct textureReference *hostVar;  // Address coming from Guest thru RegisterTexture
 	struct cudaChannelFormatDesc *hostChannel;  // Note this down as well
@@ -171,9 +111,10 @@ typedef union args {
 	char *argcp;
 	size_t arr_argi[2];
 	unsigned long long arr_argui[2];
-	tf_args_t tf_args;                  // ?
 	dim3 arg_dim;                       // 3D point
 	cudaStream_t arg_str;
+	// FIXME Are these ever used?? If not, delete them and move the reg_*_args_t
+	// to fatcubininfo.h
 	reg_func_args_t *reg_func_args;     // for __cudaRegisterFunction()
 	reg_var_args_t *reg_vars;           // for __cudaRegisterVar()
 	reg_tex_args_t *reg_texs;           // for __cudaRegisterTexture()
@@ -192,7 +133,7 @@ typedef union ret_extra {
 } ret_extra_t;
 
 typedef struct cuda_packet {
-	uint16_t method_id;     // to identify which method
+	method_id_t method_id;     // to identify which method
 	uint16_t req_id;        // to identify which request is the response for in case async
 	tid_t thr_id;           // thread sending request
 	uint8_t flags;          // if ever needed to indicate more data for the same call

@@ -33,9 +33,12 @@ extern void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global);
 
+//#undef printd
+//#define printd(level, fmt, args...)
+
 /*-------------------------------------- INTERNAL STATE ----------------------*/
 
-static fatcubin_info_t cubin;
+static struct fatcubins *cubins;
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
@@ -77,7 +80,15 @@ void localsink(asmid_t asmid, regid_t regid)
 	printd(DBG_INFO, "localsink spawned, pid=%d asm=%lu regid=%d\n",
 			getpid(), asmid, regid);
 
-	memset(&cubin, 0, sizeof(cubin));
+	// Allocate cubin set.
+	cubins = calloc(1, sizeof(*cubins));
+	if (!cubins) {
+		printd(DBG_ERROR, "out of memory\n");
+		fprintf(stderr, "out of memory\n");
+		return;
+	}
+	cubins_init(cubins);
+
 	shm = reg_be_get_shm(regid);
 
 	// Process the shm for cuda packets.
@@ -132,6 +143,7 @@ void localsink(asmid_t asmid, regid_t regid)
 int nv_exec_pkt(volatile struct cuda_packet *pkt)
 {
 	int err;
+	int fail = 0; // 1 to indicate failure within the switch
 	switch (pkt->method_id) {
 
 		/*
@@ -143,8 +155,11 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 		case CUDA_GET_DEVICE_PROPERTIES:
 		case CUDA_DRIVER_GET_VERSION:
 		case CUDA_RUNTIME_GET_VERSION:
+		{
 			printd(DBG_ERROR, "Error: packet requesting assembly information\n");
-			goto fail;
+			fail = 1;
+		}
+		break;
 
 		/*
 		 * Hidden functions for registration.
@@ -152,22 +167,26 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 
 		case __CUDA_REGISTER_FAT_BINARY:
 		{
+			void *handle;
 			void *cubin_shm = ((void*)pkt + pkt->args[0].argull);
-			cubin.fatCubin = calloc(1, sizeof(__cudaFatCudaBinary));
-			if (!cubin.fatCubin) {
+			__cudaFatCudaBinary *cuda_cubin =
+				calloc(1, sizeof(__cudaFatCudaBinary));
+			if (!cuda_cubin) {
 				printd(DBG_ERROR, "out of memory\n");
 				fprintf(stderr, "out of memory\n");
-				goto fail;
+				fail = 1;
+				break;
 			}
-			err = unpackFatBinary(cubin.fatCubin, cubin_shm);
+			err = unpackFatBinary(cuda_cubin, cubin_shm);
 			if (err < 0) {
 				printd(DBG_ERROR, "error unpacking fat cubin\n");
-				goto fail;
+				fail = 1;
+				break;
 			}
-			cubin.fatCubinHandle =
-				__cudaRegisterFatBinary(cubin.fatCubin);
-			pkt->ret_ex_val.handle = cubin.fatCubinHandle;
-			printd(DBG_DEBUG, "regFB handle=%p\n", pkt->ret_ex_val.handle);
+			handle = __cudaRegisterFatBinary(cuda_cubin);
+			pkt->ret_ex_val.handle = handle;
+			cubins_add_cubin(cubins, cuda_cubin, handle);
+			printd(DBG_DEBUG, "cudaRegFB handle=%p\n", pkt->ret_ex_val.handle);
 		}
 		break;
 
@@ -182,10 +201,6 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 
 		case __CUDA_REGISTER_FUNCTION:
 		{
-			if (cubin.num_reg_fns >= MAX_REGISTERED_FUNCS) {
-				printd(DBG_ERROR, "reached maximum registered funcs\n");
-				goto fail;
-			}
 			// unpack the serialized arguments from shared mem
 			reg_func_args_t *pargs =  // packed
 				((void*)pkt + pkt->args[0].argull);
@@ -194,17 +209,15 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 			if (!uargs) {
 				printd(DBG_ERROR, "out of memory\n");
 				fprintf(stderr, "out of memory\n");
-				goto fail;
+				fail = 1;
+				break;
 			}
+			// FIXME don't use char*
 			err = unpackRegFuncArgs(uargs, (char *)pargs);
 			if (err < 0) {
 				printd(DBG_ERROR, "error unpacking regfunc args\n");
-				goto fail;
-			}
-			if (cubin.fatCubinHandle != uargs->fatCubinHandle) {
-				printd(DBG_ERROR, "handles don't match (%p) (%p)\n",
-						cubin.fatCubinHandle, uargs->fatCubinHandle);
-				goto fail;
+				fail = 1;
+				break;
 			}
 			__cudaRegisterFunction(uargs->fatCubinHandle,
 					(const char *)uargs->hostFun, uargs->deviceFun,
@@ -212,19 +225,14 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 					uargs->tid, uargs->bid, uargs->bDim, uargs->gDim,
 					uargs->wSize);
 			// store the state
-			// FIXME not thread-safe!
-			cubin.reg_fns[cubin.num_reg_fns++] = uargs;
+			cubins_add_function(cubins, uargs->fatCubinHandle, &uargs->link);
 			pkt->ret_ex_val.err = cudaSuccess;
-			printd(DBG_DEBUG, "regFunc handle=%p\n", cubin.fatCubinHandle);
+			printd(DBG_DEBUG, "regFunc handle=%p\n", uargs->fatCubinHandle);
 		}
 		break;
 
 		case __CUDA_REGISTER_VARIABLE:
 		{
-			if (cubin.num_reg_vars >= MAX_REGISTERED_FUNCS) {
-				printd(DBG_ERROR, "reached maximum registered variables\n");
-				goto fail;
-			}
 			// unpack the serialized arguments from shared mem
 			reg_var_args_t *pargs = // packed
 				((void*)pkt + pkt->args[0].argull);
@@ -233,24 +241,21 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 			if (!uargs) {
 				printd(DBG_ERROR, "out of memory\n");
 				fprintf(stderr, "out of memory\n");
-				goto fail;
+				fail = 1;
+				break;
 			}
 			err = unpackRegVar(uargs, (char *)pargs);
 			if (err < 0) {
 				printd(DBG_ERROR, "error unpacking regvar args\n");
-				goto fail;
+				fail = 1;
+				break;
 			}
-			if (cubin.fatCubinHandle != uargs->fatCubinHandle) {
-				printd(DBG_ERROR, "handles don't match (%p) (%p)\n",
-						cubin.fatCubinHandle, uargs->fatCubinHandle);
-				goto fail;
-			}
+			printd(DBG_DEBUG, "_regVar: %p\n", uargs->hostVar);
 			__cudaRegisterVar(uargs->fatCubinHandle, uargs->dom0HostAddr,
 					uargs->deviceAddress, (const char *) uargs->deviceName,
 					uargs->ext, uargs->size, uargs->constant, uargs->global);
 			// store the state
-			// FIXME not thread-safe!
-			cubin.variables[cubin.num_reg_vars++] = uargs;
+			cubins_add_variable(cubins, uargs->fatCubinHandle, &uargs->link);
 			pkt->ret_ex_val.err = cudaSuccess;
 		}
 		break;
@@ -264,56 +269,6 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 			int dev = pkt->args[0].argll;
 			pkt->ret_ex_val.err = cudaSetDevice(dev);
 			printd(DBG_DEBUG, "setDev %d\n", dev);
-		}
-		break;
-
-		case CUDA_MEMCPY_TO_SYMBOL:
-		{
-			reg_var_args_t *var;
-			int var_idx;
-			const char *symbol = pkt->args[0].argcp;
-			const void *src = ((void*)pkt + pkt->args[1].argull);
-			// locate state of var registration associated with symbol
-			for (var_idx = 0; var_idx < cubin.num_reg_vars; var_idx++) {
-				var = cubin.variables[var_idx];
-				// FIXME We assume symbols are ptr values, not strings.
-				// CUDA API states it may be either.
-				if (var && var->hostVar == symbol)
-					break;
-			}
-			if (var_idx >= cubin.num_reg_vars) {
-				printd(DBG_ERROR, "could not locate symbol %p\n", symbol);
-				goto fail;
-			}
-			pkt->ret_ex_val.err = 
-				cudaMemcpyToSymbol(var->dom0HostAddr, src,
-						pkt->args[2].arr_argi[0], pkt->args[2].arr_argi[1],
-						pkt->args[3].argll);
-		}
-		break;
-
-		case CUDA_MEMCPY_FROM_SYMBOL:
-		{
-			reg_var_args_t *var;
-			int var_idx;
-			void *dst = ((void*)pkt + pkt->args[0].argull);
-			const char *symbol = pkt->args[1].argcp;
-			// locate state of var registration associated with symbol
-			for (var_idx = 0; var_idx < cubin.num_reg_vars; var_idx++) {
-				var = cubin.variables[var_idx];
-				// FIXME We assume symbols are ptr values, not strings.
-				// CUDA API states it may be either.
-				if (var && var->hostVar == symbol)
-					break;
-			}
-			if (var_idx >= cubin.num_reg_vars) {
-				printd(DBG_ERROR, "could not locate symbol %p\n", symbol);
-				goto fail;
-			}
-			pkt->ret_ex_val.err = 
-				cudaMemcpyFromSymbol(dst, var->dom0HostAddr,
-						pkt->args[2].arr_argi[0], pkt->args[2].arr_argi[1],
-						pkt->args[3].argll);
 		}
 		break;
 
@@ -348,9 +303,28 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 
 		case CUDA_LAUNCH:
 		{
-			const char *entry = ((void*)pkt + pkt->args[0].argull);
-			pkt->ret_ex_val.err = cudaLaunch(entry);
-			printd(DBG_DEBUG, "launch %s\n", entry);
+			// FIXME We assume entry is just a memory pointer, not a string.
+			// Printing the entry as a string will confuse your terminal
+			const char *entry = (void*)pkt->args[0].argull;
+			struct cuda_fatcubin_info *fatcubin;
+			reg_func_args_t *func;
+			int found = 0; // 0 if func not found, 1 otherwise
+			// Locate the func structure; we assume func names are unique across
+			// cubins.
+			cubins_for_each_cubin(cubins, fatcubin) {
+				cubin_for_each_function(fatcubin, func) {
+					if (func->hostFEaddr == entry) found = 1;
+					if (found) break;
+				}
+				if (found) break;
+			}
+			if (unlikely(!found)) {
+				printd(DBG_ERROR, "launch cannot find entry func\n");
+				fail = 1;
+				break;
+			}
+			printd(DBG_DEBUG, "launch(%p->%p)\n", entry, func->hostFun);
+			pkt->ret_ex_val.err = cudaLaunch(func->hostFun);
 		}
 		break;
 
@@ -424,15 +398,156 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 		}
 		break;
 
+		case CUDA_MEMCPY_TO_SYMBOL_H2D:
+		{
+			struct cuda_fatcubin_info *fatcubin;
+			reg_var_args_t *var;
+			int found = 0; // 0 if var not found, 1 otherwise
+			const char *symbol = pkt->args[0].argcp;
+			const void *src = ((void*)pkt + pkt->args[1].argull);
+			size_t count = pkt->args[2].arr_argi[0];
+			size_t offset = pkt->args[2].arr_argi[1];
+			// Locate the var structure; symbols are unique across cubins.
+			// See quote from A. Kerr in libci.c
+			cubins_for_each_cubin(cubins, fatcubin) {
+				cubin_for_each_variable(fatcubin, var) {
+					// FIXME we assume symbols are memory addresses here. The
+					// CUDA Runtime API says they may also be strings, if the
+					// app desires.
+					if (var->hostVar == symbol) found = 1;
+					if (found) break;
+				}
+				if (found) break;
+			}
+			if (unlikely(!found)) {
+				printd(DBG_ERROR, "memcpyFromSymb cannot find symbol\n");
+				fail = 1;
+				break;
+			}
+			printd(DBG_DEBUG, "memcpyFromSymb %p\n", var->hostVar);
+			pkt->ret_ex_val.err =
+				cudaMemcpyToSymbol(var->dom0HostAddr, src, count, offset,
+									cudaMemcpyHostToDevice);
+		}
+		break;
+
+#if 0
+		case CUDA_MEMCPY_TO_SYMBOL_D2D:
+		{
+			struct cuda_fatcubin_info *fatcubin;
+			reg_var_args_t *var;
+			int found = 0; // 0 if var not found, 1 otherwise
+			const char *symbol = pkt->args[0].argcp;
+			const void *src = pkt->args[1].argull;
+			size_t count = pkt->args[2].arr_argi[0];
+			size_t offset = pkt->args[2].arr_argi[1];
+			// Locate the var structure; symbols are unique across cubins.
+			// See quote from A. Kerr in libci.c
+			cubins_for_each_cubin(cubins, fatcubin) {
+				cubin_for_each_variable(fatcubin, var) {
+					// FIXME we assume symbols are memory addresses here. The
+					// CUDA Runtime API says they may also be strings, if the
+					// app desires.
+					if (var->hostVar == symbol) found = 1;
+					if (found) break;
+				}
+				if (found) break;
+			}
+			if (unlikely(!found)) {
+				printd(DBG_ERROR, "memcpyFromSymb cannot find symbol\n");
+				fail = 1;
+				break;
+			}
+			printd(DBG_DEBUG, "memcpyFromSymb %p\n", var->hostVar);
+			pkt->ret_ex_val.err =
+				cudaMemcpyToSymbol(var->dom0HostAddr, src, count, offset,
+						cudaMemcpyDeviceToDevice);
+		}
+		break;
+#endif
+
+		case CUDA_MEMCPY_FROM_SYMBOL_D2H:
+		{
+			struct cuda_fatcubin_info *fatcubin;
+			int found = 0; // 0 if var not found, 1 otherwise
+			reg_var_args_t *var;
+			void *dst = ((void*)pkt + pkt->args[0].argull);
+			const char *symbol = pkt->args[1].argcp;
+			size_t count = pkt->args[2].arr_argi[0];
+			size_t offset = pkt->args[2].arr_argi[1];
+			// Locate the var structure; symbols are unique across cubins.
+			// See quote from A. Kerr in libci.c
+			cubins_for_each_cubin(cubins, fatcubin) {
+				cubin_for_each_variable(fatcubin, var) {
+					// FIXME we assume symbols are memory addresses here. The
+					// CUDA Runtime API says they may also be strings, if the
+					// app desires.
+					if (var->hostVar == symbol) found = 1;
+					if (found) break;
+				}
+				if (found) break;
+			}
+			if (unlikely(!found)) {
+				printd(DBG_ERROR, "memcpyFromSymb cannot find symbol\n");
+				fail = 1;
+				break;
+			}
+			printd(DBG_DEBUG, "memcpyFromSymb %p\n", var->hostVar);
+			pkt->ret_ex_val.err =
+				cudaMemcpyFromSymbol(dst, var->dom0HostAddr, count, offset,
+						cudaMemcpyDeviceToHost);
+		}
+		break;
+
+#if 0
+		case CUDA_MEMCPY_FROM_SYMBOL_D2D:
+		{
+			struct cuda_fatcubin_info *fatcubin;
+			int found = 0; // 0 if var not found, 1 otherwise
+			reg_var_args_t *var;
+			void *dst = pkt->args[0].argull;
+			const char *symbol = pkt->args[1].argcp;
+			size_t count = pkt->args[2].arr_argi[0];
+			size_t offset = pkt->args[2].arr_argi[1];
+			// Locate the var structure; symbols are unique across cubins.
+			// See quote from A. Kerr in libci.c
+			cubins_for_each_cubin(cubins, fatcubin) {
+				cubin_for_each_variable(fatcubin, var) {
+					// FIXME we assume symbols are memory addresses here. The
+					// CUDA Runtime API says they may also be strings, if the
+					// app desires.
+					if (var->hostVar == symbol) found = 1;
+					if (found) break;
+				}
+				if (found) break;
+			}
+			if (unlikely(!found)) {
+				printd(DBG_ERROR, "memcpyFromSymb cannot find symbol\n");
+				fail = 1;
+				break;
+			}
+			printd(DBG_DEBUG, "memcpyFromSymb %p\n", var->hostVar);
+			pkt->ret_ex_val.err =
+				cudaMemcpyFromSymbol(dst, var->dom0HostAddr, count, offset,
+						cudaMemcpyDeviceToDevice);
+		}
+		break;
+#endif
+
 		/*
 		 * All other functions are unhandled.
 		 */
 
 		default:
+		{
 			printd(DBG_ERROR, "Unhandled packet, method %d\n", pkt->method_id);
 			pkt->ret_ex_val.err = (!cudaSuccess);
-			goto fail;
+			fail = 1;
+		}
+		break;
 	}
+	if (fail)
+		return -1;
 	if (pkt->method_id == __CUDA_REGISTER_FAT_BINARY &&
 			pkt->ret_ex_val.handle == NULL) {
 		printd(DBG_ERROR, "__cudaRegFatBin returned NULL handle\n");
@@ -442,6 +557,4 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 				pkt->method_id, pkt->ret_ex_val.err);
 	}
 	return 0;
-fail:
-	return -1;
 }

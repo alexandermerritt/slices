@@ -50,6 +50,7 @@ char * freeBuffer(char * pBuffer){
 	return NULL;
 }
 
+#if 0
 /**
  * cleans the structure, frees the allocated memory, sets values to zeros,
  * nulls, etc; intended to be used in __unregisterCudaFatBinary
@@ -82,6 +83,7 @@ int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo){
 
 	return OK;
 }
+#endif
 
 /**
  * returns the size of the packet for the string
@@ -615,6 +617,7 @@ int l_printCudaDeviceProp(const struct cudaDeviceProp * const pProp){
     return OK;
 }
 
+#if 0
 /**
  * prints the fatcubin_info array
  */
@@ -636,6 +639,7 @@ int printFatCIArray(GArray * fcia){
 
 	return OK;
 }
+#endif
 
 /**
  * prints the hash table of handlers and vars
@@ -2310,8 +2314,10 @@ char * methodIdToString(const int method_id){
 	case CUDA_UNBIND_TEXTURE: fname = "cudaUnbindTexture"; break;
 	case CUDA_BIND_TEXTURE_TO_ARRAY: fname = "cudaBindTextureToArray"; break;
 	case CUDA_FREE_HOST: fname = "cudaFreeHost"; break;
-	case CUDA_MEMCPY_TO_SYMBOL: fname = "cudaMemcpyToSymbol"; break;
-	case CUDA_MEMCPY_FROM_SYMBOL: fname = "cudaMemcpyFromSymbol"; break;
+	case CUDA_MEMCPY_TO_SYMBOL_H2D: fname = "cudaMemcpyToSymbol"; break;
+	case CUDA_MEMCPY_TO_SYMBOL_D2D: fname = "cudaMemcpyToSymbol"; break;
+	case CUDA_MEMCPY_FROM_SYMBOL_D2H: fname = "cudaMemcpyFromSymbol"; break;
+	case CUDA_MEMCPY_FROM_SYMBOL_D2D: fname = "cudaMemcpyFromSymbol"; break;
 	case CUDA_MALLOC_ARRAY: fname = "cudaMallocArray"; break;
 	case CUDA_FREE_ARRAY: fname = "cudaFreeArray"; break;
 	case CUDA_MEMCPY_TO_ARRAY_D2D: fname = "cudaMemcpyToArrayD2D"; break;
@@ -2381,6 +2387,7 @@ void nullExitChkptMalloc(void *p, char * message){
 // ---------------------------------------------
 
 
+#if 0
 /**
  * returns the the pointer to the fatcubin_info_t corresponding to
  * a fatCubinHandle. If there is a few the same fatCubinHandles
@@ -2416,8 +2423,10 @@ int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle) {
 
 	return index;
 }
+#endif
 
 
+#if 0
 /**
  * returns the the pointer to the fatcubin_info_t corresponding to
  * a fatCubinHandle and an index . If there is a few the same fatCubinHandles
@@ -2495,6 +2504,7 @@ fatcubin_info_t * g_fcia_host_var(GArray * fatCubinInfoArr, char * hostVar, int 
 
 	return fci;
 }
+#endif
 
 // -------------------------------
 // dealing with regVarsHashTable

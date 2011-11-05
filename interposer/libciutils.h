@@ -130,7 +130,7 @@ int printRegVarTab(GHashTable * tab);
  * cleans the structure, frees the allocated memory, sets values to zeros,
  * nulls, etc; intended to be used in __unregisterCudaFatBinary
  */
-int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo);
+int cleanFatCubinInfo(struct cuda_fatcubin_info * pFatCInfo);
 
 /**
  * removes the handler and associated array of pointers from the table
@@ -158,8 +158,8 @@ char * methodIdToString(const int method_id);
 //inline int l_getLocalFromConfig(void);
 
 /**
- * returns an index in fatCubinInfoArr to the fatcubin_info_t corresponding to
- * a provided fatCubinHandle. If there is a few the same fatCubinHandles
+ * returns an index in fatCubinInfoArr to the cuda_fatcubin_info corresponding
+ * to a provided fatCubinHandle. If there is a few the same fatCubinHandles
  * the first found is returned (I guess it should never happen)
  *
  * @todo check for uniqueness of the fatCubinHandle
@@ -172,7 +172,7 @@ char * methodIdToString(const int method_id);
 int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle);
 
 /**
- * returns the the pointer to the fatcubin_info_t corresponding to
+ * returns the the pointer to the cuda_fatcubin_info corresponding to
  * a fatCubinHandle. If there is a few the same fatCubinHandles
  * the first found is returned
  *
@@ -184,11 +184,11 @@ int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle);
  *         NULL if no entry equal to fatCubinHandle can be found or fatCubinInfoArr
  *         is lost
  */
-fatcubin_info_t * g_fcia_elem(GArray * fatCubinInfoArr,
+struct cuda_fatcubin_info * g_fcia_elem(GArray * fatCubinInfoArr,
 		void ** fatCubinHandle);
 
 /**
- * returns the the pointer to the fatcubin_info_t corresponding to
+ * returns the the pointer to the struct cuda_fatcubin_info corresponding to
  * a fatCubinHandle and an index . If there is a few the same fatCubinHandles
  * the first found is returned; invokes @see g_find_fatci
  *
@@ -201,7 +201,7 @@ fatcubin_info_t * g_fcia_elem(GArray * fatCubinInfoArr,
  *         NULL if no entry equal to fatCubinHandle can be found or fatCubinInfoArr
  *         is lost
  */
-fatcubin_info_t * g_fcia_elidx(GArray * fatCubinInfoArr,
+struct cuda_fatcubin_info * g_fcia_elidx(GArray * fatCubinInfoArr,
 		void ** fatCubinHandle, int * pIndex);
 
 /**
@@ -211,12 +211,12 @@ fatcubin_info_t * g_fcia_elidx(GArray * fatCubinInfoArr,
  * @param hostVar The original value as originally issued on the client side
  *                we assume this is a pointer - the client sends not the name
  *                but the pointer
- * @param pIndex (out) The index in fatcubin_info_t->variables where
+ * @param pIndex (out) The index in struct cuda_fatcubin_info->variables where
  *          you found this
- * @return pointer to the fatcubin_info_t containing the hostVar
+ * @return pointer to the struct cuda_fatcubin_info containing the hostVar
  *         NULL if the hostVar has not been found
  */
-fatcubin_info_t * g_fcia_host_var(GArray * fatCubinInfoArr, char * hostVar, int *pIndex) ;
+struct cuda_fatcubin_info * g_fcia_host_var(GArray * fatCubinInfoArr, char * hostVar, int *pIndex) ;
 // ----------------------------------
 // register variables hash table helper functions
 // ----------------------------------
