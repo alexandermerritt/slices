@@ -5,6 +5,8 @@
  * @brief TODO
  */
 
+#include <stdbool.h>
+#include <string.h>
 #include <shmgrp.h>
 
 extern int shmgrp_init_leader(void);
@@ -38,4 +40,27 @@ int shmgrp_tini(void)
 	if (err < 0)
 		return err;
 	return 0;
+}
+
+const char * shmgrp_memb_str(membership_event e)
+{
+	switch (e) {
+		case MEMBERSHIP_JOIN:
+			return "Membership Join";
+		case MEMBERSHIP_LEAVE:
+			return "Membership Leave";
+		default:
+			return "Uknown Membership Event";
+	}
+}
+
+/*-------------------------------------- INTERNAL UTILITIES ------------------*/
+
+bool verify_userkey(const char *key)
+{
+	if (!key || strchr(key, '/') != NULL)
+		return false;
+	if (strlen(key) >= SHMGRP_MAX_KEY_LEN)
+		return false;
+	return true;
 }

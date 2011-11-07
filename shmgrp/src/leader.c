@@ -10,6 +10,7 @@
 #include <mqueue.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/inotify.h>
@@ -36,7 +37,7 @@ struct region
 	int fd;
 	void *addr;
 	size_t size;
-	char shm_key[SHM_MAX_FMT_LEN];
+	char shm_key[MAX_LEN];
 };
 
 struct member
@@ -44,8 +45,9 @@ struct member
 	struct list_head link;
 	struct list_head region_list;
 	pid_t pid;
+	mqd_t mqid;
 	//! Name of the file used to trigger membership notification.
-	char inotify_filename[SHM_MAX_FMT_LEN];
+	char inotify_filename[MAX_LEN];
 };
 
 // forward declaration
@@ -55,23 +57,24 @@ struct group
 {
 	struct list_head link;
 	char user_key[SHMGRP_MAX_KEY_LEN];
+	char memb_dir[MAX_LEN];
 	// TODO other keys needed?
 	struct list_head member_list;
-	mqd_t mqid;
 	membership_callback notify;
 	struct inotify_thread_state *inotify_thread;
 };
 
 struct groups
 {
-	struct list_head list;
+	struct list_head list; //! List of groups
 	pthread_mutex_t lock;
 };
 
 /**
  * Protocol errors. These indicate events that occur which violate our
  * expectations regarding the use of the underlying system IPC, etc and are not
- * actual errors from improper use of system calls, etc.
+ * actual errors from improper use of system calls, etc. They're pretty much
+ * impossible to encounter.
  *
  * These can happen, for example, if someone maliciously deletes the inotify
  * directory we watch without using the library.  This action triggers an
@@ -120,7 +123,7 @@ struct inotify_thread_state
 	proto_code proto_error;
 
 	// Membership information
-	struct group *grp;
+	struct group *group;
 
 	// Inotify state for this thread
 	int inotify_fd;
@@ -129,9 +132,15 @@ struct inotify_thread_state
 
 /*-------------------------------------- INTERNAL STATE ----------------------*/
 
-static struct groups *groups;
+static struct groups *groups = NULL;
 
 /*-------------------------------------- INTERNAL STATE OPS ------------------*/
+
+/*
+ * No locking is performed within any of the internal functions in this section.
+ * All locks that need to be held are assumed to have been acquired. Also, no
+ * error checking is performed, to keep the code simple, easy to read and fast.
+ */
 
 /*
  * Memory operations.
@@ -147,12 +156,9 @@ static struct groups *groups;
 #define member_for_each_region(member, region)	\
 	list_for_each_entry(region, &((member)->region_list), link)
 
-static inline int member_add_region(struct member *mem, struct region *reg)
+static inline void member_add_region(struct member *mem, struct region *reg)
 {
-	if (!mem || !reg)
-		return -1;
 	list_add(&(reg->link), &(mem->region_list));
-	return 0;
 }
 
 #if 0
@@ -173,8 +179,6 @@ static inline int member_rm_region(struct member *mem, int reg_id)
 
 static inline bool member_has_regions(struct member *mem)
 {
-	if (!mem)
-		return false; // technically an error
 	return !list_empty(&(mem->region_list));
 }
 
@@ -185,18 +189,22 @@ static inline bool member_has_regions(struct member *mem)
 #define group_for_each_member(group, member)	\
 	list_for_each_entry(member, &((group)->member_list), link)
 
-static inline int group_add_member(struct group *grp, struct member *mem)
+static inline bool
+group_empty(struct group *group)
 {
-	if (!grp || !mem)
-		return -1;
-	list_add(&(mem->link), &(grp->member_list));
-	return 0;
+	return list_empty(&(group->member_list));
 }
 
-static inline int group_rm_member(struct group *grp, pid_t pid)
+static inline void
+group_add_member(struct group *group, struct member *mem)
+{
+	list_add(&(mem->link), &(group->member_list));
+}
+
+static inline int group_rm_member(struct group *group, pid_t pid)
 {
 	struct member *m = NULL;
-	group_for_each_member(grp, m)
+	group_for_each_member(group, m)
 		if (m->pid == pid)
 			break;
 	if (!m || m->pid != pid)
@@ -205,11 +213,17 @@ static inline int group_rm_member(struct group *grp, pid_t pid)
 	return 0;
 }
 
-static inline bool group_has_members(struct group *grp)
+static inline bool group_has_members(struct group *group)
 {
-	if (!grp)
-		return false; // technically an error
-	return !list_empty(&(grp->member_list));
+	return !list_empty(&(group->member_list));
+}
+
+static inline void group_stop_inotify(struct group *group)
+{
+	if (group->inotify_thread->is_alive) {
+		pthread_cancel(group->inotify_thread->tid);
+		pthread_join(group->inotify_thread->tid, NULL);
+	}
 }
 
 /*
@@ -217,43 +231,102 @@ static inline bool group_has_members(struct group *grp)
  */
 
 #define groups_for_each_group(groups, group)	\
-	list_for_each_entry(group, groups, link)
+	list_for_each_entry(group, &(groups)->list, link)
 
-static inline bool groups_exist(struct groups *groups)
+static inline bool
+groups_empty(struct groups *groups)
 {
-	if (!groups)
-		return false; // technically an error
-	return !list_empty(&groups->list);
+	return list_empty(&groups->list);
 }
 
-// TODO argument struct for inotify thread
+static inline void
+groups_add_group(struct groups *groups, struct group *group)
+{
+	list_add(&(group->link), &(groups->list));
+}
+
+static inline struct group *
+groups_get_group(struct groups *groups, const char *key)
+{
+	struct group *group;
+	groups_for_each_group(groups, group) {
+		if (strcmp(key, group->user_key) == 0)
+			return group;
+	}
+	return NULL;
+}
+
+static inline void
+__groups_rm_group(struct groups *groups, struct group *group)
+{
+	list_del(&(group->link));
+}
+
+static inline void
+groups_rm_group(struct groups *groups, const char *key)
+{
+	struct group *group = groups_get_group(groups, key);
+	if (group)
+		__groups_rm_group(groups, group);
+}
+
+/*
+ * Misc
+ */
+
+static inline const char *
+proto_str(proto_code c)
+{
+	// TODO Fix up these error messages to be more meaningful.
+	switch (c) {
+		case PROTO_WRONG_WD:
+			return "Wrong Watch Descriptor";
+		case PROTO_ZERO_READ_LEN:
+			return "Zero Length Returned on Read";
+		case PROTO_ZERO_EVT_LEN:
+			return "Zero Length on Event";
+		case PROTO_UNSUPPORTED_EVT_MASK:
+			return "Unsupported Event Mask";
+		default:
+			return "Inotify Protocol Error Unknown";
+	}
+}
 
 /*-------------------------------------- INTERNAL THREADING ------------------*/
 
-// TODO
-
+#if 0
 static void process_message(union sigval sval)
 {
 	// this function is registered for all message queue callbacks, thus we
 	// extract our specific state from the argument
-	//struct group *grp = (struct group *)sval.sival_ptr;
+	//struct group *group = (struct group *)sval.sival_ptr;
 	// FIXME
 }
+#endif
 
 static void inotify_thread_cleanup(void *arg)
 {
 	struct inotify_thread_state *state = 
 		(struct inotify_thread_state *)arg;
-	state->is_alive = false;
+
+	// Check the reason for our exit
+	if (state->exit_code != 0) {
+		if (state->exit_code != -EPROTO)
+			fprintf(stderr, "Membership watch exited fatally: %s\n",
+					strerror(-(state->exit_code)));
+		else
+			fprintf(stderr, "Membership watch exited unexpectedly: %s\n",
+					proto_str(state->proto_error));
+	}
 
 	// TODO Close the inotify instance, deallocate all regions, etc etc
 
-	// Clean up inotify instance
+	state->is_alive = false;
+
 	if (state->inotify_fd > -1)
-		close(state->inotify_fd);
+		close(state->inotify_fd); // closes watch descriptors, too
 	state->inotify_fd = -1;
 
-	// Deallocate memory given to the events array
 	if (!state->events)
 		free(state->events);
 	state->events = NULL;
@@ -285,7 +358,7 @@ static void* inotify_thread(void *arg)
 		pthread_exit(NULL);
 	}
 	wd = inotify_add_watch(state->inotify_fd,
-			state->grp->user_key, IN_CREATE | IN_DELETE);
+			state->group->memb_dir, IN_CREATE | IN_DELETE);
 	if (wd < 0) {
 		state->exit_code = -(errno);
 		pthread_exit(NULL);
@@ -324,12 +397,18 @@ static void* inotify_thread(void *arg)
 			switch (event->mask) {
 				case IN_CREATE:
 				{
+					pid_t pid = atoi(event->name);
+					printf("New member arrival from %d in group %s\n",
+							pid, state->group->user_key);
 //#error Update state to indicate arrival of new member to group
-//#error Invoke group callback function with key for the grp message queue
+//#error Invoke group callback function with key for the group message queue
 				}
 				break;
 				case IN_DELETE:
 				{
+					pid_t pid = atoi(event->name);
+					printf("New member departure from %d in group %s\n",
+							pid, state->group->user_key);
 //#error Update state to indicate departure of member from group
 //#error Invoke group callback function
 				}
@@ -359,12 +438,25 @@ static void* inotify_thread(void *arg)
 
 int shmgrp_init_leader(void)
 {
+	int err, exit_errno;
+	if (groups) {
+		exit_errno = -EEXIST;
+	}
 	groups = calloc(1, sizeof(*groups));
-	if (!groups)
-		return -ENOMEM;
+	if (!groups) {
+		exit_errno = -ENOMEM;
+	}
 	INIT_LIST_HEAD(&groups->list);
 	pthread_mutex_init(&groups->lock, NULL);
+	// create the shmgrp root membership directory
+	err = mkdir(MEMB_DIR_PREFIX_DIR, MEMB_DIR_PERMS);
+	if (err < 0 && errno != EEXIST) { // okay if already exists
+		exit_errno = -(errno);
+		goto fail;
+	}
 	return 0;
+fail:
+	return exit_errno;
 }
 
 int shmgrp_tini_leader(void)
@@ -373,6 +465,7 @@ int shmgrp_tini_leader(void)
 	if (groups)
 		free(groups);
 	groups = NULL;
+	// Don't bother deleting the base member directory.
 	return 0;
 }
 
@@ -380,47 +473,49 @@ int shmgrp_open(const char *key, membership_callback func)
 {
 	int err, exit_errno;
 	struct group *new_grp = NULL;
-	struct mq_attr qattr;
-	struct sigevent event;
 	struct stat statbuf;
 	struct inotify_thread_state *tstate = NULL;
-	char memb_dir[MEMB_DIR_MAX_LEN];
 
-	// verify arguments
-	if (!key || key[0] != '/') {
-		exit_errno = -EINVAL;
-		goto fail;
-	}
-	if (!func) {
-		exit_errno = -EINVAL;
-		goto fail;
-	}
-	if (strlen(key) >= SHMGRP_MAX_KEY_LEN) {
+	if (!verify_userkey(key) || !func) {
 		exit_errno = -EINVAL;
 		goto fail;
 	}
 
 	memset(&statbuf, 0, sizeof(struct stat));
-	memset(&qattr, 0, sizeof(qattr));
-	memset(&event, 0, sizeof(event));
-	memset(memb_dir, 0, MEMB_DIR_MAX_LEN);
 
-	// First, create the group (do this before creating the mq)
+	// To prevent multiple threads from opening a group with the same group key
+	// (FIXME prevent other processes from opening the same group) we lock the
+	// group list and attempt to locate the key. If found, exit. Else continue
+	// setting up the group with the lock held. If we instead add the group,
+	// unlock the list then proceed to finish initializing the group it will be
+	// in an inconsistent state for some time, which we do not want.
+	pthread_mutex_lock(&(groups->lock));
+	new_grp = groups_get_group(groups, key);
+	if (new_grp) {
+		pthread_mutex_unlock(&(groups->lock));
+		exit_errno = -EEXIST;
+		goto fail;
+	}
 	new_grp = calloc(1, sizeof(*new_grp));
 	if (!new_grp) {
+		pthread_mutex_unlock(&(groups->lock));
 		exit_errno = -ENOMEM;
 		goto fail;
 	}
 	strncpy(new_grp->user_key, key, strlen(key));
-	new_grp->mqid = MQ_INVALID_VALUE;
 
+#if 0 // FIXME this goes into membership requests
+	struct mq_attr qattr;
+	struct sigevent event;
+	memset(&qattr, 0, sizeof(qattr));
+	memset(&event, 0, sizeof(event));
 	// Second, create a message queue.
 	// FIXME Move to another file/function
 	qattr.mq_maxmsg=8; // FIXME put this somewhere
 	qattr.mq_msgsize = 8; // FIXME use sizeof msg struct
-	new_grp->mqid = mq_open(key, MQ_OPEN_LEADER_FLAGS, MQ_PERMS, &qattr);
-	if (!MQ_IS_VALID(new_grp->mqid)) {
-		exit_errno = errno;
+	new_grp->mqid = mq_open(key, MQ_LEADER_OPEN_FLAGS, MQ_PERMS, &qattr);
+	if (!MQ_ID_IS_VALID(new_grp->mqid)) {
+		exit_errno = -(errno);
 		goto fail;
 	}
 	event.sigev_notify = SIGEV_THREAD;
@@ -428,32 +523,41 @@ int shmgrp_open(const char *key, membership_callback func)
 	event.sigev_value.sival_ptr = new_grp;
 	err = mq_notify(new_grp->mqid, &event);
 	if (err < 0) {
-		exit_errno = errno;
+		exit_errno = -(errno);
+		goto fail;
+	}
+#endif
+
+	// Construct the membership directory path and verify that it does not
+	// already exist.
+	snprintf(new_grp->memb_dir, MAX_LEN, MEMB_DIR_FMT, key);
+	err = stat(new_grp->memb_dir, &statbuf); // only allow errno of ENOENT
+	if (err < 0 && errno != ENOENT) {
+		pthread_mutex_unlock(&(groups->lock));
+		exit_errno = -(errno); // possible internal error, maybe don't expose this?
+		goto fail;
+	} else if (err >= 0) {
+		pthread_mutex_unlock(&(groups->lock));
+		exit_errno = -EEXIST;
+		goto fail;
+	}
+	err = mkdir(new_grp->memb_dir, MEMB_DIR_PERMS);
+	if (err < 0) {
+		pthread_mutex_unlock(&(groups->lock));
+		exit_errno = -(errno); // possible internal error, maybe don't expose this?
 		goto fail;
 	}
 
-	// Third, construct the membership directory path and verify that it does
-	// not already exist.
-	strncat(memb_dir, MEMB_DIR_PREFIX, strlen(MEMB_DIR_PREFIX));
-	strncat(memb_dir, key, strlen(key));
-	err = stat(memb_dir, &statbuf); // only allow errno of ENOENT
-	if (err < 0 && errno != ENOENT)
-		return errno; // possible internal error, maybe don't expose this?
-	else if (err >= 0)
-		return -EEXIST;
-	err = mkdir(memb_dir, MEMB_DIR_PERMS);
-	if (err < 0)
-		return errno; // possible internal error, maybe don't expose this?
-
-	// Fourth, begin accepting registration requests. Spawn an inotify thread on
-	// the membership directory we just created.
+	// Begin accepting registration requests. Spawn an inotify thread on the
+	// membership directory we just created.
 	tstate = calloc(1, sizeof(*tstate));
 	if (!tstate) {
+		pthread_mutex_unlock(&(groups->lock));
 		exit_errno = -ENOMEM;
 		goto fail;
 	}
 	// cross link thread and group
-	tstate->grp = new_grp;
+	tstate->group = new_grp;
 	new_grp->inotify_thread = tstate;
 	// init remaining useful group fields
 	INIT_LIST_HEAD(&new_grp->link);
@@ -461,26 +565,86 @@ int shmgrp_open(const char *key, membership_callback func)
 	new_grp->notify = func;
 	err = pthread_create(&(tstate->tid), NULL, inotify_thread, tstate);
 	if (err < 0) {
-		exit_errno = errno; // possible internal error, maybe don't expose this?
+		exit_errno = -(errno); // possible internal error, maybe don't expose this?
 		goto fail;
 	}
+
+	groups_add_group(groups, new_grp);
+
+	pthread_mutex_unlock(&groups->lock);
 
 	return 0;
 
 fail:
 	if (tstate)
 		free(tstate);
-	if (new_grp) {
-		if (MQ_IS_VALID(new_grp->mqid)) {
-			mq_close(new_grp->mqid);
-			mq_unlink(key);
-		}
+	if (new_grp)
 		free(new_grp);
-	}
+	// No need to cancel the inotify thread, because we can never get to the
+	// label fail if the thread was successfully created :)
 	return exit_errno;
 }
 
-int shmgrp_close(/*TODO*/)
+int shmgrp_close(const char *key)
 {
-	return -1;
+	int err, exit_errno = 0;
+	struct group *group;
+	char path[MAX_LEN];
+
+	if (!verify_userkey(key)) {
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	memset(path, 0, MAX_LEN);
+
+	// Look up key. Remove group from list if found to ensure other threads
+	// closing the same group key do not find it. No need to protect against
+	// other processes closing this group, because they would not have had
+	// opened the group.
+	pthread_mutex_lock(&groups->lock);
+	groups_for_each_group(groups, group) {
+		if (strcmp(key, group->user_key) == 0)
+			break;
+	}
+	if (!group || strcmp(key, group->user_key) != 0) {
+		pthread_mutex_unlock(&groups->lock);
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+	__groups_rm_group(groups, group);
+	pthread_mutex_unlock(&groups->lock);
+
+	// Now we are free to operate on the group without further locking.
+
+	// Prevent further registrations
+	group_stop_inotify(group);
+
+	// If there are still members in the group, clean up their state
+	if (!group_empty(group)) { // What TODO?
+		// go through all members and terminate all our state relating to these
+		// members, such as mmaped regions, etc
+		// delete all the inotify files?? that might be good
+	}
+
+	// Grab the path before releasing memory resources.
+	snprintf(path, MAX_LEN, MEMB_DIR_FMT, group->user_key);
+	free(group->inotify_thread);
+	free(group);
+
+	// Attempt to remove the membership directory. We assume at this point that
+	// it is empty.
+	err = rmdir(path);
+	if (err < 0) {
+		if (errno == ENOTEMPTY)
+			fprintf(stderr, "Could not delete member directory '%s',"
+					" delete manually\n", path);
+		exit_errno = -(errno);
+		goto fail;
+	}
+
+	return 0;
+
+fail:
+	return exit_errno;
 }
