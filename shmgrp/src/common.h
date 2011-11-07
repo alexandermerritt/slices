@@ -12,6 +12,8 @@
 #include <dirent.h>
 #include <stdbool.h>
 
+/*-------------------------------------- DEFINITIONS -------------------------*/
+
 //! Longest length for any key, be it an inotify file, group directory path, or
 //! shared memory region key. This length may include the user-supplied group
 //! key.
@@ -64,7 +66,10 @@
 #define MQ_OPEN_LEADER_FLAGS	(O_RDWR | O_CREAT | O_EXCL)
 #define MQ_OPEN_MEMBER_FLAGS	(O_RDWR)
 #define MQ_ID_INVALID_VALUE		((mqd_t) - 1) // RTFM
-#define MQ_ID_IS_VALID(m)		((m) != MQ_INVALID_VALUE)
+#define MQ_ID_IS_VALID(m)		((m) != MQ_ID_INVALID_VALUE)
+
+//! Maximum number of messages allowed to queue up.
+#define MQ_MAX_MESSAGES			8
 
 /*
  * Shared memory files exist with any number of instances between each leader
@@ -85,6 +90,17 @@
 #define SHM_PERMS				0660
 #define SHM_LEADER_OPEN_FLAGS	(O_RDWR | O_CREAT | O_EXCL)
 #define SHM_MEMBER_OPEN_FLAGS	(O_RDWR)
+
+/*-------------------------------------- STRUCTURES --------------------------*/
+
+typedef enum {MESSAGE_CREATE_SHM, MESSAGE_REMOVE_SHM} message_type;
+
+struct message
+{
+	message_type type;
+};
+
+/*-------------------------------------- FUNCTIONS ---------------------------*/
 
 bool verify_userkey(const char *key);
 

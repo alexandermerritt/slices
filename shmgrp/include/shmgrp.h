@@ -38,7 +38,6 @@ typedef int (*membership_callback)(membership_event, pid_t);
 
 /**
  * TODO
- * key must begin with /
  */
 int shmgrp_open(const char *key, membership_callback func);
 
