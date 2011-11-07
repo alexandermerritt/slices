@@ -307,6 +307,7 @@ group_member_join(struct group *group, pid_t pid, struct member **new_memb)
 		exit_errno = -(errno);
 		goto fail;
 	}
+
 	// Add the member as the very last operation (else we might have to remove
 	// it again in the fail code below).
 	group_add_member(group, memb);
@@ -387,15 +388,14 @@ static inline struct group *
 groups_get_group(struct groups *groups, const char *key)
 {
 	struct group *group;
-	groups_for_each_group(groups, group) {
+	groups_for_each_group(groups, group)
 		if (strcmp(key, group->user_key) == 0)
 			return group;
-	}
 	return NULL;
 }
 
 static inline void
-__groups_rm_group(struct groups *groups, struct group *group)
+__groups_rm_group(struct group *group)
 {
 	list_del(&(group->link));
 }
@@ -405,7 +405,7 @@ groups_rm_group(struct groups *groups, const char *key)
 {
 	struct group *group = groups_get_group(groups, key);
 	if (group)
-		__groups_rm_group(groups, group);
+		__groups_rm_group(group);
 }
 
 /*
@@ -729,24 +729,15 @@ int shmgrp_close(const char *key)
 
 	memset(path, 0, MAX_LEN);
 
-	// Look up key. Remove group from list if found to ensure other threads
-	// closing the same group key do not find it. No need to protect against
-	// other processes closing this group, because they would not have had
-	// opened the group.
+	// Look up key. Remove group from list.
 	pthread_mutex_lock(&groups->lock);
-	groups_for_each_group(groups, group) {
-		if (strcmp(key, group->user_key) == 0)
-			break;
-	}
-	if (!group || strcmp(key, group->user_key) != 0) {
+	group = groups_get_group(groups, key);
+	if (!group) {
 		pthread_mutex_unlock(&groups->lock);
 		exit_errno = -EINVAL;
 		goto fail;
 	}
-	__groups_rm_group(groups, group);
-	pthread_mutex_unlock(&groups->lock);
-
-	// Now we are free to operate on the group without further locking.
+	__groups_rm_group(group);
 
 	// Prevent further registrations
 	group_stop_inotify(group);
@@ -770,10 +761,12 @@ int shmgrp_close(const char *key)
 		if (errno == ENOTEMPTY)
 			fprintf(stderr, "Could not delete member directory '%s',"
 					" delete manually\n", path);
+		pthread_mutex_unlock(&groups->lock);
 		exit_errno = -(errno);
 		goto fail;
 	}
 
+	pthread_mutex_unlock(&groups->lock);
 	return 0;
 
 fail:

@@ -38,7 +38,7 @@
 #define MEMB_DIR_PREFIX_DIR		"/tmp/shmgrp/"
 #define MEMB_DIR_FMT			MEMB_DIR_PREFIX_DIR "%s/" // group key
 #define MEMB_DIR_PERMS			0770
-#define MEMB_FILE_FMT			"%s"		// pid
+#define MEMB_FILE_FMT			MEMB_DIR_FMT "%d"		// pid
 #define MEMB_FILE_PERMS			0660
 
 /*
@@ -103,5 +103,6 @@ struct message
 /*-------------------------------------- FUNCTIONS ---------------------------*/
 
 bool verify_userkey(const char *key);
+int group_dir_exists(const char *key, bool *exists);
 
 #endif
