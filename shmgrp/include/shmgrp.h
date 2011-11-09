@@ -35,7 +35,8 @@
 typedef int shmgrp_region_id;
 
 /**
- * Structure describing a mapped region.
+ * Structure describing a mapped region. Do not munmap the virtual address or I
+ * will cut your face off.
  */
 struct shmgrp_region
 {
@@ -97,17 +98,6 @@ int shmgrp_init(void);
 int shmgrp_tini(void);
 
 /**
- * Return information associated with the given region.
- *
- * Valid region IDs come from arguments passed into invocations of the
- * shm_callback routine. Do not call munmap on the addresses returned by this
- * function, or I will cut your face off.
- *
- * @param reg	Output parameter where region information will be written.
- */
-int shmgrp_region(shmgrp_region_id id, shmgrp_region *reg);
-
-/**
  * Convert the given group_event to a human-readable string for printing.
  */
 const char * shmgrp_memb_str(group_event e);
@@ -137,6 +127,19 @@ int shmgrp_close(const char *key);
  * memory regions.
  */
 int shmgrp_establish_member(const char *key, pid_t pid, shm_callback func);
+
+/**
+ * Obtain information about an existing shared memory region established with a
+ * member of a group. Valid region IDs come from a parameter passed to
+ * invocations of the shm_callback routine.
+ *
+ * @param	key		Group identifier
+ * @param	pid		Member identifier
+ * @param	id		Region identifier
+ * @param	region	Location where region information will be written.
+ */
+int shmgrp_member_region(const char *key, pid_t pid,
+		shmgrp_region_id id, struct shmgrp_region *region);
 
 /*-------------------------------------- MEMBER FUNCTIONS --------------------*/
 
@@ -187,5 +190,17 @@ int shmgrp_mkreg(const char *key, size_t size, shmgrp_region_id *id);
  * not represent any known region.
  */
 int shmgrp_rmreg(const char *key, shmgrp_region_id id);
+
+/**
+ * Obtain information about an existing shared memory region established with
+ * the leader of a group you are a member of. Valid region IDs come from
+ * successful calls to shmgrp_mkreg.
+ *
+ * @param	key		Group identifier
+ * @param	id		Region identifier
+ * @param	region	Location where region information will be written.
+ */
+int shmgrp_leader_region(const char *key, shmgrp_region_id id,
+		struct shmgrp_region *region);
 
 #endif /* _SHMGRP_H */

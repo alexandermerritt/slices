@@ -568,3 +568,47 @@ int shmgrp_rmreg(const char *key, shmgrp_region_id id)
 fail:
 	return exit_errno;
 }
+
+int shmgrp_leader_region(const char *key, shmgrp_region_id id,
+		struct shmgrp_region *reg)
+{
+	int exit_errno = 0;
+	struct membership *membership = NULL;
+	struct region *region = NULL;
+
+	if (!verify_userkey(key) || !reg) {
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	// Lock membership list, get membership
+	pthread_mutex_lock(&memberships->lock);
+	membership = memberships_get_membership(memberships, key);
+	if (!membership) {
+		pthread_mutex_unlock(&memberships->lock);
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	// Get region. No need to lock, as there are no other entry points in the
+	// code which directly access a membership, by-passing the membership list.
+	// Adding a region occurs in mkreg which locks the entire list, so that's
+	// all we need to lock (which we've done above).
+	region = membership_get_region(membership, id);
+	if (!region) {
+		pthread_mutex_unlock(&memberships->lock);
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	// Copy region state to output parameter
+	reg->id = region->id;
+	reg->addr = region->addr;
+	reg->size = region->size;
+
+	pthread_mutex_unlock(&memberships->lock);
+	return 0;
+
+fail:
+	return exit_errno;
+}

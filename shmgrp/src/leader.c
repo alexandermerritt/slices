@@ -49,6 +49,7 @@ struct member
 {
 	struct list_head link;
 	struct list_head region_list;
+	pthread_mutex_t lock; //! Region lock
 	pid_t pid;
 	mqd_t mq_in;
 	mqd_t mq_out;
@@ -70,9 +71,9 @@ struct group
 	char memb_dir[MAX_LEN];
 	// TODO other keys needed?
 	struct list_head member_list;
+	pthread_mutex_t lock; //! Member lock
 	group_callback notify;
 	struct inotify_thread_state *inotify_thread;
-	pthread_mutex_t lock; //! Lock for changes to the structure
 };
 
 struct groups
@@ -211,13 +212,16 @@ member_rm_region(struct member *memb, shmgrp_region_id id)
 static int
 member_create_region(struct member *memb, size_t size, struct region **region)
 {
-	int exit_errno;
+	int err, exit_errno;
 	struct region *reg;
 	reg = calloc(1, sizeof(*reg));
 	if (!reg) {
 		exit_errno = -ENOMEM;
 		goto fail;
 	}
+
+	pthread_mutex_lock(&memb->lock);
+
 	reg->id = member_next_region_id(memb); // FIXME Need to lock this??
 	INIT_LIST_HEAD(&reg->link);
 	reg->size = size;
@@ -227,18 +231,27 @@ member_create_region(struct member *memb, size_t size, struct region **region)
 			memb->user_key, memb->pid, reg->id);
 	reg->fd = shm_open(reg->shm_file, SHM_OPEN_LEADER_FLAGS, SHM_PERMS);
 	if (reg->fd < 0){
+		pthread_mutex_unlock(&memb->lock);
 		exit_errno = -(errno);
 		goto fail;
 	}
 	reg->addr = mmap(NULL, reg->size,
 			MMAP_PERMS, MMAP_FLAGS, reg->fd, 0);
 	if (reg->addr == MAP_FAILED) {
+		pthread_mutex_unlock(&memb->lock);
+		exit_errno = -(errno);
+		goto fail;
+	}
+	// Enlarge region from zero to the correct size
+	err = ftruncate(reg->fd, reg->size);
+	if (err < 0) {
 		exit_errno = -(errno);
 		goto fail;
 	}
 
 	member_add_region(memb, reg);
 	*region = reg;
+	pthread_mutex_unlock(&memb->lock);
 	return 0;
 
 fail:
@@ -258,18 +271,23 @@ member_remove_region(struct member *memb, shmgrp_region_id id)
 	int err, exit_errno;
 	struct region *region;
 
+	pthread_mutex_lock(&memb->lock);
+
 	region = member_get_region(memb, id);
 	if (!region) {
+		pthread_mutex_unlock(&memb->lock);
 		exit_errno = -EINVAL;
 		goto fail;
 	}
 	err = munmap(region->addr, region->size);
 	if (err < 0) {
+		pthread_mutex_unlock(&memb->lock);
 		exit_errno = -(errno);
 		goto fail;
 	}
 	err = close(region->fd);
 	if (err < 0) {
+		pthread_mutex_unlock(&memb->lock);
 		exit_errno = -(errno);
 		goto fail;
 	}
@@ -277,6 +295,7 @@ member_remove_region(struct member *memb, shmgrp_region_id id)
 	__member_rm_region(region);
 
 	free(region);
+	pthread_mutex_unlock(&memb->lock);
 	return 0;
 
 fail:
@@ -538,6 +557,7 @@ group_member_join(struct group *group, pid_t pid,
 	memb->notify = func;
 	memb->next_region_id = 1;
 	pthread_mutex_init(&memb->mq_lock, NULL);
+	pthread_mutex_init(&memb->lock, NULL);
 
 	// ----1----
 	// Add the member to the group. This MUST be done prior to both setting
@@ -643,6 +663,7 @@ group_member_leave(struct group *group, pid_t pid)
 	__group_rm_member(group, member);
 
 	if (member_has_regions(member)) {
+		// FIXME
 		fprintf(stderr, "Member '%d' still has regions\n", member->pid);
 	}
 
@@ -1102,6 +1123,79 @@ int shmgrp_establish_member(const char *key, pid_t pid, shm_callback func)
 		goto fail;
 	}
 
+	pthread_mutex_unlock(&groups->lock);
+	return 0;
+
+fail:
+	return exit_errno;
+}
+
+int shmgrp_member_region(const char *key, pid_t pid,
+		shmgrp_region_id id, struct shmgrp_region *reg)
+{
+	int exit_errno = 0;
+	struct group *group;
+	struct member *member;
+	struct region *region;
+
+	// Unfortunately this function can get complicated if we wish to play it
+	// safe. We must be able to perform a lookup without crashing even if
+	// members are leaving or closing their regions.
+	//
+	// Thankfully, pairs of functions control the addition and removal of
+	// elements to and from objects, locking those objects while doing so. i.e.
+	// adding a group means locking the group list; adding a member to a group
+	// means locking the group; etc.  So, hopefully we won't crash if we just
+	// lock everything top-down. In the event of failures, unlock what was
+	// locked in reverse order.
+	//
+	// Note that it may very well be possible that the client code invokes this
+	// function from within their shm_callback! This routine is called from
+	// process_messages which only locks mq_lock in a member, which we do not
+	// use.
+
+	if (!verify_userkey(key) || !reg) {
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	// Lock group list, get group
+	pthread_mutex_lock(&groups->lock);
+	group = groups_get_group(groups, key);
+	if (!group) {
+		pthread_mutex_unlock(&groups->lock);
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	// Lock group, get member
+	pthread_mutex_lock(&group->lock);
+	member = group_get_member(group, pid);
+	if (!member) {
+		pthread_mutex_unlock(&group->lock);
+		pthread_mutex_unlock(&groups->lock);
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	// Lock member, get region
+	pthread_mutex_lock(&member->lock);
+	region = member_get_region(member, id);
+	if (!region) {
+		pthread_mutex_unlock(&member->lock);
+		pthread_mutex_unlock(&group->lock);
+		pthread_mutex_unlock(&groups->lock);
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	// Copy region state to output parameter
+	reg->id = region->id;
+	reg->addr = region->addr;
+	reg->size = region->size;
+
+	pthread_mutex_unlock(&member->lock);
+	pthread_mutex_unlock(&group->lock);
 	pthread_mutex_unlock(&groups->lock);
 	return 0;
 
