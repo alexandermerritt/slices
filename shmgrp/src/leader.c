@@ -484,7 +484,7 @@ group_get_member(struct group *group, pid_t pid)
 }
 
 static inline void
-__group_rm_member(struct group *group, struct member *member)
+__group_rm_member(struct member *member)
 {
 	list_del(&member->link);
 	member->user_key = NULL;
@@ -495,7 +495,8 @@ group_rm_member(struct group *group, pid_t pid)
 {
 	struct member *member;
 	member = group_get_member(group, pid);
-	__group_rm_member(group, member);
+	if (member)
+		__group_rm_member(member);
 	return 0;
 }
 
@@ -584,7 +585,7 @@ group_member_join(struct group *group, pid_t pid,
 	snprintf(memb->mqname_in, MAX_LEN, MQ_NAME_FMT_MEMBER, group->user_key, pid);
 	memb->mq_in = mq_open(memb->mqname_in, MQ_OPEN_CONNECT_FLAGS);
 	if (!MQ_ID_IS_VALID(memb->mq_in)) {
-		__group_rm_member(group, memb);
+		__group_rm_member(memb);
 		pthread_mutex_unlock(&group->lock);
 		exit_errno = -EINVAL;
 		goto fail;
@@ -609,7 +610,7 @@ group_member_join(struct group *group, pid_t pid,
 			memb->user_key, memb->pid);
 	memb->mq_out = mq_open(memb->mqname_out, MQ_OPEN_OWNER_FLAGS, MQ_PERMS, &qattr);
 	if (!MQ_ID_IS_VALID(memb->mq_out)) {
-		__group_rm_member(group, memb);
+		__group_rm_member(memb);
 		pthread_mutex_unlock(&group->lock);
 		exit_errno = -(errno);
 		goto fail;
@@ -621,7 +622,7 @@ group_member_join(struct group *group, pid_t pid,
 	// stack, and the inotify thread stack (of which there exists only ONE) is
 	// the only one to call either group_member_join and group_member_leave,
 	// there is no worry about both functions being on separate simultaneously
-	// executing stacks at the same time.
+	// executing stacks at the same time for the same member.
 	
 	pthread_mutex_unlock(&group->lock);
 	if (new_memb)
@@ -630,7 +631,6 @@ group_member_join(struct group *group, pid_t pid,
 
 fail:
 	// group lock should not be held here
-	// and the new member should not exist in the group
 	if (memb) {
 		if (MQ_ID_IS_VALID(memb->mq_in)) {
 			mq_close(memb->mq_in);
@@ -652,7 +652,7 @@ group_member_leave(struct group *group, pid_t pid)
 	struct member *member;
 
 	// Lock member list, remove member from list, deallocate member resources,
-	// unlock member list, deallocate member.
+	// deallocate member, unlock member list.
 	pthread_mutex_lock(&group->lock);
 	member = group_get_member(group, pid);
 	if (!member) {
@@ -660,7 +660,7 @@ group_member_leave(struct group *group, pid_t pid)
 		exit_errno = -ENOENT;
 		goto fail;
 	}
-	__group_rm_member(group, member);
+	__group_rm_member(member);
 
 	if (member_has_regions(member)) {
 		// FIXME
@@ -913,11 +913,12 @@ int shmgrp_init_leader(void)
 {
 	int err, exit_errno;
 	if (groups) {
-		exit_errno = -EEXIST;
+		return -EEXIST; // don't go to fail, as groups will be deallocated
 	}
 	groups = calloc(1, sizeof(*groups));
 	if (!groups) {
 		exit_errno = -ENOMEM;
+		goto fail;
 	}
 	INIT_LIST_HEAD(&groups->list);
 	pthread_mutex_init(&groups->lock, NULL);
@@ -929,6 +930,8 @@ int shmgrp_init_leader(void)
 	}
 	return 0;
 fail:
+	if (groups)
+		free(groups);
 	return exit_errno;
 }
 
