@@ -2,3 +2,4 @@ Problems
 - Forking after setting notify on a message queue is bad. We'll have to break
 member joining in the leader into two steps: 1) upcall the leader to tell it we
 have a new member, then 2) let it call down to tell us to set notify on the mq
+	+ this has been coded, but not tested with a fork
