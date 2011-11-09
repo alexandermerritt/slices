@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/inotify.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -37,16 +38,26 @@ struct region
 	int fd;
 	void *addr;
 	size_t size;
-	char shm_key[MAX_LEN];
+	char shm_file[MAX_LEN];
+	shmgrp_region_id id; // leader creates the ID
 };
+
+// forward declaration
+struct group;
 
 struct member
 {
 	struct list_head link;
 	struct list_head region_list;
 	pid_t pid;
-	mqd_t mq_id;
-	char mq_name[MAX_LEN];
+	mqd_t mq_in;
+	mqd_t mq_out;
+	char mqname_in[MAX_LEN];
+	char mqname_out[MAX_LEN];
+	shmgrp_region_id next_region_id;
+	shm_callback notify;
+	pthread_mutex_t mq_lock; //! Lock held when processing messages
+	const char * user_key; // points to char user_key in group
 };
 
 // forward declaration
@@ -59,9 +70,9 @@ struct group
 	char memb_dir[MAX_LEN];
 	// TODO other keys needed?
 	struct list_head member_list;
-	membership_callback notify;
+	group_callback notify;
 	struct inotify_thread_state *inotify_thread;
-	pthread_mutex_t lock;
+	pthread_mutex_t lock; //! Lock for changes to the structure
 };
 
 struct groups
@@ -159,10 +170,117 @@ static struct groups *groups = NULL;
 #define member_for_each_region(member, region)	\
 	list_for_each_entry(region, &((member)->region_list), link)
 
+static inline shmgrp_region_id
+member_next_region_id(struct member *memb)
+{
+	// obviously not thread-safe
+	return (memb->next_region_id++);
+}
+
 static inline void
 member_add_region(struct member *mem, struct region *reg)
 {
 	list_add(&(reg->link), &(mem->region_list));
+}
+
+static inline struct region *
+member_get_region(struct member *memb, shmgrp_region_id id)
+{
+	struct region *region;
+	member_for_each_region(memb, region)
+		if (region->id == id)
+			return region;
+	return NULL;
+}
+
+static inline void
+__member_rm_region(struct region *region)
+{
+	list_del(&region->link);
+}
+
+static inline void
+member_rm_region(struct member *memb, shmgrp_region_id id)
+{
+	struct region *region;
+	region = member_get_region(memb, id);
+	if (region)
+		__member_rm_region(region);
+}
+
+static int
+member_create_region(struct member *memb, size_t size, struct region **region)
+{
+	int exit_errno;
+	struct region *reg;
+	reg = calloc(1, sizeof(*reg));
+	if (!reg) {
+		exit_errno = -ENOMEM;
+		goto fail;
+	}
+	reg->id = member_next_region_id(memb); // FIXME Need to lock this??
+	INIT_LIST_HEAD(&reg->link);
+	reg->size = size;
+
+	// Map in the shm file
+	snprintf(reg->shm_file, MAX_LEN, SHM_NAME_FMT,
+			memb->user_key, memb->pid, reg->id);
+	reg->fd = shm_open(reg->shm_file, SHM_OPEN_LEADER_FLAGS, SHM_PERMS);
+	if (reg->fd < 0){
+		exit_errno = -(errno);
+		goto fail;
+	}
+	reg->addr = mmap(NULL, reg->size,
+			MMAP_PERMS, MMAP_FLAGS, reg->fd, 0);
+	if (reg->addr == MAP_FAILED) {
+		exit_errno = -(errno);
+		goto fail;
+	}
+
+	member_add_region(memb, reg);
+	*region = reg;
+	return 0;
+
+fail:
+	if (reg) {
+		if (reg->addr != MAP_FAILED)
+			munmap(reg->addr, reg->size);
+		if (reg->fd >= 0)
+			close(reg->fd);
+		free(reg);
+	}
+	return exit_errno;
+}
+
+static int
+member_remove_region(struct member *memb, shmgrp_region_id id)
+{
+	int err, exit_errno;
+	struct region *region;
+
+	region = member_get_region(memb, id);
+	if (!region) {
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+	err = munmap(region->addr, region->size);
+	if (err < 0) {
+		exit_errno = -(errno);
+		goto fail;
+	}
+	err = close(region->fd);
+	if (err < 0) {
+		exit_errno = -(errno);
+		goto fail;
+	}
+
+	__member_rm_region(region);
+
+	free(region);
+	return 0;
+
+fail:
+	return exit_errno;
 }
 
 #if 0
@@ -187,6 +305,133 @@ member_has_regions(struct member *mem)
 	return !list_empty(&(mem->region_list));
 }
 
+// Send a message. If we receive some signal while sending, we retry the send.
+// If the out MQ is full, we spin trying to send until the MQ accepts it.
+static int
+member_send_message(struct member *memb, struct message *msg)
+{
+	int err, exit_errno;
+again:
+	err = mq_send(memb->mq_out, (char*)msg, sizeof(*msg), MQ_DFT_PRIO);
+	if (err < 0) {
+		if (errno == EINTR)
+			goto again; // A signal interrupted the call, try again
+		if (errno == EAGAIN)
+			goto again; // MQ is full, try again (spin)
+		exit_errno = -(errno);
+		goto fail;
+	}
+	return 0;
+fail:
+	return exit_errno;
+}
+
+// Receive a message. If we are sent some signal while receiving, we retry the
+// receive. If the in MQ is empty, we return with -EAGAIN instead of spinning.
+static int
+member_recv_message(struct member *memb, struct message *msg)
+{
+	int err, exit_errno;
+again:
+	err = mq_receive(memb->mq_in, (char*)msg, sizeof(*msg), NULL);
+	if (err < 0) {
+		if (errno == EINTR)
+			goto again; // A signal interrupted the call, try again
+		exit_errno = -(errno); // must do this, as EAGAIN indicates empty queue
+		goto fail;
+	}
+	return 0;
+fail:
+	return exit_errno;
+}
+
+// forward declaration
+static void process_messages(union sigval);
+
+static inline int
+member_set_notify(struct member *memb)
+{
+	int err;
+	struct sigevent event;
+	memset(&event, 0, sizeof(event));
+	event.sigev_notify = SIGEV_THREAD;
+	event.sigev_notify_function = process_messages;
+	event.sigev_value.sival_ptr = memb;
+	err = mq_notify(memb->mq_in, &event);
+	if (err < 0)
+		return -(errno);
+	return 0;
+}
+
+/* Call this when we expect there may be messages on the queue. If there are
+ * none, this function does nothing. This function must be thread-safe. */
+void member_process_messages(struct member *memb)
+{
+	int err;
+	struct message msg;
+	struct region *region = NULL;
+
+	pthread_mutex_lock(&memb->mq_lock);
+
+	// Re-enable notification on the message queue. The man page says
+	// notifications are one-shot, and need to be reset after each trigger. It
+	// additionally says that notifications are only triggered upon receipt of a
+	// message on an empty queue. Thus we set notification first, then empty the
+	// queue completely.
+	err = member_set_notify(memb);
+	if (err < 0) {
+		fprintf(stderr, "Error setting notify on member %d: %s\n",
+				memb->pid, strerror(-(err)));
+		pthread_mutex_unlock(&memb->mq_lock);
+
+		return;
+	}
+
+	// Pull all messages out until the queue is empty. For each message, process
+	// it (either add or remove a region) and invoke the group callback with the
+	// new state.
+	while (1) {
+		err = member_recv_message(memb, &msg); // does not block if MQ is empty
+		if (err < 0) {
+			if (err == -EAGAIN)
+				break; // MQ is empty, notify will trigger next time
+			fprintf(stderr, "Error recv msg from memb %d: %s\n",
+					memb->pid, strerror(-(err)));
+		}
+
+		// we shouldn't have to lock creating/destroying regions as there is
+		// only one notification thread per member which calls this function
+
+		if (msg.type == MESSAGE_CREATE_SHM) {
+			err = member_create_region(memb, msg.m.region.size, &region);
+			if (err < 0) {
+				msg.m.region.status = err;
+			} else {
+				msg.m.region.id = region->id;
+				msg.m.region.status = 0; // = okay
+			}
+			err = member_send_message(memb, &msg); // spins on send unless error
+			if (err < 0)
+				fprintf(stderr, "Error sending create shm reply to %d: %s\n",
+						memb->pid, strerror(-(err)));
+			// upcall is last step
+			memb->notify(SHM_CREATE_REGION, memb->pid, msg.m.region.id);
+		}
+
+		else if (msg.type == MESSAGE_REMOVE_SHM) {
+			// upcall is first step
+			memb->notify(SHM_REMOVE_REGION, memb->pid, msg.m.region.id);
+			msg.m.region.status = member_remove_region(memb, msg.m.region.id);
+			err = member_send_message(memb, &msg); // spins on send unless error
+			if (err < 0)
+				fprintf(stderr, "Error sending remove shm reply to %d: %s\n",
+						memb->pid, strerror(-(err)));
+			break;
+		}
+	}
+	pthread_mutex_unlock(&memb->mq_lock);
+}
+
 /*
  * Group operations.
  */
@@ -195,9 +440,10 @@ member_has_regions(struct member *mem)
 	list_for_each_entry(member, &((group)->member_list), link)
 
 static inline void
-group_add_member(struct group *group, struct member *mem)
+__group_add_member(struct group *group, struct member *memb)
 {
-	list_add(&(mem->link), &(group->member_list));
+	list_add(&(memb->link), &(group->member_list));
+	memb->user_key = group->user_key;
 }
 
 static inline bool
@@ -222,6 +468,7 @@ static inline void
 __group_rm_member(struct group *group, struct member *member)
 {
 	list_del(&member->link);
+	member->user_key = NULL;
 }
 
 static inline int
@@ -248,21 +495,22 @@ group_stop_inotify(struct group *group)
 	}
 }
 
-// forward declaration
-static void process_message(union sigval);
-
+// Locks the group. Verifies member pid doesn't already exist, creates new
+// member, opens all MQs and adds member to group.
+//
+// This function performs a sequence of steps whose ordering is extremely vital,
+// because it must perform actions LOCK-STEP with what happens or what MAY
+// HAPPEN in the member (join, then mkreg or leave in any order, any number of
+// times).
 static int
-group_member_join(struct group *group, pid_t pid, struct member **new_memb)
+group_member_join(struct group *group, pid_t pid,
+		shm_callback func, struct member **new_memb)
 {
-	int err, exit_errno;
+	int exit_errno;
 	struct mq_attr qattr;
-	struct sigevent event;
 	struct member *memb = NULL;
-	char pid_str[MAX_LEN];
 
-	memset(&event, 0, sizeof(event));
 	memset(&qattr, 0, sizeof(qattr));
-	memset(pid_str, 0, MAX_LEN);
 
 	// Lock the group in case there are multiple joins to the same group at the
 	// same time. Release lock when a new member has been added.
@@ -285,56 +533,106 @@ group_member_join(struct group *group, pid_t pid, struct member **new_memb)
 	INIT_LIST_HEAD(&memb->link);
 	INIT_LIST_HEAD(&memb->region_list);
 	memb->pid = pid;
-	memb->mq_id = MQ_ID_INVALID_VALUE;
+	memb->mq_in = MQ_ID_INVALID_VALUE;
+	memb->mq_out = MQ_ID_INVALID_VALUE;
+	memb->notify = func;
+	memb->next_region_id = 1;
+	pthread_mutex_init(&memb->mq_lock, NULL);
 
-	// Create a message queue and turn on asynchronous notification.
-	snprintf(pid_str, MAX_LEN, "%d", pid);
-	snprintf(memb->mq_name, MAX_LEN, MQ_NAME_FMT, group->user_key, pid_str);
+	// ----1----
+	// Add the member to the group. This MUST be done prior to both setting
+	// notification on MQ-in and allowing the member to wake up (creating
+	// MQ-out). The reason is because once notify is enabled and the member
+	// woken up, the member may send a message to us. This will trigger the
+	// notify thread to process any messages from the member, which involves
+	// invoking the member callback routine. Within this routine, the application
+	// may request we LOOKUP the region we just created. However if the member
+	// has not yet been added to the group, that will fail. So we add the member
+	// to the group here.
+	__group_add_member(group, memb);
+
+	// ----2----
+	// OPEN the MQ under ownership of the member (MQ-in). If this fails, then
+	// the PID reported to us is not actually requesting to join the group
+	// (because in join() it should have created our MQ-in, or from its
+	// perspective, MQ-out). Thus if mq_open fails with errno ENOENT, it merely
+	// means that the group_callback within the application has borked its value
+	// of pid, somehow. But that is unlikely.
+	//
+	// The member process is still blocked in its call to join() at this point,
+	// waiting for us to CREATE MQ-out (what it calls MQ-in within member.c).
+	snprintf(memb->mqname_in, MAX_LEN, MQ_NAME_FMT_MEMBER, group->user_key, pid);
+	memb->mq_in = mq_open(memb->mqname_in, MQ_OPEN_CONNECT_FLAGS);
+	if (!MQ_ID_IS_VALID(memb->mq_in)) {
+		__group_rm_member(group, memb);
+		pthread_mutex_unlock(&group->lock);
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	// ----3----
+	// Enable notification on our MQ-in BEFORE we create our MQ-out.
+	// Notification is ONLY triggered when a message arrives to an EMPTY MQ.
+	// Thus we enable notification before the member wakes up to prevent it from
+	// injecting a message on our MQ-in before we're able to set notification.
+	// The member wakes up once we create our MQ-out (below).
+	member_set_notify(memb);
+
+	// ----4----
+	// Create the MQ under our ownership. Owned MQs are used for sending. This
+	// wakes up the member, allowing it to return from a call to join(). Thus
+	// ANYTIME AFTER THIS POINT the member application may send messages on
+	// MQ-in or request to leave the group.
 	qattr.mq_maxmsg = MQ_MAX_MESSAGES;
-	qattr.mq_msgsize = sizeof(struct message);
-	memb->mq_id = mq_open(memb->mq_name, MQ_OPEN_LEADER_FLAGS, MQ_PERMS, &qattr);
-	if (!MQ_ID_IS_VALID(memb->mq_id)) {
-		pthread_mutex_unlock(&group->lock);
-		exit_errno = -(errno);
-		goto fail;
-	}
-	event.sigev_notify = SIGEV_THREAD; // async
-	event.sigev_notify_function = process_message;
-	event.sigev_value.sival_ptr = memb; // member state for this queue
-	err = mq_notify(memb->mq_id, &event);
-	if (err < 0) {
+	qattr.mq_msgsize = MQ_MAX_MSG_SIZE;
+	snprintf(memb->mqname_out, MAX_LEN, MQ_NAME_FMT_LEADER,
+			memb->user_key, memb->pid);
+	memb->mq_out = mq_open(memb->mqname_out, MQ_OPEN_OWNER_FLAGS, MQ_PERMS, &qattr);
+	if (!MQ_ID_IS_VALID(memb->mq_out)) {
+		__group_rm_member(group, memb);
 		pthread_mutex_unlock(&group->lock);
 		exit_errno = -(errno);
 		goto fail;
 	}
 
-	// Add the member as the very last operation (else we might have to remove
-	// it again in the fail code below).
-	group_add_member(group, memb);
+	// If the member application decided to withdraw its membership from us
+	// RIGHT NOW, it will delete (unlink) its membership file from the
+	// directory. Since this function will only exist on the inotify thread
+	// stack, and the inotify thread stack (of which there exists only ONE) is
+	// the only one to call either group_member_join and group_member_leave,
+	// there is no worry about both functions being on separate simultaneously
+	// executing stacks at the same time.
+	
 	pthread_mutex_unlock(&group->lock);
-	*new_memb = memb;
+	if (new_memb)
+		*new_memb = memb;
 	return 0;
 
 fail:
 	// group lock should not be held here
+	// and the new member should not exist in the group
 	if (memb) {
-		if (MQ_ID_IS_VALID(memb->mq_id)) {
-			mq_close(memb->mq_id);
-			mq_unlink(memb->mq_name);
+		if (MQ_ID_IS_VALID(memb->mq_in)) {
+			mq_close(memb->mq_in);
+		}
+		if (MQ_ID_IS_VALID(memb->mq_out)) {
+			mq_close(memb->mq_out);
+			mq_unlink(memb->mqname_out);
 		}
 		free(memb);
 	}
 	return exit_errno;
 }
 
+// Locks the group, removes a member, destroys member and all resources.
 static int
 group_member_leave(struct group *group, pid_t pid)
 {
 	int err, exit_errno;
 	struct member *member;
 
-	// Lock group, remove group from list, unlock group. Then we can take our
-	// time to deallocate the group and its resources.
+	// Lock member list, remove member from list, deallocate member resources,
+	// unlock member list, deallocate member.
 	pthread_mutex_lock(&group->lock);
 	member = group_get_member(group, pid);
 	if (!member) {
@@ -343,22 +641,35 @@ group_member_leave(struct group *group, pid_t pid)
 		goto fail;
 	}
 	__group_rm_member(group, member);
-	pthread_mutex_unlock(&group->lock);
 
-	// Indicate we no longer will use the message queue
-	err = mq_close(member->mq_id);
+	if (member_has_regions(member)) {
+		fprintf(stderr, "Member '%d' still has regions\n", member->pid);
+	}
+
+	// Indicate we no longer will use the message queues
+	err = mq_close(member->mq_in);
 	if (err < 0) {
+		pthread_mutex_unlock(&group->lock);
 		exit_errno = -(errno);
 		goto fail;
 	}
-	// Destroy the message queue; the kernel will deallocate it once everyone
+	err = mq_close(member->mq_out);
+	if (err < 0) {
+		pthread_mutex_unlock(&group->lock);
+		exit_errno = -(errno);
+		goto fail;
+	}
+	// Destroy our message queue; the kernel will deallocate it once everyone
 	// who has opened it has closed it
-	err = mq_unlink(member->mq_name);
+	err = mq_unlink(member->mqname_out);
 	if (err < 0) {
+		pthread_mutex_unlock(&group->lock);
 		exit_errno = -(errno);
 		goto fail;
 	}
+
 	free(member);
+	pthread_mutex_unlock(&group->lock);
 	return 0;
 
 fail:
@@ -432,14 +743,17 @@ proto_str(proto_code c)
 
 /*-------------------------------------- INTERNAL THREADING ------------------*/
 
-//! Function registered to all message queue notify callbacks.
+/**
+ * Function registered to ALL message queue notify callbacks. It must be
+ * thread-safe.
+ */
 static void
-process_message(union sigval sval)
+process_messages(union sigval sval)
 {
-	// this function is registered for all message queue callbacks, thus we
-	// extract our specific state from the argument
-	//struct group *group = (struct group *)sval.sival_ptr;
-	printf("%s\n", __func__);
+	struct member *memb;
+	// Extract our specific state from the argument; no locking needed.
+	memb = (struct member*) sval.sival_ptr;
+	member_process_messages(memb);
 }
 
 static void
@@ -479,6 +793,7 @@ inotify_thread(void *arg)
 	int wd; //! inotify watch descriptor
 	int len, err;
 	struct group *group = state->group;
+	pid_t pid;
 
 	pthread_cleanup_push(inotify_thread_cleanup, state);
 	state->is_alive = true;
@@ -533,48 +848,30 @@ inotify_thread(void *arg)
 				exit_loop = true;
 				break;
 			}
+
+			pid = atoi(event->name);
 			switch (event->mask) {
+
 				case IN_CREATE:
-				{
-					pid_t pid = atoi(event->name);
-					struct member *new_memb;
-					err = group_member_join(state->group, pid, &new_memb);
-					if (err < 0) {
-						// stop on fault; either the member code is broken or
-						// someone is manually screwing with our directories
-						// and/or files. member code should prevent a client
-						// from successfully calling shmgrp_join more than once
-						// on the same group.
-						state->exit_code = err;
-						exit_loop = true;
-						break;
-					}
-					group->notify(MEMBERSHIP_JOIN, new_memb->pid);
-				}
-				break;
+					group->notify(MEMBERSHIP_JOIN, pid);
+					// group_member_join is invoked via a function exposed to
+					// the caller; they decided whether or not to accept it.
+					break;
+
 				case IN_DELETE:
-				{
-					pid_t pid = atoi(event->name);
+					group->notify(MEMBERSHIP_LEAVE, pid);
 					err = group_member_leave(group, pid);
 					if (err < 0) {
-						// stop on fault; either the member code is broken or
-						// someone is manually screwing with our directories
-						// and/or files. member code should prevent a client
-						// from successfully calling shmgrp_leave more than once
-						// on the same group.
 						state->exit_code = err;
 						exit_loop = true;
 					}
-					group->notify(MEMBERSHIP_LEAVE, pid);
-				}
-				break;
+					break;
+
 				default:
-				{
 					state->exit_code = -EPROTO;
 					state->proto_error = PROTO_UNSUPPORTED_EVT_MASK;
 					exit_loop = true;
-				}
-				break;
+					break;
 			}
 			i += INOTIFY_EVENT_SZ + event->len;
 		}
@@ -624,7 +921,7 @@ int shmgrp_tini_leader(void)
 	return 0;
 }
 
-int shmgrp_open(const char *key, membership_callback func)
+int shmgrp_open(const char *key, group_callback func)
 {
 	int err, exit_errno;
 	struct group *new_grp = NULL;
@@ -693,7 +990,9 @@ int shmgrp_open(const char *key, membership_callback func)
 	// init remaining useful group fields
 	INIT_LIST_HEAD(&new_grp->link);
 	INIT_LIST_HEAD(&new_grp->member_list);
+	pthread_mutex_init(&new_grp->lock, NULL);
 	new_grp->notify = func;
+
 	err = pthread_create(&(tstate->tid), NULL, inotify_thread, tstate);
 	if (err < 0) {
 		exit_errno = -(errno); // possible internal error, maybe don't expose this?
@@ -763,6 +1062,43 @@ int shmgrp_close(const char *key)
 					" delete manually\n", path);
 		pthread_mutex_unlock(&groups->lock);
 		exit_errno = -(errno);
+		goto fail;
+	}
+
+	pthread_mutex_unlock(&groups->lock);
+	return 0;
+
+fail:
+	return exit_errno;
+}
+
+// This function completes the addition of a member to a group. It is ONLY
+// invoked by the application's group_callback routine. That routine has been in
+// turn invoked by our inotify thread, as the creation of a group establishes
+// the group_callback routine within the application. Thus, this function will
+// ONLY ever exist on the inotify thread's stack.
+int shmgrp_establish_member(const char *key, pid_t pid, shm_callback func)
+{
+	int err, exit_errno = 0;
+	struct group *group = NULL;
+
+	if (!verify_userkey(key) || !func) {
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	pthread_mutex_lock(&groups->lock);
+
+	group = groups_get_group(groups, key);
+	if (!group) {
+		pthread_mutex_unlock(&groups->lock);
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+	err = group_member_join(group, pid, func, NULL);
+	if (err < 0) {
+		pthread_mutex_unlock(&groups->lock);
+		exit_errno = err;
 		goto fail;
 	}
 

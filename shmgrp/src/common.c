@@ -48,7 +48,7 @@ int shmgrp_tini(void)
 	return 0;
 }
 
-const char * shmgrp_memb_str(membership_event e)
+const char * shmgrp_memb_str(group_event e)
 {
 	switch (e) {
 		case MEMBERSHIP_JOIN:
