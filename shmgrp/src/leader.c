@@ -777,6 +777,46 @@ process_messages(union sigval sval)
 	member_process_messages(memb);
 }
 
+/**
+ * Arguments to group_callback + pointer to notify function. Used by the thread
+ * spawned to invoke that callback.
+ */
+struct group_callback_args
+{
+	group_event e;
+	pid_t pid;
+	struct group *group;
+};
+
+/**
+ * Thread created for each invocation of the group_callback when the inotify
+ * thread created for the group observes an event.
+ *
+ * The reason we spawn a thread, is in case the user does a fork() inside
+ * group_notify. fork() recreates only the calling thread in the process. Should
+ * we not create a thread to invoke the callback, the inotify thread will exist
+ * in the child and will return: there will then be an additional thread
+ * observing for group joins/leaves.  This may not be expected behavior. We can
+ * always not create a thread in the future and do something else.
+ *
+ * The client probably shouldn't call fork in any other situation...
+ */
+static void *
+group_notify_thread(void *arg)
+{
+	int err;
+	struct group_callback_args *args = (struct group_callback_args*)arg;
+	args->group->notify(args->e, args->pid);
+	if (args->e == MEMBERSHIP_LEAVE) {
+		err = group_member_leave(args->group, args->pid);
+		if (err < 0)
+			fprintf(stderr, "%s: error calling group_member_leave(%p, %d)\n",
+					__func__, args->group, args->pid);
+	}
+	free(args);
+	return NULL;
+}
+
 static void
 inotify_thread_cleanup(void *arg)
 {
@@ -870,22 +910,29 @@ inotify_thread(void *arg)
 				break;
 			}
 
+			// Spawn a new thread to invoke the group_callback given to us for
+			// the group. Give the thread its own argument structure which it
+			// will deallocate.
 			pid = atoi(event->name);
+			pthread_t dontneed;
+			struct group_callback_args *args = calloc(1, sizeof(*args));
+			if (!args) {
+				state->exit_code = -ENOMEM;
+				exit_loop = true;
+				break;
+			}
+			args->group = group;
+			args->pid = pid;
 			switch (event->mask) {
 
 				case IN_CREATE:
-					group->notify(MEMBERSHIP_JOIN, pid);
+					args->e = MEMBERSHIP_JOIN;
 					// group_member_join is invoked via a function exposed to
-					// the caller; they decided whether or not to accept it.
+					// the caller; they decide whether or not to accept it.
 					break;
 
 				case IN_DELETE:
-					group->notify(MEMBERSHIP_LEAVE, pid);
-					err = group_member_leave(group, pid);
-					if (err < 0) {
-						state->exit_code = err;
-						exit_loop = true;
-					}
+					args->e = MEMBERSHIP_LEAVE;
 					break;
 
 				default:
@@ -893,6 +940,14 @@ inotify_thread(void *arg)
 					state->proto_error = PROTO_UNSUPPORTED_EVT_MASK;
 					exit_loop = true;
 					break;
+			}
+			if (exit_loop == true)
+				break;
+			err = pthread_create(&dontneed, NULL, group_notify_thread, (void*)args);
+			if (err < 0) {
+				state->exit_code = -ENOMEM;
+				exit_loop = true;
+				break;
 			}
 			i += INOTIFY_EVENT_SZ + event->len;
 		}

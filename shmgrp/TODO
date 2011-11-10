@@ -1,5 +1,22 @@
 Problems
+
 - Forking after setting notify on a message queue is bad. We'll have to break
 member joining in the leader into two steps: 1) upcall the leader to tell it we
 have a new member, then 2) let it call down to tell us to set notify on the mq
 	+ this has been coded, but not tested with a fork
+
+- When forked from the group_callback function, notify has not been set yet. It
+will be set when establish_member is called. Forking only copies the thread
+invoking fork(), which would be the inotify thread. In a child process, this
+inotify may go back to watching the directory again for members. But this should
+not happen because it already occurs in the parent (we'd get N inotify threads
+for N forks). Two solutions may exist:
+	1) init records the pid of the process. when inotify returns from calling
+the callback, it verifies the pid recorded has not changed. If so, it
+immediately exits.
+	2) the inotify thread could spawn a thread to call the notify callback each
+time. Thus fork would fork that thread that was spawned, since that one will
+have called fork() (and fork doesn't duplicate all threads, thus the inotify
+thread would not exist in the child).
+
+	I've implemented the second option.
