@@ -462,9 +462,7 @@ fail:
 
 static int node_main_shutdown(void)
 {
-	int err;
 	struct node_participant *node_pos = NULL, *node_tmp = NULL;
-	struct assembly *asm_pos = NULL, *asm_tmp = NULL;
 
 	// Free participant list. We assume all minions have unregistered at this
 	// point (meaning only one entry in the list).
@@ -477,21 +475,11 @@ static int node_main_shutdown(void)
 		free(node_pos);
 	}
 
-	// Free assembly list. Again, we assume minions have shutdown their
-	// assemblies, leaving this list empty.
+	// We assume minions have shutdown their assemblies, leaving this list
+	// empty.
 	if (!list_empty(&internals->assembly_list)) {
 		printd(DBG_ERROR, "Assemblies still exist!\n");
 		fprintf(stderr, "Assemblies still exist!\n");
-		list_for_each_entry_safe(asm_pos, asm_tmp,
-				&internals->assembly_list, link) {
-			err = assembly_teardown(asm_pos->id);
-			if (err < 0) {
-				printd(DBG_ERROR, "could not teardown assembly %lu\n",
-						asm_pos->id);
-			}
-			list_del(&asm_pos->link);
-			free(asm_pos);
-		}
 	}
 
 	free(internals);
@@ -828,5 +816,31 @@ int assembly_teardown(asmid_t id)
 {
 	// TODO send rpc to main to close the assembly if a minion, but we do not
 	// unregister ourself with main
+	int err;
+	struct assembly *assm = NULL;
+	if (!internals) {
+		printd(DBG_ERROR, "assembly runtime not initialized\n");
+		goto fail;
+	}
+	err = pthread_mutex_lock(&internals->lock);
+	if (err < 0) {
+		printd(DBG_ERROR, "Could not lock internals\n");
+		goto fail;
+	}
+	assm = __find_assembly(id);
+	if (!assm) {
+		printd(DBG_ERROR, "Invalid assembly ID %lu\n", id);
+		goto fail;
+	}
+	list_del(&assm->link);
+	free(assm);
+	err = pthread_mutex_unlock(&internals->lock);
+	if (err < 0) {
+		printd(DBG_ERROR, "Could not unlock internals\n");
+		goto fail;
+	}
+	return 0;
+
+fail:
 	return -1;
 }

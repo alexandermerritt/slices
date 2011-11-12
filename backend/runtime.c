@@ -46,8 +46,6 @@ static void runtime_entry(group_event e, pid_t pid)
 	memset(&hint, 0, sizeof(hint));
 	hint.num_gpus = 1;
 
-	memset(&sink_child, 0, sizeof(sink_child));
-
 	switch (e) {
 		case MEMBERSHIP_JOIN:
 		{
@@ -91,6 +89,17 @@ static void runtime_entry(group_event e, pid_t pid)
 						sink_child.pid);
 			}
 			printd(DBG_DEBUG, "Child exited with code %d\n", ret);
+			// Now kill its assembly
+			// XXX XXX XXX
+			// Only kill its assembly IF there are no longer any processes in
+			// its application group using the assembly! Not sure how to verify
+			// this.
+			// XXX XXX XXX
+			err = assembly_teardown(sink_child.asmid);
+			if (err < 0) {
+				printd(DBG_ERROR, "Could not destroy assembly %lu\n",
+						sink_child.asmid);
+			}
 		}
 		break;
 		default:
@@ -123,6 +132,8 @@ static int start_runtime(void)
 		shmgrp_tini();
 		return -1;
 	}
+	// FIXME Initialize a list of sinks instead of one child.
+	memset(&sink_child, 0, sizeof(sink_child));
 	return 0;
 }
 
