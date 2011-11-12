@@ -12,6 +12,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #define DEBUG
 
@@ -57,7 +58,7 @@
 #define printd(level, fmt, args...)                                     \
     do {                                                                \
         if((level) <= DBG_LEVEL) {                                      \
-            printf("<%d> %s::%s[%d]: ", (level), __FILE__, __func__, __LINE__);   \
+            printf("<%d> (%d) %s::%s[%d]: ", (level), getpid(), __FILE__, __func__, __LINE__);   \
             printf(fmt, ##args);                                        \
             fflush(stdout);                                             \
         }                                                               \
