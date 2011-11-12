@@ -21,28 +21,61 @@ Legend
 [L]		works, but some limitations (noted with feature)
 [C]		complete
 
-Items
-[L]		implement libregistration
-[ ]			multi-process (able to support multiple process reg without restart)
-[ ]			multi-threading (?)
-[ ]			multiple watches
-[ ]			convert to self-contained library
+Updated 2011-11-12
 
-[ ]		support multiple fat cubin binaries
-[ ]		all hidden register calls need to be duplicated for across nodes in assm
-[ ]		registered variables (the symbols) are assumed at the moment to be
+Assembly Runtime
+================
+	[C] design assembly interface
+	[L] implement framework
+		[C] starting runtime does self-discovery
+		[L] node adds self to participants
+			(not yet distributed)
+		[L] start assembly composition
+	- shared memory library
+		[C] "libregistration" - now obsolete
+		[C] multi-process-aware
+		[C] multi-threading-aware
+		[C] self-contained library
+
+	[C] support multiple fat binaries
+
+	- network API (Magda)
+		[L] IB
+			some bugs at the moment
+		[C] sockets
+		[C] single library
+
+	- distributed assembly (Alex)
+		[ ] assembly RPC thread
+		[ ] [support executing apps on nodes w/o GPUs]
+		[ ] implement separation of local/remote assembly interfaces
+		[ ] add use of monitoring API to assembly composition
+		[ ] duplicate register calls across nodes in assembly
+
+	- remote data paths (Alex w/ network API)
+		[ ] duplicate hidden CUDA register calls across nodes in assembly
+		[ ] what is local:remote sink process configuration?
+
+	[ ] incorporate notion of groups in assemblies, for MPI apps (Alex)
+
+	[ ] multi-threaded backend processes (Alex)
+		[ ] needed to perform scheduling, and to support multi-threaded apps
+
+	[ ] scheduling interface (Dipanjan)
+
+Monitoring
+==========
+	[ ] Design data structure(s) for exporting Lynx data (Naila)
+	[ ] glue Lynx and local monitor with shmgrp (Naila + Alex)
+	[ ] push Lynx data from local->global monitor (Alex + Magda)
+	[ ] design API to access all of monitoring data (Naila + Alex)
+	[ ] build library code to expose this API (Alex + Naila)
+	[ ] glue global monitor and library with shmgrp (Alex + Naila)
+
+Other details
+=============
+	[ ]	registered variables (the symbols) are assumed at the moment to be
 		memory addresses; the runtime says they may also be strings: remove this
 		assumption
 			libci.c : cudaMemcpy[To|From]Symbol
 			localsink.c : nv_exec_pkt
-
-[L]		assembly interface
-[ ]			assembly RPC (ability for node to be included in runtime)
-[ ]			add monitoring data to assembly composition
-[ ]			support notion of group membership for MPI codes
-
-[ ]		networking interface
-
-[ ]		scheduling interface
-
-[ ]		support execution of CUDA apps on machines without GPUs? (all remote)
