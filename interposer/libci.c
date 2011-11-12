@@ -55,37 +55,38 @@
 
 /*-------------------------------------- INCLUDES ----------------------------*/
 
-#include <stdio.h>
-#include <driver_types.h>
-
-// /opt/cuda/include for uint3
-#include <vector_types.h>
-#include <string.h>
-#include <stdlib.h>
-#include <dlfcn.h>
-
-#include <cuda.h>		// for CUDA_SUCCESS
-#include <__cudaFatFormat.h>  // for __cudaFatCudaBinary
-#include "packetheader.h" 	// for cuda_packet_t
-#include "debug.h"			// printd, ERROR, OK
-#include <pthread.h>		// pthread_self()
-#include "method_id.h"		// method identifiers
-#include "libciutils.h"
+// System includes
 #include <assert.h>
+#include <dlfcn.h>
+#include <pthread.h>
+#include <stdbool.h> // because C doesn't have a bool type
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include <glib.h>		// for GHashTable
-#include "kidron_common_s.h" // for ini file
+// CUDA includes
+#include <__cudaFatFormat.h>
+#include <cuda.h>
+#include <driver_types.h>
+#include <vector_types.h>
 
-#include <util/x86_system.h> // memory barriers
+// Project includes
 #include <assembly.h>
+#include <config.h>
+#include <debug.h>			// printd, ERROR, OK
+#include <kidron_common_s.h> // for ini file
+#include <method_id.h>		// method identifiers
+#include <packetheader.h> 	// for cuda_packet_t
+#include <shmgrp.h>
 #include <util/compiler.h>
-#include <common/libregistration.h>
+#include <util/x86_system.h> // memory barriers
 
-#include "config.h"
+// Directory-immediate includes
+#include "libciutils.h"
 
 /* preprocess out debug statements */
-//#undef printd
-//#define printd(level, fmt, args...)
+#undef printd
+#define printd(level, fmt, args...)
 
 /*-------------------------------------- EXTERNS -----------------------------*/
 
@@ -94,34 +95,7 @@ extern int ini_getLocal(const ini_t* pIni);
 extern int ini_getIni(ini_t* pIni);
 extern int ini_freeIni(ini_t* pIni);
 
-/*-------------------------------------- DEFINITIONS -------------------------*/
-
-/**
- * Struct representing the state associated with registration with the backend
- * process. Just a place to store this local collection of information. Each
- * registration ID is associated with a different memory region. TODO Currently
- * the registration library does not support more than one. When it does, each
- * may be used by a different application thread to store packets.
- * TODO Use a thread ID to index into the correct shm.
- */
-struct backend_reg {
-	gboolean	has_registered;
-	regid_t		regs[5];		//! Library-Backened registration IDs (for SHM)
-	void		*shm[5];		//! Memory regions shared with the backend
-	size_t		sizes[5];		//! Sizes of each region.
-};
-
-#define NEED_REGISTRATION	(unlikely(be_reg.has_registered == FALSE))
-#define NEED_UNREGISTRATION	(be_reg.has_registered == TRUE)
-
-//#define PRINT_FUNC	printf("CAUGHT %s\n", __func__)
-#define PRINT_FUNC	/* preprocess it out */
-
-/*-------------------------------------- INTENRAL STATE ----------------------*/
-
-/*
- * These variables are 'global' with respect to this file only.
- */
+/*-------------------------------------- INTERNAL STATE ----------------------*/
 
 //! to indicate the error with the dynamic loaded library
 //static cudaError_t cudaErrorDL = cudaErrorUnknown;
@@ -129,7 +103,173 @@ struct backend_reg {
 //! State machine for cudaGetLastError()
 static cudaError_t cuda_err = cudaSuccess;
 
-static struct backend_reg be_reg;
+static struct shm_regions *cuda_regions;
+
+/*-------------------------------------- SHMGRP DEFINITIONS ------------------*/
+
+//! Amount of memory to allocate for each CUDA thread, in bytes.
+#define THREAD_SHM_SIZE					(128 << 20)
+
+/**
+ * Region of memory we've mapped in with the runtime. Each region is assigned to
+ * a unique thread in the CUDA application.
+ */
+struct shm_region {
+	struct list_head link;
+	struct shmgrp_region shmgrp_region;
+	pthread_t tid;	//! Application thread assigned this region
+};
+
+//! List of shm regions maintained with the assembly runtime.
+struct shm_regions {
+	struct list_head list;
+	pthread_mutex_t lock; //! two-fold lock: this structure and the shmgrp API
+};
+
+//! Iterator loop for shm regions.
+#define __shm_for_each_region(regions, region)	\
+	list_for_each_entry(region, &((regions)->list), link)
+
+//! Iterator loop for shm regions, allowing us to remove regions as we iterate.
+#define __shm_for_each_region_safe(regions, region, tmp)	\
+	list_for_each_entry_safe(region, tmp, &((regions)->list), link)
+
+// All the __shm* functions should not be called directly. They should only be
+// called by the other functions just below them, as any locking that needs to
+// happen is handled correctly within those.
+
+static inline struct shm_region *
+__shm_get_region(struct shm_regions *regions, pthread_t tid)
+{
+	struct shm_region *region;
+	__shm_for_each_region(regions, region)
+		if (pthread_equal(region->tid, tid) != 0)
+			return region;
+	return NULL;
+}
+
+static inline void
+__shm_add_region(struct shm_regions *regions, struct shm_region *region)
+{
+	list_add(&region->link, &regions->list);
+}
+
+static inline void
+__shm_rm_region(struct shm_region *region)
+{
+	list_del(&region->link);
+}
+
+static inline bool
+__shm_has_regions(struct shm_regions *regions)
+{
+	return !(list_empty(&regions->list));
+}
+
+// Should be called within the first CUDA call interposed. It is okay to call
+// this function more than once, it will only have an effect the first time.
+int attach_assembly_runtime(void)
+{
+	int err;
+	if (cuda_regions)
+		return 0;
+	cuda_regions = calloc(1, sizeof(*cuda_regions));
+	if (!cuda_regions) {
+		fprintf(stderr, "Out of memory\n");
+		return -1;
+	}
+	INIT_LIST_HEAD(&cuda_regions->list);
+	err = shmgrp_init();
+	if (err < 0) {
+		fprintf(stderr, "Error initializing shmgrp state\n");
+		return -1;
+	}
+	err = shmgrp_join(ASSEMBLY_SHMGRP_KEY);
+	if (err < 0) {
+		fprintf(stderr, "Error attaching to assembly runtime\n");
+		return -1;
+	}
+	return 0;
+}
+
+// Should be called within the last CUDA call interposed. It is okay to call
+// this function more than once, it will only have an effect the first time.
+void detach_assembly_runtime(void)
+{
+	int err;
+	struct shm_region *region, *tmp;
+	if (!cuda_regions)
+		return;
+	if (__shm_has_regions(cuda_regions)) {
+		__shm_for_each_region_safe(cuda_regions, region, tmp) {
+			__shm_rm_region(region);
+			err = shmgrp_rmreg(ASSEMBLY_SHMGRP_KEY, region->shmgrp_region.id);
+			if (err < 0) {
+				printd(DBG_ERROR, "Error destroying region %lu\n",
+						region->shmgrp_region.id);
+			}
+			free(region);
+		}
+	}
+	free(cuda_regions);
+	err = shmgrp_leave(ASSEMBLY_SHMGRP_KEY);
+	if (err < 0)
+		fprintf(stderr, "Error detaching from assembly runtime\n");
+	err = shmgrp_tini();
+	if (err < 0)
+		fprintf(stderr, "Error uninitializing shmgrp state\n");
+}
+
+// Create a new shared memory region with the runtime, and add a new entry to
+// the region list for us. This function must be thread-safe (newly detected
+// threads will ask for a new region, and will call this). If the tid has
+// already been allocated a memory region, we simply return that mapping.
+void * __add_shm(size_t size, pthread_t tid)
+{
+	int err;
+	struct shm_region *region;
+	shmgrp_region_id id;
+	region = __shm_get_region(cuda_regions, tid);
+	if (region)
+		return region->shmgrp_region.addr;
+	region = calloc(1, sizeof(*region));
+	if (!region) {
+		fprintf(stderr, "Out of memory\n");
+		goto fail;
+	}
+	INIT_LIST_HEAD(&region->link);
+	region->tid = tid;
+	err = shmgrp_mkreg(ASSEMBLY_SHMGRP_KEY, size, &id);
+	if (err < 0) {
+		fprintf(stderr, "Error creating a new memory region with assembly\n");
+		goto fail;
+	}
+	err = shmgrp_leader_region(ASSEMBLY_SHMGRP_KEY, id, &region->shmgrp_region);
+	if (err < 0) {
+		fprintf(stderr, "Error accessing existing shm region %d\n", id);
+		goto fail;
+	}
+	__shm_add_region(cuda_regions, region);
+	return region->shmgrp_region.addr;
+fail:
+	if (region)
+		free(region);
+	return NULL;
+}
+
+//! Each interposed call will invoke this to locate the shared memory region
+//! allocated to the thread calling it. If one does not exist, one is allocated.
+//! Thus if there are no errors, this function will always return a valid
+//! address.
+static inline void *
+get_region(pthread_t tid)
+{
+	void *addr;
+	pthread_mutex_lock(&cuda_regions->lock);
+	addr = __add_shm(THREAD_SHM_SIZE, tid);
+	pthread_mutex_unlock(&cuda_regions->lock);
+	return addr;
+}
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
@@ -144,56 +284,6 @@ static struct backend_reg be_reg;
 #	endif
 #endif
 
-static int registerWithBackend(void) {
-	int err;
-
-	if (be_reg.has_registered == FALSE) {
-		err = reg_lib_init();
-		if (err < 0) {
-			printd(DBG_ERROR, "Could not initialize registration with backend\n");
-			goto fail;
-		}
-		be_reg.has_registered = TRUE;
-		// request new mmap region, initialize with hint struct
-		be_reg.regs[0] = reg_lib_connect();
-		if (be_reg.regs[0] < 0) {
-			printd(DBG_ERROR, "Could not connect\n");
-			goto fail;
-		}
-		be_reg.shm[0] = reg_lib_get_shm(be_reg.regs[0]);
-		be_reg.sizes[0] = reg_lib_get_shm_size(be_reg.regs[0]);
-		printd(DBG_DEBUG, "id=%d shm=%p sz=%lu\n",
-				be_reg.regs[0], be_reg.shm[0], be_reg.sizes[0]);
-	}
-	printd(DBG_INFO, "complete\n");
-	return 0;
-
-fail:
-	return -1;
-}
-
-static int unregisterWithBackend(void) {
-	int err;
-	if (be_reg.has_registered == TRUE) {
-		err = reg_lib_disconnect(be_reg.regs[0]);
-		if (err < 0) {
-			printd(DBG_ERROR, "Could not disconnect\n");
-			goto fail;
-		}
-		err = reg_lib_shutdown();
-		if (err < 0) {
-			printd(DBG_ERROR, "Could not shutdown\n");
-			goto fail;
-		}
-		be_reg.has_registered = FALSE;
-	}
-	printd(DBG_INFO, "complete\n");
-	return 0;
-
-fail:
-	return -1;
-}
-
 /*-------------------------------------- INTERPOSING API ---------------------*/
 
 /* Updates needed in the future:
@@ -207,20 +297,14 @@ fail:
 
 cudaError_t cudaGetDeviceCount(int *count) {
 	int err;
-	volatile struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	volatile struct cuda_packet *shmpkt;
 
-	// Most CUDA programs call __registerFatBinary first, this is here to catch
-	// deviceQuery in the SDK. Better would be to check for registration in
-	// every function call.
-	if (NEED_REGISTRATION) {
-		err = registerWithBackend();
-		if (err < 0) {
-			fprintf(stderr, "Error registering with backend\n");
-			return -1;
-		}
-		shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	err = attach_assembly_runtime();
+	if (err < 0) {
+		fprintf(stderr, "Error attaching to assembly runtime\n");
+		assert(0);
 	}
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	/* Directly write the cuda packet into the shared memory region. Indicate
 	 * where the output argument's data should be stored.
@@ -256,9 +340,8 @@ cudaError_t cudaGetDeviceCount(int *count) {
 }
 
 cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	struct cudaDeviceProp *prop_shm = NULL;
-	PRINT_FUNC;
 
 	printd(DBG_DEBUG, "dev=%d\n", device);
 
@@ -279,8 +362,7 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 }
 
 cudaError_t cudaSetDevice(int device) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	printd(DBG_DEBUG, "device=%d\n", device);
 
@@ -298,8 +380,7 @@ cudaError_t cudaSetDevice(int device) {
 }
 
 cudaError_t cudaGetDevice(int *device) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	printd(DBG_DEBUG, "thread=%lu\n", pthread_self());
 
@@ -319,8 +400,7 @@ cudaError_t cudaGetDevice(int *device) {
 
 cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	printd(DBG_DEBUG, "grid={%d,%d,%d} block={%d,%d,%d} shmem=%lu strm=%p\n",
 			gridDim.x, gridDim.y, gridDim.z,
@@ -349,8 +429,7 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 }
 
 cudaError_t cudaLaunch(const char *entry) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_LAUNCH;
@@ -368,8 +447,7 @@ cudaError_t cudaLaunch(const char *entry) {
 }
 
 cudaError_t cudaDriverGetVersion(int *driverVersion) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_DRIVER_GET_VERSION;
@@ -387,8 +465,7 @@ cudaError_t cudaDriverGetVersion(int *driverVersion) {
 }
 
 cudaError_t cudaRuntimeGetVersion(int *runtimeVersion) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_RUNTIME_GET_VERSION;
@@ -405,9 +482,8 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion) {
 }
 
 cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	void *shm_ptr;
-	PRINT_FUNC;
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_SETUP_ARGUMENT;
@@ -450,8 +526,7 @@ cudaError_t cudaChooseDevice(int *device, const struct cudaDeviceProp *prop) {
 #endif
 
 cudaError_t cudaThreadExit(void) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_THREAD_EXIT;
@@ -466,8 +541,7 @@ cudaError_t cudaThreadExit(void) {
 }
 
 cudaError_t cudaThreadSynchronize(void) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_THREAD_SYNCHRONIZE;
@@ -870,8 +944,7 @@ cudaError_t cudaSetDoubleForHost(double *d) {
 #endif
 
 cudaError_t cudaMalloc(void **devPtr, size_t size) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_MALLOC;
@@ -879,6 +952,12 @@ cudaError_t cudaMalloc(void **devPtr, size_t size) {
 	// We expect the sink to write the value of devPtr to args[0].argull
 	shmpkt->args[1].arr_argi[0] = size;
 	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	if (size >= THREAD_SHM_SIZE) {
+		fprintf(stderr, "%s: error: memory region too large: %lu\n",
+				__func__, size);
+		assert(0);
+	}
 
 	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
@@ -944,8 +1023,7 @@ cudaError_t cudaMallocArray(struct cudaArray **array,
 #endif
 
 cudaError_t cudaFree(void * devPtr) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = CUDA_FREE;
@@ -1131,12 +1209,17 @@ cudaError_t cudaMemGetInfo(size_t *free, size_t *total) {
 
 cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 		enum cudaMemcpyKind kind) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	void *shm_ptr;
-	PRINT_FUNC;
 
 	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d\n",
 			dst, src, count, kind);
+
+	if (count >= THREAD_SHM_SIZE) {
+		fprintf(stderr, "%s: error: memory region too large: %lu\n",
+				__func__, count);
+		assert(0);
+	}
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->thr_id = pthread_self();
@@ -1337,11 +1420,16 @@ cudaError_t cudaMemcpy2DArrayToArray(struct cudaArray *dst,
 cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 		__dv(cudaMemcpyHostToDevice)) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	void *shm_ptr;
-	PRINT_FUNC;
 
 	printd(DBG_DEBUG, "symb %p\n", symbol);
+
+	if (count >= THREAD_SHM_SIZE) {
+		fprintf(stderr, "%s: error: memory region too large: %lu\n",
+				__func__, count);
+		assert(0);
+	}
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->thr_id = pthread_self();
@@ -1383,11 +1471,16 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
 cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 		__dv(cudaMemcpyDeviceToHost)) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	void *shm_ptr;
-	PRINT_FUNC;
 
 	printd(DBG_DEBUG, "symb %p\n", symbol);
+
+	if (count >= THREAD_SHM_SIZE) {
+		fprintf(stderr, "%s: error: memory region too large: %lu\n",
+				__func__, count);
+		assert(0);
+	}
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->thr_id = pthread_self();
@@ -2085,20 +2178,16 @@ static void printFatBinary(void *fatC) {
 
 void** __cudaRegisterFatBinary(void* cubin) {
 	int err, cubin_size;
-	volatile struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	volatile struct cuda_packet *shmpkt;
 	void *cubin_shm; // pointer to serialized copy of argument
 	cache_num_entries_t entries_in_cubin;
 
-	PRINT_FUNC;
-
-	if (NEED_REGISTRATION) {
-		err = registerWithBackend();
-		if (err < 0) {
-			fprintf(stderr, "Error registering with backend\n");
-			return NULL;
-		}
-		shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	err = attach_assembly_runtime();
+	if (err < 0) {
+		fprintf(stderr, "Error attaching to assembly runtime\n");
+		assert(0);
 	}
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	memset((void*)shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = __CUDA_REGISTER_FAT_BINARY;
@@ -2111,6 +2200,11 @@ void** __cudaRegisterFatBinary(void* cubin) {
 	memset(&entries_in_cubin, 0, sizeof(entries_in_cubin));
 	cubin_size = getFatRecPktSize(cubin, &entries_in_cubin);
 	printd(DBG_DEBUG, "size of cubin: %d bytes\n", cubin_size);
+	if (cubin_size >= THREAD_SHM_SIZE) {
+		fprintf(stderr, "%s: error: cubin size too large: %d\n",
+				__func__, cubin_size);
+		assert(0);
+	}
 	err = packFatBinary((char *)cubin_shm, cubin, &entries_in_cubin);
 	if (err < 0) {
 		printd(DBG_ERROR, "error calling packFatBinary\n");
@@ -2129,9 +2223,16 @@ void** __cudaRegisterFatBinary(void* cubin) {
 }
 
 void __cudaUnregisterFatBinary(void** fatCubinHandle) {
-	int err;
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-	PRINT_FUNC;
+	struct cuda_packet *shmpkt;
+
+	static bool unregistered = false;
+	if (unregistered) {
+		fprintf(stderr, "Warning: %s called more than once\n", __func__);
+		return;
+	}
+	unregistered = true;
+
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = __CUDA_UNREGISTER_FAT_BINARY;
@@ -2143,11 +2244,7 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle) {
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
-	if (NEED_UNREGISTRATION) {
-		err = unregisterWithBackend();
-		if (err < 0)
-			fprintf(stderr, "Error unregistering with backend\n");
-	}
+	detach_assembly_runtime();
 
 	return;
 }
@@ -2156,9 +2253,8 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize) {
 	int err;
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	void *var = NULL;
-	PRINT_FUNC;
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = __CUDA_REGISTER_FUNCTION;
@@ -2194,9 +2290,8 @@ void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global) {
 	int err;
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	void *var = NULL;
-	PRINT_FUNC;
 
 	printd(DBG_DEBUG, "symbol=%p\n", hostVar);
 

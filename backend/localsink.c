@@ -6,21 +6,27 @@
  * @brief TODO
  */
 
+// System includes
 #include <assert.h>
-#include <cuda.h>
-#include <cuda_runtime_api.h>
+#include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 
+// CUDA includes
+#include <cuda.h>
+#include <cuda_runtime_api.h>
+
+// Project includes
 #include <assembly.h>
-#include <common/libregistration.h>
 #include <debug.h>
 #include <fatcubininfo.h>
 #include <libciutils.h>
 #include <method_id.h>
 #include <packetheader.h>
+#include <shmgrp.h>
 #include <util/x86_system.h>
 
+// Directory-immediate includes
 #include "sinks.h"
 
 /* Not defined in any header? */
@@ -40,19 +46,141 @@ extern void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 
 static struct fatcubins *cubins;
 
+// FIXME FIXME We are assuming SINGLE-THREADED CUDA applications as a first
+// step, thus one region and one address.
+struct shmgrp_region region;
+void *shm;
+
+bool process_rpc = false; //! Barrier and stop flag for main processing loop
+bool loop_exited = false; //! Indication that the main loop has exited
+
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
+// We assume a new region request maps 1:1 to a new thread (using the CUDA API)
+// having spawned in the CUDA application.
+// TODO Spawn a thread for each new shm region, and cancel it on remove.
+void region_request(shm_event e, pid_t memb_pid, shmgrp_region_id id)
+{
+	int err;
+	switch (e) {
+		case SHM_CREATE_REGION:
+		{
+			err = shmgrp_member_region(ASSEMBLY_SHMGRP_KEY, memb_pid, id, &region);
+			if (err < 0) {
+				printd(DBG_ERROR, "Could not access region %d details"
+						" for process %d\n", id, memb_pid);
+				break;
+			}
+			shm = region.addr;
+			printd(DBG_DEBUG, "Process %d created a shm region: id=%d @%p bytes=%lu\n",
+					memb_pid, id, region.addr, region.size);
+			fflush(stdout);
+			process_rpc = true; // Set this last, after shm has been set
+		}
+		break;
+		case SHM_REMOVE_REGION:
+		{
+			process_rpc = false;
+			err = shmgrp_member_region(ASSEMBLY_SHMGRP_KEY, memb_pid, id, &region);
+			if (err < 0) {
+				printd(DBG_ERROR, "Could not access region %d details"
+						" for process %d\n", id, memb_pid);
+				break;
+			}
+			printd(DBG_DEBUG, "Process %d destroyed an shm region: id=%d @%p bytes=%lu\n",
+					memb_pid, id, region.addr, region.size);
+			fflush(stdout);
+			// wait for the loop to see our change to process_rpc before
+			// continuing, to avoid it reading the shm after it has been
+			// unmapped
+			while (!loop_exited)
+				;
+		}
+		break;
+	}
+}
+
+static void sigterm_handler(int sig)
+{
+	; // Do nothing, just prevent it from killing us
+}
 
 /*-------------------------------------- PUBLIC FUNCTIONS --------------------*/
 
 /**
- * Entry point for the local sink process. It is forked from runtime when a new
- * application process registers. This function should never exit.
+ * The main() function for forked sink processes. It must not be allowed to
+ * return. Once it completes its work, it waits on a termination signal from the
+ * runtime coordinator before exiting. That signal is sent when the CUDA process
+ * tells the runtime it wants to leave the assembly runtime.
  *
- * This function shall NOT call any functions that request/destroy
- * assemblies, nor those that modify registration state (or any library state
- * for that matter). That is under the control of the runtime process when it
- * detects new applications joining or leaving. This state will exist from the
+ * The parent process will simply leave this function after invoking fork.
+ */
+int fork_localsink(asmid_t asmid, pid_t memb_pid, pid_t *child_pid)
+{
+	int err;
+	sigset_t mask;
+	struct sigaction action;
+
+	printd(DBG_INFO, "Forking localsink\n");
+
+	*child_pid = fork();
+
+	// Fork error.
+	if (*child_pid < 0) {
+		printd(DBG_ERROR, "fork() failed, pid=%d\n", *child_pid);
+		goto fail;
+	}
+
+	// Parent does nothing more.
+	if (*child_pid > 0) {
+		return 0;
+	}
+
+	/*
+	 * We're the child process.
+	 */
+
+	// Install a handler for the termination signal.
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = sigterm_handler;
+	sigemptyset(&action.sa_mask);
+	err = sigaction(SINK_TERM_SIG, &action, NULL);
+	if (err < 0) {
+		printd(DBG_ERROR, "Error installing signal handler for SIGTERM.\n");
+	}
+
+	localsink(asmid, memb_pid); // Process all RPC calls.
+
+	printd(DBG_INFO, "Waiting for runtime to signal us\n");
+
+	// Wait for the runtime to terminate us.
+	sigdelset(&mask, SINK_TERM_SIG);
+	sigsuspend(&mask);
+
+	printd(DBG_INFO, "Destroying association with member %d\n", memb_pid);
+	err = shmgrp_destroy_member(ASSEMBLY_SHMGRP_KEY, memb_pid);
+	if (err < 0) {
+		printd(DBG_ERROR, "Error destroying member %d state: %s\n",
+				memb_pid, strerror(-(err)));
+	}
+
+	exit(0);
+
+fail:
+	exit(-1);
+}
+
+/**
+ * Entry point for the local sink process. It is forked from runtime when a new
+ * application process registers. Right now it directly executes the RPCs, but
+ * in future code TODO it should only register with the CUDA app it was forked
+ * to handle (establish_member) then wait on a signal or something. Each time
+ * the shm_callback is invoked, that function should spawn a thread to handle
+ * the region created (as a CUDA thread will be pushing RPCs through it).
+ *
+ * This file shall NOT call any functions that request/destroy assemblies, nor
+ * those that modify shmgrp state (or any library state for that matter) EXCEPT
+ * to establish/destroy members. Library and other state will exist from the
  * fork, but modifying it will not enable it to be visible to the runtime
  * process. TODO Unless all the state is stored in a shared memory region that
  * can be accessed across forks().
@@ -71,14 +199,23 @@ static struct fatcubins *cubins;
  * try spawning a thread to handle this function instead of a new process
  * altogether.
  */
-void localsink(asmid_t asmid, regid_t regid)
+void localsink(asmid_t asmid, pid_t pid)
 {
 	int err;
-	void *shm = NULL;
 	volatile struct cuda_packet *cpkt_shm = NULL;
 
-	printd(DBG_INFO, "localsink spawned, pid=%d asm=%lu regid=%d\n",
-			getpid(), asmid, regid);
+	printd(DBG_INFO, "localsink spawned, asmid=%lu pid=%d,"
+			" attaching to cuda pid=%d\n", asmid, getpid(), pid);
+
+	// Tell shmgrp we are assuming responsibility for this process.
+	//
+	// developer note: establish_member will set notification on the underlying
+	// MQs within the library; this creates threads.
+	err = shmgrp_establish_member(ASSEMBLY_SHMGRP_KEY, pid, region_request);
+	if (err < 0) {
+		printd(DBG_ERROR, "Could not establish member %d\n", pid);
+		exit(-1);
+	}
 
 	// Allocate cubin set.
 	cubins = calloc(1, sizeof(*cubins));
@@ -89,28 +226,30 @@ void localsink(asmid_t asmid, regid_t regid)
 	}
 	cubins_init(cubins);
 
-	shm = reg_be_get_shm(regid);
+	printd(DBG_INFO, "Spinning until application creates a shm region\n");
 
-	// Process the shm for cuda packets.
-	// TODO Once the lib uses multiple threads, we will need to consider state
-	// that divides the shm region into per-thread regions (OR, do what Vishakha
-	// did in the driver within VMs: have a tree-based memory allocator). We can
-	// start with one thread looking at all queues. Then migrate to spawning a
-	// set of worker threads, one per queue. When linked with a scheduling
-	// library, we can add specific threads to be scheduled, too.
+	// FIXME FIXME HACK
+	// The shm_callback will modify this variable. If a region is registered, it
+	// will enable it, and vice versa. We assume single-threaded cuda
+	// applications, performing one single mkreg and rmreg.
+	while (!process_rpc)
+		;
 
+	printd(DBG_INFO, "Now proceeding to process CUDA RPCs\n");
+
+	// Process CUDA RPC until the CUDA application unregisters its memory
+	// region.
 	cpkt_shm = (struct cuda_packet *)shm;
-	while (1) {
+	while (process_rpc) {
 
-		// wait for next packet
-		printd(DBG_DEBUG, "waiting for next packet...\n");
+		// Check packet flag. If not ready, check loop flag. Spin.
 		rmb();
-		while (!(cpkt_shm->flags & CUDA_PKT_REQUEST))
+		if (!(cpkt_shm->flags & CUDA_PKT_REQUEST)) {
 			rmb();
+			continue;
+		}
 
 		// Tell assembly to execute the packet for us
-		// TODO Use a thread pool to associate with each thread in the
-		// application.
 		err = assembly_rpc(asmid, 0, cpkt_shm); // FIXME don't hardcode vgpu 0
 		if (err < 0) {
 			printd(DBG_ERROR, "assembly_rpc returned error\n");
@@ -123,13 +262,16 @@ void localsink(asmid_t asmid, regid_t regid)
 		cpkt_shm->flags = CUDA_PKT_RESPONSE;
 		wmb();
 	}
+	loop_exited = true;
 
-	assert(0);
+	// FIXME Destroy cubins.
 }
 
 /**
  * Execute a cuda packet. The assembly layer calls into this if it receives a
  * call destined for a local physical GPU.
+ *
+ * FIXME Move the execution of a packet to a separate file/interface.
  *
  * It is assumed the address pointed to by the argument pkt is located in a
  * shared memory region. Arguments within the packet, if for a function
@@ -196,6 +338,7 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 			__cudaUnregisterFatBinary(handle);
 			// FIXME Deallocate the fat binary data structures.
 			pkt->ret_ex_val.err = cudaSuccess;
+			printd(DBG_DEBUG, "unregister FB handle=%p\n", handle);
 		}
 		break;
 

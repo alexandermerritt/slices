@@ -9,6 +9,8 @@
 
 #include <packetheader.h>
 
+#define ASSEMBLY_SHMGRP_KEY "cudarpc"
+
 /**
  * Distinguish between the centralized location where state of all assemblies is
  * located, or an instance on another node (minion) that forwards RPCs to the

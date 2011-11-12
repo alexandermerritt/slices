@@ -11,128 +11,170 @@
  * spawns. And find a reasonable way to specify assembly hint structures/files.
  */
 
+// System includes
 #include <assert.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
+// Project includes
+#include <shmgrp.h>
 #include <debug.h>
-#include <common/libregistration.h>
 #include <assembly.h>
+
+// Directory-immediate includes
 #include "sinks.h"
 
-// deal with only one assembly for now, then expand
-// later we can store a list of PIDs we fork into local sinks with their
-// respective assembly IDs
-asmid_t asmid;
-struct assembly_cap_hint *hint = NULL;
+/*-------------------------------------- INTERNAL STATE ----------------------*/
 
-pid_t localsink_pid;
+// XXX We assume a single-process single-threaded CUDA application for now. Thus
+// one assembly, one hint and one sink child.
+static struct assembly_cap_hint hint;
+static struct sink_child sink_child;
 
-static int fork_localsink(asmid_t asmid, regid_t regid)
+/*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
+
+static void runtime_entry(group_event e, pid_t pid)
 {
-	pid_t pid;
-
-	printd(DBG_INFO, "Forking localsink\n");
-
-	pid = fork();
-	if (pid == 0) { // we're the child process
-		localsink(asmid, regid);
-		printd(DBG_ERROR, "localsink returned!\n");
-		assert(0); // localsink should NEVER return up out of localsink()
-	} else if (pid != 0) { // we're the parent
-		localsink_pid = pid;
-		printd(DBG_DEBUG, "forked localsink, pid=%d\n",
-				localsink_pid);
-	} else {
-		printd(DBG_ERROR, "fork() failed, pid=%d\n", pid);
-		goto fail;
-	}
-	return 0;
-fail:
-	return -1;
-}
-
-static void registration_callback(enum callback_event e, regid_t regid)
-{
-	asmid_t asmid;
-	void *region;
-	size_t size;
 	int err;
-
-	struct assembly_cap_hint hint;
+	asmid_t asmid;
 	memset(&hint, 0, sizeof(hint));
 	hint.num_gpus = 1;
 
+	memset(&sink_child, 0, sizeof(sink_child));
+
 	switch (e) {
-		// Process has indicated it wishes to join runtime.
-		case CALLBACK_NEW:
-			region = reg_be_get_shm(regid);
-			size = reg_be_get_shm_size(regid);
-			printd(DBG_DEBUG, "new reg; shm=%p sz=%lxB\n", region, size);
+		case MEMBERSHIP_JOIN:
+		{
+			// TODO in the future, detect multi-rank MPI applications, and
+			// give them the same assembly. Perhaps provide this in the hint
+			// structure.
+			pid_t childpid;
+			printd(DBG_INFO, "Process %d is requesting to join the assembly\n", pid);
 			asmid = assembly_request(&hint);
 			if (!VALID_ASSEMBLY_ID(asmid)) {
-				printd(DBG_ERROR, "Could not request assembly\n");
+				printd(DBG_ERROR, "Error requesting assembly\n");
+				break;
 			}
-			printd(DBG_INFO, "Acquired assembly: asmid=%lu size=%d\n",
+			printd(DBG_INFO, "Acquired assembly %lu with %d GPUs\n",
 					asmid, assembly_num_vgpus(asmid));
-			err = fork_localsink(asmid, regid);
-			if (err < 0)
-				printd(DBG_ERROR, "Could not fork localsink\n");
-			break;
-
-		// Process has indicated it wishes to leave runtime.
-		case CALLBACK_DEL:
-			break;
-
+			err = fork_localsink(asmid, pid, &childpid);
+			// XXX ONLY the parent should return from here!
+			if (err < 0) {
+				printd(DBG_ERROR, "Error forking localsink for assembly %lu\n",
+						asmid);
+				break;
+			}
+			sink_child.pid = childpid;
+			sink_child.type = SINK_EXEC_LOCAL;
+			sink_child.asmid = asmid;
+		}
+		break;
+		case MEMBERSHIP_LEAVE:
+		{
+			int ret; // return val of child
+			printd(DBG_INFO, "Application %d is leaving the runtime\n", pid);
+			// Tell it to stop, then wait for it to disappear.
+			err = kill(sink_child.pid, SINK_TERM_SIG);
+			if (err < 0) {
+				printd(DBG_ERROR, "Could not send signal %d to child %d\n",
+						SINK_TERM_SIG, sink_child.pid);
+			}
+			err = waitpid(sink_child.pid, &ret, 0);
+			if (err < 0) {
+				printd(DBG_ERROR, "Could not wait on child %d\n",
+						sink_child.pid);
+			}
+			printd(DBG_DEBUG, "Child exited with code %d\n", ret);
+		}
+		break;
 		default:
-			printd(DBG_ERROR, "Unknown callback event %u\n", e);
+			printd(DBG_ERROR, "Error: invalid membership event %d\n", e);
 			break;
 	}
 }
 
-int main(void)
+static void sigint_handler(int sig)
+{
+	; // Do nothing, just prevent it from killing us
+}
+
+static int start_runtime(void)
 {
 	int err;
-
-	// TODO Use command line to determine which node type we are.
-	err = assembly_runtime_init(NODE_TYPE_MAIN);
+	err = assembly_runtime_init(NODE_TYPE_MAIN); // TODO Take a command arg
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not initialize assembly runtime\n");
 		return -1;
 	}
-
-	// Initialize library <--> backend registration.
-	err = reg_be_init(32); // # processes we expect to register
+	err = shmgrp_init();
 	if (err < 0) {
-		fprintf(stderr, "Could not initialize library registration\n");
+		printd(DBG_ERROR, "Could not initialize shmgrp state\n");
 		return -1;
 	}
-	err = reg_be_callback(registration_callback);
+	err = shmgrp_open(ASSEMBLY_SHMGRP_KEY, runtime_entry, true);
 	if (err < 0) {
-		printd(DBG_ERROR, "Could not set registration callback\n");
+		printd(DBG_ERROR, "Could not open shmgrp %s\n", ASSEMBLY_SHMGRP_KEY);
+		shmgrp_tini();
 		return -1;
 	}
+	return 0;
+}
 
-	// TODO Wait on all sink processes instead of sleeping.
-	// TODO Install sig handler to capture premature exit.
-	printf("Sleeping for some time\n");
-	sleep(3600);
-
-	// Close application registration.
-	err = reg_be_shutdown();
-	if (err < 0) {
-		fprintf(stderr, "Could not shutdown library registration\n");
-		return -1;
-	}
-
+static void shutdown_runtime(void)
+{
+	int err;
+	err = shmgrp_close(ASSEMBLY_SHMGRP_KEY);
+	if (err < 0)
+		printd(DBG_ERROR, "Could not close shmgrp\n");
+	err = shmgrp_tini();
+	if (err < 0)
+		printd(DBG_ERROR, "Could not deallocate shmgrp state\n");
 	err = assembly_runtime_shutdown();
-	if (err < 0) {
+	if (err < 0)
 		printd(DBG_ERROR, "Could not shutdown assembly runtime\n");
+	printd(DBG_INFO, "\nAssembly runtime shut down.\n");
+
+}
+
+/*-------------------------------------- ENTRY -------------------------------*/
+
+int main(void)
+{
+	int err;
+	sigset_t mask;
+	struct sigaction action;
+
+	// Block all signals.
+	sigfillset(&mask);
+	sigprocmask(SIG_BLOCK, &mask, NULL);
+
+	err = start_runtime();
+	if (err < 0)
+		return -1;
+
+	printd(DBG_INFO, "Assembly runtime ready to accept new CUDA applications.\n");
+
+	// Install a new handler for SIGINT.
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = sigint_handler;
+	sigemptyset(&action.sa_mask);
+	err = sigaction(SIGINT, &action, NULL);
+	if (err < 0) {
+		printd(DBG_ERROR, "Error installing signal handler for SIGINT.\n");
+		shutdown_runtime();
 		return -1;
 	}
 
+	// Atomically unblock SIGINT and wait for it.
+	sigdelset(&mask, SIGINT);
+	sigsuspend(&mask);
+
+	shutdown_runtime();
 	return 0;
 }

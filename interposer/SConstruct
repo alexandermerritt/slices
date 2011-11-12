@@ -68,14 +68,15 @@ envInterposerProst = envInterposerKeeneland
 # shiva
 envInterposerShiva = Environment(
      LIBS = ['rt', 'dl', 
-             'glib-2.0'],
-     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64'],
+             'glib-2.0', 'shmgrp'],
+     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64', '../shmgrp/lib'],
      CPPPATH = [
         '.',
         CUDA_ROOT + 'include', 
         '../include', 
 #        '../remote',
         '../backend',
+        '../shmgrp/include',
         '/usr/include/glib-2.0',
         '/usr/lib/glib-2.0/include'
         ],
@@ -85,14 +86,15 @@ envInterposerShiva = Environment(
 envInterposerIfrit = Environment(
      LIBS = ['rt', 
              'dl', 
-             'glib-2.0'],
-     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64'],
+             'glib-2.0', 'shmgrp'],
+     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64', 'shmgrp/lib'],
      CPPPATH = [
         '.',
         CUDA_ROOT + 'include', 
         '../include', 
 #        '../remote',
         '../backend',
+        '../shmgrp/include',
         '/usr/include/glib-2.0',
         '/usr/lib/glib-2.0/include'
         ],
