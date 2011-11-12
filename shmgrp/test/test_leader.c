@@ -71,7 +71,7 @@ int main(void)
 	}
 
 	printf("Opening group %s\n", GRPKEY1);
-	err = shmgrp_open(GRPKEY1, cudarpc_callback);
+	err = shmgrp_open(GRPKEY1, cudarpc_callback, false);
 	if (err < 0) {
 		fprintf(stderr, "Error: shmgrp_open(%s): %s\n",
 				GRPKEY1, strerror(-err));

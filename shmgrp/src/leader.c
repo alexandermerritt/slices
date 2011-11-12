@@ -69,11 +69,14 @@ struct group
 	struct list_head link;
 	char user_key[SHMGRP_MAX_KEY_LEN];
 	char memb_dir[MAX_LEN];
-	// TODO other keys needed?
 	struct list_head member_list;
 	pthread_mutex_t lock; //! Member lock
 	group_callback notify;
 	struct inotify_thread_state *inotify_thread;
+
+	// State to handle forking.
+	bool willfork; //! Value of willfork in shmgrp_open.
+	pid_t pid; //! PID of process which created this group.
 };
 
 struct groups
@@ -265,6 +268,13 @@ fail:
 	return exit_errno;
 }
 
+static inline bool
+member_has_regions(struct member *mem)
+{
+	return !list_empty(&(mem->region_list));
+}
+
+// If it cannot find the region ID, error is returned.
 static int
 member_remove_region(struct member *memb, shmgrp_region_id id)
 {
@@ -291,37 +301,13 @@ member_remove_region(struct member *memb, shmgrp_region_id id)
 		exit_errno = -(errno);
 		goto fail;
 	}
-
 	__member_rm_region(region);
-
 	free(region);
 	pthread_mutex_unlock(&memb->lock);
 	return 0;
 
 fail:
 	return exit_errno;
-}
-
-#if 0
-static inline int member_rm_region(struct member *mem, int reg_id)
-{
-	struct region *reg = NULL;
-	if (!mem || reg_id < 0)
-		return -1;
-	member_for_each_region(member, reg)
-		if (reg->id == reg_id)
-			break;
-	if (!reg || reg->id != reg_id)
-		return -1;
-	list_del(&(reg->link));
-	return 0;
-}
-#endif
-
-static inline bool
-member_has_regions(struct member *mem)
-{
-	return !list_empty(&(mem->region_list));
 }
 
 // Send a message. If we receive some signal while sending, we retry the send.
@@ -433,12 +419,20 @@ void member_process_messages(struct member *memb)
 			if (err < 0)
 				fprintf(stderr, "Error sending create shm reply to %d: %s\n",
 						memb->pid, strerror(-(err)));
-			// upcall is last step
+			// notify last
 			memb->notify(SHM_CREATE_REGION, memb->pid, msg.m.region.id);
 		}
 
 		else if (msg.type == MESSAGE_REMOVE_SHM) {
-			// upcall is first step
+			// If willfork=true, the child process needs to make sure that it
+			// does not introduce a race condition between us (this function on
+			// the MQ notify thread stack) and another thread in the child,
+			// which might presumably call destroy_member; destroy_member will
+			// lock the member as it removes it, preventing us from removing the
+			// region (which requires holding the same member lock) and
+			// unmapping resources. The root leader should instead signal all
+			// children to quit after it receives a MEMBERSHIP_LEAVE, assuming
+			// the application has rmreg'd all regions.
 			memb->notify(SHM_REMOVE_REGION, memb->pid, msg.m.region.id);
 			msg.m.region.status = member_remove_region(memb, msg.m.region.id);
 			err = member_send_message(memb, &msg); // spins on send unless error
@@ -623,7 +617,7 @@ group_member_join(struct group *group, pid_t pid,
 	// the only one to call either group_member_join and group_member_leave,
 	// there is no worry about both functions being on separate simultaneously
 	// executing stacks at the same time for the same member.
-	
+
 	pthread_mutex_unlock(&group->lock);
 	if (new_memb)
 		*new_memb = memb;
@@ -660,22 +654,43 @@ group_member_leave(struct group *group, pid_t pid)
 		exit_errno = -ENOENT;
 		goto fail;
 	}
-	__group_rm_member(member);
+
+	// We must also lock the member, as an MQ notify thread may additionally be
+	// removing regions from this member.
+	pthread_mutex_lock(&member->lock);
+
+	if (group->willfork && (group->pid == getpid())) {
+		// Client has multi-process leader, and is calling destroy_member from
+		// the root leader instead of the child which established the member.
+		// establish_member creates MQs, which if done in the child process, do
+		// not exist in the parent leader.
+		pthread_mutex_unlock(&member->lock);
+		pthread_mutex_unlock(&group->lock);
+		exit_errno = -EPROTO;
+		goto fail;
+	}
 
 	if (member_has_regions(member)) {
-		// FIXME
-		fprintf(stderr, "Member '%d' still has regions\n", member->pid);
+		// FIXME What to do? These should all be cleared. One way these may
+		// still exist is if the member process does not remove its regions with
+		// us.
+		fprintf(stderr, "Warning: memory regions still"
+				" exist with member %d\n", member->pid);
 	}
+
+	__group_rm_member(member);
 
 	// Indicate we no longer will use the message queues
 	err = mq_close(member->mq_in);
 	if (err < 0) {
+		pthread_mutex_unlock(&member->lock);
 		pthread_mutex_unlock(&group->lock);
 		exit_errno = -(errno);
 		goto fail;
 	}
 	err = mq_close(member->mq_out);
 	if (err < 0) {
+		pthread_mutex_unlock(&member->lock);
 		pthread_mutex_unlock(&group->lock);
 		exit_errno = -(errno);
 		goto fail;
@@ -684,6 +699,7 @@ group_member_leave(struct group *group, pid_t pid)
 	// who has opened it has closed it
 	err = mq_unlink(member->mqname_out);
 	if (err < 0) {
+		pthread_mutex_unlock(&member->lock);
 		pthread_mutex_unlock(&group->lock);
 		exit_errno = -(errno);
 		goto fail;
@@ -799,20 +815,14 @@ struct group_callback_args
  * observing for group joins/leaves.  This may not be expected behavior. We can
  * always not create a thread in the future and do something else.
  *
- * The client probably shouldn't call fork in any other situation...
+ * TODO In the future, we can selectively spawn a thread to handle the notify
+ * callback if we see group.willfork is set to true to reduce overhead.
  */
 static void *
 group_notify_thread(void *arg)
 {
-	int err;
 	struct group_callback_args *args = (struct group_callback_args*)arg;
 	args->group->notify(args->e, args->pid);
-	if (args->e == MEMBERSHIP_LEAVE) {
-		err = group_member_leave(args->group, args->pid);
-		if (err < 0)
-			fprintf(stderr, "%s: error calling group_member_leave(%p, %d)\n",
-					__func__, args->group, args->pid);
-	}
 	free(args);
 	return NULL;
 }
@@ -1000,7 +1010,7 @@ int shmgrp_tini_leader(void)
 	return 0;
 }
 
-int shmgrp_open(const char *key, group_callback func)
+int shmgrp_open(const char *key, group_callback func, bool willfork)
 {
 	int err, exit_errno;
 	struct group *new_grp = NULL;
@@ -1071,6 +1081,7 @@ int shmgrp_open(const char *key, group_callback func)
 	INIT_LIST_HEAD(&new_grp->member_list);
 	pthread_mutex_init(&new_grp->lock, NULL);
 	new_grp->notify = func;
+	new_grp->willfork = willfork;
 
 	err = pthread_create(&(tstate->tid), NULL, inotify_thread, tstate);
 	if (err < 0) {
@@ -1151,11 +1162,6 @@ fail:
 	return exit_errno;
 }
 
-// This function completes the addition of a member to a group. It is ONLY
-// invoked by the application's group_callback routine. That routine has been in
-// turn invoked by our inotify thread, as the creation of a group establishes
-// the group_callback routine within the application. Thus, this function will
-// ONLY ever exist on the inotify thread's stack.
 int shmgrp_establish_member(const char *key, pid_t pid, shm_callback func)
 {
 	int err, exit_errno = 0;
@@ -1174,7 +1180,47 @@ int shmgrp_establish_member(const char *key, pid_t pid, shm_callback func)
 		exit_errno = -EINVAL;
 		goto fail;
 	}
+
+	// Verify consistency of willfork.
+	if (group->willfork && (group->pid == getpid())) {
+		pthread_mutex_unlock(&groups->lock);
+		exit_errno = -EPROTO;
+		goto fail;
+	}
+
 	err = group_member_join(group, pid, func, NULL);
+	if (err < 0) {
+		pthread_mutex_unlock(&groups->lock);
+		exit_errno = err;
+		goto fail;
+	}
+
+	pthread_mutex_unlock(&groups->lock);
+	return 0;
+
+fail:
+	return exit_errno;
+}
+
+int shmgrp_destroy_member(const char *key, pid_t pid)
+{
+	int err, exit_errno = 0;
+	struct group *group = NULL;
+
+	if (!verify_userkey(key)) {
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	pthread_mutex_lock(&groups->lock);
+
+	group = groups_get_group(groups, key);
+	if (!group) {
+		pthread_mutex_unlock(&groups->lock);
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+	err = group_member_leave(group, pid);
 	if (err < 0) {
 		pthread_mutex_unlock(&groups->lock);
 		exit_errno = err;

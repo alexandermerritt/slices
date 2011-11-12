@@ -18,6 +18,7 @@
 #ifndef _SHMGRP_H
 #define _SHMGRP_H
 
+#include <stdbool.h>
 #include <unistd.h>
 
 /*-------------------------------------- DEFINITIONS -------------------------*/
@@ -106,8 +107,30 @@ const char * shmgrp_memb_str(group_event e);
 
 /**
  * Open a new group for members to join.
+ *
+ * The last parameter is important, to help the library deal with forking
+ * correctly, as shmgrp is a stateful library. If set to true, it tells the
+ * library that you organize your leader as a multi-process runtime, wherein you
+ * have a main parent leader that deals with group joins/departures, forking
+ * within group_callback to spawn children for each new member. Within the
+ * child's stack of group_callback you then must invoke establish_member and
+ * destroy_member.  The value passed as willfork applies to the group and all
+ * members while the group is open and cannot be changed.  Note that forking is
+ * not supported anywhere else in the leader.
+ *
+ * If willfork is false, then your single-process leader must invoke
+ * establish_member and destroy_member itself as it is assumed to additionally
+ * be responsible for working directly together with existing members, in
+ * addition to handling new/departing members.
+ *
+ * To put it simply: whichever *process* calls establish_member, that process,
+ * and ONLY that process, is responsible for calling destroy_member.
+ *
+ * @param key	Unique group identifier.
+ * @param func	Caller-implemented function to process group joins/departures.
+ * @param willfork True if func will fork children to associate with members.
  */
-int shmgrp_open(const char *key, group_callback func);
+int shmgrp_open(const char *key, group_callback func, bool willfork);
 
 /**
  * Close an existing group and prevent new members from joining.
@@ -125,8 +148,24 @@ int shmgrp_close(const char *key);
  * new member joining. You must provide a second-level callback routine that
  * will be invoked by accepted members when they create and destroy shared
  * memory regions.
+ *
+ * @return zero if okay, -EPROTO if you called this from the process which
+ * opened the group with willfork=true, -EINVAL/-ENOENT for invalid arguments,
+ * else < 0 for internal errors.
  */
 int shmgrp_establish_member(const char *key, pid_t pid, shm_callback func);
+
+/**
+ * Finalize the departure of a member from a group.
+ *
+ * This function has the same requirements as establish_member, but must be
+ * invoked when the event signifies the departure of an existing member.
+ *
+ * @return zero if okay, -EPROTO if you called this from a process which did NOT
+ * establish the member, -EINVAL/-ENOENT for invalid arguments, else < 0 for
+ * internal errors.
+ */
+int shmgrp_destroy_member(const char *key, pid_t pid);
 
 /**
  * Obtain information about an existing shared memory region established with a

@@ -202,6 +202,8 @@ memberships_rm_membership(struct memberships *memberships, const char *key)
 
 int shmgrp_init_member(void)
 {
+	if (memberships)
+		return 0;
 	memberships = calloc(1, sizeof(*memberships));
 	if (!memberships)
 		return -ENOMEM;
