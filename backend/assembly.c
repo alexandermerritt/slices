@@ -66,7 +66,7 @@ struct vgpu_mapping
  */
 struct assembly
 {
-	struct list_head list;
+	struct list_head link;
 	asmid_t id;
 	int num_gpus;
 	struct vgpu_mapping mappings[ASSEMBLY_MAX_MAPPINGS];
@@ -86,7 +86,7 @@ struct assembly
  */
 struct node_participant
 {
-	struct list_head list;
+	struct list_head link;
 	char hostname[255];
 	char ip[255];
 	int num_gpus;
@@ -137,10 +137,11 @@ static struct internals_state *internals = NULL;
  * Locate the assembly structure given the ID. Assumes locks governing the list
  * have been acquired by the caller.
  */
-static struct assembly* find_assembly(asmid_t id)
+static struct assembly*
+__find_assembly(asmid_t id)
 {
 	struct assembly *assm = NULL;
-	list_for_each_entry(assm, &internals->assembly_list, list)
+	list_for_each_entry(assm, &internals->assembly_list, link)
 		if (assm->id == id)
 			break;
 	if (unlikely(!assm || assm->id != id)) {
@@ -359,7 +360,7 @@ static struct assembly* compose_assembly(const struct assembly_cap_hint *hint)
 		fprintf(stderr, "out of memory\n");
 		goto fail;
 	}
-	INIT_LIST_HEAD(&assm->list);
+	INIT_LIST_HEAD(&assm->link);
 	assm->id = NEXT_ASMID;
 
 	// TODO Simple 'compose' technique for starters: compare the list of
@@ -382,7 +383,7 @@ static struct assembly* compose_assembly(const struct assembly_cap_hint *hint)
 	// find physical GPUs and set each mapping
 	// FIXME we currently assume the main node can satisfy any assembly request.
 	vgpu_id = 0;
-	list_for_each_entry(node, &internals->n.main.participants, list) {
+	list_for_each_entry(node, &internals->n.main.participants, link) {
 		if (node->type != NODE_TYPE_MAIN) // FIXME don't limit to main node
 			continue;
 		for ( ; vgpu_id < assm->num_gpus; vgpu_id++) {
@@ -408,7 +409,7 @@ static struct assembly* compose_assembly(const struct assembly_cap_hint *hint)
 	// FIXME Verify cuda/runtime versions on all nodes the assembly was mapped
 	// to are equal. For now, just use the values from the first node in the
 	// list.
-	node = list_first_entry(&internals->n.main.participants, struct node_participant, list);
+	node = list_first_entry(&internals->n.main.participants, struct node_participant, link);
 	assm->runtimeVersion = node->runtimeVersion;
 	assm->driverVersion = node->driverVersion;
 
@@ -437,7 +438,7 @@ static int node_main_init(void)
 		fprintf(stderr, "out of memory\n");
 		goto fail;
 	}
-	INIT_LIST_HEAD(&p->list);
+	INIT_LIST_HEAD(&p->link);
 	
 	// FIXME don't hardcode, figure out at runtime
 	strcpy(p->ip, "10.0.0.1");
@@ -450,7 +451,7 @@ static int node_main_init(void)
 	p->type = NODE_TYPE_MAIN;
 
 	// no need to lock list, as nobody else exists at this point
-	list_add(&p->list, &internals->n.main.participants);
+	list_add(&p->link, &internals->n.main.participants);
 
 	// TODO Spawn RPC thread.
 
@@ -468,11 +469,11 @@ static int node_main_shutdown(void)
 	// Free participant list. We assume all minions have unregistered at this
 	// point (meaning only one entry in the list).
 	list_for_each_entry_safe(node_pos, node_tmp,
-			&internals->n.main.participants, list) {
+			&internals->n.main.participants, link) {
 		if (node_pos->type == NODE_TYPE_MINION) { // oops...
 			printd(DBG_ERROR, "minion still connected: TODO\n");
 		}
-		list_del(&node_pos->list);
+		list_del(&node_pos->link);
 		free(node_pos);
 	}
 
@@ -482,13 +483,13 @@ static int node_main_shutdown(void)
 		printd(DBG_ERROR, "Assemblies still exist!\n");
 		fprintf(stderr, "Assemblies still exist!\n");
 		list_for_each_entry_safe(asm_pos, asm_tmp,
-				&internals->assembly_list, list) {
+				&internals->assembly_list, link) {
 			err = assembly_teardown(asm_pos->id);
 			if (err < 0) {
 				printd(DBG_ERROR, "could not teardown assembly %lu\n",
 						asm_pos->id);
 			}
-			list_del(&asm_pos->list);
+			list_del(&asm_pos->link);
 			free(asm_pos);
 		}
 	}
@@ -598,8 +599,9 @@ int assembly_num_vgpus(asmid_t id)
 	err = pthread_mutex_lock(&internals->lock);
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not lock internals\n");
+		goto fail;
 	}
-	list_for_each_entry(assm, &internals->assembly_list, list) {
+	list_for_each_entry(assm, &internals->assembly_list, link) {
 		if (assm->id == id) {
 			num_gpus = assm->num_gpus;
 			break;
@@ -670,10 +672,11 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 	err = pthread_mutex_lock(&internals->lock);
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not lock internals\n");
+		goto fail;
 	}
 	// search assembly list for the id, search for indicated vgpu, then RPC CUDA
 	// packet to it.
-	assm = find_assembly(id);
+	assm = __find_assembly(id);
 	if (unlikely(!assm)) {
 		printd(DBG_ERROR, "could not locate assembly %lu\n", id);
 		err = pthread_mutex_unlock(&internals->lock);
@@ -685,6 +688,7 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 	err = pthread_mutex_unlock(&internals->lock);
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not unlock internals\n");
+		goto fail;
 	}
 	// Execute calls. Some return data specific to the assembly, others can go
 	// directly to NVIDIA's runtime.
@@ -801,6 +805,7 @@ asmid_t assembly_request(const struct assembly_cap_hint *hint)
 	err = pthread_mutex_lock(&internals->lock);
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not lock internals\n");
+		goto fail;
 	}
 	assm = compose_assembly(hint);
 	if (!assm) {
@@ -808,7 +813,7 @@ asmid_t assembly_request(const struct assembly_cap_hint *hint)
 		pthread_mutex_unlock(&internals->lock);
 		goto fail;
 	}
-	list_add(&assm->list, &internals->assembly_list);
+	list_add(&assm->link, &internals->assembly_list);
 	err = pthread_mutex_unlock(&internals->lock);
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not unlock internals\n");
