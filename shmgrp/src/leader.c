@@ -301,6 +301,12 @@ member_remove_region(struct member *memb, shmgrp_region_id id)
 		exit_errno = -(errno);
 		goto fail;
 	}
+	err = shm_unlink(region->shm_file);
+	if (err < 0) {
+		pthread_mutex_unlock(&memb->lock);
+		exit_errno = -(errno);
+		goto fail;
+	}
 	__member_rm_region(region);
 	free(region);
 	pthread_mutex_unlock(&memb->lock);
