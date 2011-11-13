@@ -4,7 +4,8 @@
 ## @brief Makefile to build the shmgrp dynamic library
 
 CC=gcc
-CCFLAGS=-fPIC -O2 -Wall -Werror -Wextra -Wno-unused-parameter -Iinclude/
+#CC=icc
+CCFLAGS=-fPIC -ggdb -Wall -Werror -Wextra -Wno-unused-parameter -Iinclude/
 LDFLAGS=-lrt -shared -Wl,-soname,libshmgrp.so
 
 all:	lib/libshmgrp.so

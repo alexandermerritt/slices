@@ -15,11 +15,6 @@
 
 #include "common.h"
 
-extern int shmgrp_init_leader(void);
-extern int shmgrp_tini_leader(void);
-extern int shmgrp_init_member(void);
-extern int shmgrp_tini_member(void);
-
 /*-------------------------------------- COMMON PUBLIC INTERFACE -------------*/
 
 int shmgrp_init(void)

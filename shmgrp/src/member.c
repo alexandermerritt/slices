@@ -97,15 +97,6 @@ __membership_rm_region(struct region *region)
 }
 
 static inline void
-membership_rm_region(struct membership *membership, shmgrp_region_id id)
-{
-	struct region *region;
-	region = membership_get_region(membership, id);
-	if (region)
-		__membership_rm_region(region);
-}
-
-static inline void
 membership_add_region(struct membership *membership, struct region *region)
 {
 	list_add(&region->link, &membership->region_list);
@@ -187,15 +178,6 @@ static inline void
 __memberships_rm_membership(struct membership *membership)
 {
 	list_del(&(membership->link));
-}
-
-static inline void
-memberships_rm_membership(struct memberships *memberships, const char *key)
-{
-	struct membership *membership;
-	membership = memberships_get_membership(memberships, key);
-	if (membership)
-		__memberships_rm_membership(membership);
 }
 
 /*-------------------------------------- PUBLIC INTERFACE --------------------*/

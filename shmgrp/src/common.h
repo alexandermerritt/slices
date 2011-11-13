@@ -172,4 +172,9 @@ struct message
 bool verify_userkey(const char *key);
 int group_dir_exists(const char *key, bool *exists);
 
+int shmgrp_init_leader(void);
+int shmgrp_tini_leader(void);
+int shmgrp_init_member(void);
+int shmgrp_tini_member(void);
+
 #endif

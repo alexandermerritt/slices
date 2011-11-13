@@ -203,15 +203,6 @@ __member_rm_region(struct region *region)
 	list_del(&region->link);
 }
 
-static inline void
-member_rm_region(struct member *memb, shmgrp_region_id id)
-{
-	struct region *region;
-	region = member_get_region(memb, id);
-	if (region)
-		__member_rm_region(region);
-}
-
 static int
 member_create_region(struct member *memb, size_t size, struct region **region)
 {
@@ -376,7 +367,8 @@ member_set_notify(struct member *memb)
 
 /* Call this when we expect there may be messages on the queue. If there are
  * none, this function does nothing. This function must be thread-safe. */
-void member_process_messages(struct member *memb)
+static void
+member_process_messages(struct member *memb)
 {
 	int err;
 	struct message msg;
@@ -488,16 +480,6 @@ __group_rm_member(struct member *member)
 {
 	list_del(&member->link);
 	member->user_key = NULL;
-}
-
-static inline int
-group_rm_member(struct group *group, pid_t pid)
-{
-	struct member *member;
-	member = group_get_member(group, pid);
-	if (member)
-		__group_rm_member(member);
-	return 0;
 }
 
 static bool
@@ -726,12 +708,6 @@ fail:
 #define groups_for_each_group(groups, group)	\
 	list_for_each_entry(group, &(groups)->list, link)
 
-static inline bool
-groups_empty(struct groups *groups)
-{
-	return list_empty(&groups->list);
-}
-
 static inline void
 groups_add_group(struct groups *groups, struct group *group)
 {
@@ -752,14 +728,6 @@ static inline void
 __groups_rm_group(struct group *group)
 {
 	list_del(&(group->link));
-}
-
-static inline void
-groups_rm_group(struct groups *groups, const char *key)
-{
-	struct group *group = groups_get_group(groups, key);
-	if (group)
-		__groups_rm_group(group);
 }
 
 /*
