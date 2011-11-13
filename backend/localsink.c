@@ -18,6 +18,7 @@
 
 // Project includes
 #include <assembly.h>
+#include <cuda_hidden.h>
 #include <debug.h>
 #include <fatcubininfo.h>
 #include <libciutils.h>
@@ -28,16 +29,6 @@
 
 // Directory-immediate includes
 #include "sinks.h"
-
-/* Not defined in any header? */
-extern void** __cudaRegisterFatBinary(void*);
-extern void __cudaUnregisterFatBinary(void**);
-extern void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
-		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
-		uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
-extern void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
-		char *deviceAddress, const char *deviceName, int ext, int vsize,
-		int constant, int global);
 
 //#undef printd
 //#define printd(level, fmt, args...)
@@ -59,7 +50,7 @@ bool loop_exited = false; //! Indication that the main loop has exited
 // We assume a new region request maps 1:1 to a new thread (using the CUDA API)
 // having spawned in the CUDA application.
 // TODO Spawn a thread for each new shm region, and cancel it on remove.
-void region_request(shm_event e, pid_t memb_pid, shmgrp_region_id id)
+static void region_request(shm_event e, pid_t memb_pid, shmgrp_region_id id)
 {
 	int err;
 	switch (e) {
@@ -310,7 +301,7 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 		case __CUDA_REGISTER_FAT_BINARY:
 		{
 			void *handle;
-			void *cubin_shm = ((void*)pkt + pkt->args[0].argull);
+			void *cubin_shm = (void*)((uintptr_t)pkt + pkt->args[0].argull);
 			__cudaFatCudaBinary *cuda_cubin =
 				calloc(1, sizeof(__cudaFatCudaBinary));
 			if (!cuda_cubin) {
@@ -346,7 +337,7 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 		{
 			// unpack the serialized arguments from shared mem
 			reg_func_args_t *pargs =  // packed
-				((void*)pkt + pkt->args[0].argull);
+				(reg_func_args_t*)((uintptr_t)pkt + pkt->args[0].argull);
 			reg_func_args_t *uargs = // unpacked
 				calloc(1, sizeof(reg_func_args_t));
 			if (!uargs) {
@@ -378,7 +369,7 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 		{
 			// unpack the serialized arguments from shared mem
 			reg_var_args_t *pargs = // packed
-				((void*)pkt + pkt->args[0].argull);
+				(reg_var_args_t*)((uintptr_t)pkt + pkt->args[0].argull);
 			reg_var_args_t *uargs = // unpacked
 				calloc(1, sizeof(reg_var_args_t));
 			if (!uargs) {
@@ -420,9 +411,9 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 			dim3 gridDim = pkt->args[0].arg_dim;
 			dim3 blockDim = pkt->args[1].arg_dim;
 			size_t sharedMem = pkt->args[2].arr_argi[0];
-			cudaStream_t stream = (void*)pkt->args[3].argull;
+			cudaStream_t stream = (cudaStream_t)pkt->args[3].argull;
 
-			printd(DBG_DEBUG, "grid={%d,%d,%d} block={%d,%d,%d}"
+			printd(DBG_DEBUG, "grid={%u,%u,%u} block={%u,%u,%u}"
 					" shmem=%lu strm=%p\n",
 					gridDim.x, gridDim.y, gridDim.z,
 					blockDim.x, blockDim.y, blockDim.z,
@@ -435,11 +426,11 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 
 		case CUDA_SETUP_ARGUMENT:
 		{
-			const void *arg = ((void*)pkt + pkt->args[0].argull);
+			const void *arg = (void*)((uintptr_t)pkt + pkt->args[0].argull);
 			size_t size = pkt->args[1].arr_argi[0];
 			size_t offset = pkt->args[1].arr_argi[1];
 			pkt->ret_ex_val.err = cudaSetupArgument(arg, size, offset);
-			printd(DBG_DEBUG, "setupArg arg=%p size=%lu offset=%lu ret=%d\n",
+			printd(DBG_DEBUG, "setupArg arg=%p size=%lu offset=%lu ret=%u\n",
 					arg, size, offset, pkt->ret_ex_val.err);
 		}
 		break;
@@ -448,7 +439,7 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 		{
 			// FIXME We assume entry is just a memory pointer, not a string.
 			// Printing the entry as a string will confuse your terminal
-			const char *entry = (void*)pkt->args[0].argull;
+			const char *entry = (const char *)pkt->args[0].argull;
 			struct cuda_fatcubin_info *fatcubin;
 			reg_func_args_t *func;
 			int found = 0; // 0 if func not found, 1 otherwise
@@ -491,7 +482,7 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 			void *devPtr = NULL;
 			size_t size = pkt->args[1].arr_argi[0];
 			pkt->ret_ex_val.err = cudaMalloc(&devPtr, size);
-			printd(DBG_DEBUG, "cudaMalloc devPtr=%p size=%lu ret:%d\n",
+			printd(DBG_DEBUG, "cudaMalloc devPtr=%p size=%lu ret:%u\n",
 					devPtr, size, pkt->ret_ex_val.err);
 			pkt->args[0].argull = (unsigned long long)devPtr;
 		}
@@ -508,23 +499,23 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 		case CUDA_MEMCPY_H2D:
 		{
 			void *dst = (void*)pkt->args[0].argull; // gpu ptr
-			const void *src = ((void*)pkt + pkt->args[1].argull);
+			const void *src = (const void*)((uintptr_t)pkt + pkt->args[1].argull);
 			size_t count = pkt->args[2].arr_argi[0];
 			enum cudaMemcpyKind kind = cudaMemcpyHostToDevice;
 			pkt->ret_ex_val.err = cudaMemcpy(dst, src, count, kind);
-			printd(DBG_DEBUG, "memcpyh2d dst=%p src=%p count=%lu kind=%d\n",
+			printd(DBG_DEBUG, "memcpyh2d dst=%p src=%p count=%lu kind=%u\n",
 					dst, src, count, kind);
 		}
 		break;
 
 		case CUDA_MEMCPY_D2H:
 		{
-			void *dst = ((void*)pkt + pkt->args[0].argull);
+			void *dst = (void*)((uintptr_t)pkt + pkt->args[0].argull);
 			void *src = (void*)pkt->args[1].argull; // gpu ptr
 			size_t count = pkt->args[2].arr_argi[0];
 			enum cudaMemcpyKind kind = cudaMemcpyDeviceToHost;
 			pkt->ret_ex_val.err = cudaMemcpy(dst, src, count, kind);
-			printd(DBG_DEBUG, "memcpyd2h dst=%p src=%p count=%lu kind=%d\n",
+			printd(DBG_DEBUG, "memcpyd2h dst=%p src=%p count=%lu kind=%u\n",
 					dst, src, count, kind);
 		}
 		break;
@@ -536,7 +527,7 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 			size_t count = pkt->args[2].arr_argi[0];
 			enum cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
 			pkt->ret_ex_val.err = cudaMemcpy(dst, src, count, kind);
-			printd(DBG_DEBUG, "memcpyd2d dst=%p src=%p count=%lu kind=%d\n",
+			printd(DBG_DEBUG, "memcpyd2d dst=%p src=%p count=%lu kind=%u\n",
 					dst, src, count, kind);
 		}
 		break;
@@ -547,7 +538,7 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 			reg_var_args_t *var;
 			int found = 0; // 0 if var not found, 1 otherwise
 			const char *symbol = pkt->args[0].argcp;
-			const void *src = ((void*)pkt + pkt->args[1].argull);
+			const void *src = (void*)((uintptr_t)pkt + pkt->args[1].argull);
 			size_t count = pkt->args[2].arr_argi[0];
 			size_t offset = pkt->args[2].arr_argi[1];
 			// Locate the var structure; symbols are unique across cubins.
@@ -614,7 +605,7 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 			struct cuda_fatcubin_info *fatcubin;
 			int found = 0; // 0 if var not found, 1 otherwise
 			reg_var_args_t *var;
-			void *dst = ((void*)pkt + pkt->args[0].argull);
+			void *dst = (void*)((uintptr_t)pkt + pkt->args[0].argull);
 			const char *symbol = pkt->args[1].argcp;
 			size_t count = pkt->args[2].arr_argi[0];
 			size_t offset = pkt->args[2].arr_argi[1];
@@ -683,8 +674,8 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 
 		default:
 		{
-			printd(DBG_ERROR, "Unhandled packet, method %d\n", pkt->method_id);
-			pkt->ret_ex_val.err = (!cudaSuccess);
+			printd(DBG_ERROR, "Unhandled packet, method %u\n", pkt->method_id);
+			pkt->ret_ex_val.err = cudaErrorUnknown;
 			fail = 1;
 		}
 		break;
@@ -696,7 +687,7 @@ int nv_exec_pkt(volatile struct cuda_packet *pkt)
 		printd(DBG_ERROR, "__cudaRegFatBin returned NULL handle\n");
 	} else if (pkt->method_id != __CUDA_REGISTER_FAT_BINARY &&
 			pkt->ret_ex_val.err != cudaSuccess) {
-		printd(DBG_ERROR, "method %d returned not cudaSuccess: %d\n",
+		printd(DBG_ERROR, "method %u returned not cudaSuccess: %u\n",
 				pkt->method_id, pkt->ret_ex_val.err);
 	}
 	return 0;

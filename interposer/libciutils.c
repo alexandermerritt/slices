@@ -97,7 +97,7 @@ int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo){
  * @param string
  * @return size of the packet for the string
  */
-int l_getStringPktSize(const char const * string){
+static int l_getStringPktSize(const char * string){
 	int size = sizeof(size_pkt_field_t);
 
 	if( string == NULL || strlen(string) == 0)
@@ -115,7 +115,7 @@ int l_getStringPktSize(const char const * string){
  * @oaram pEntriesCache (out) the cache for storing entries about FatEntries structures
  * @return the size of the entry (including the size of the pointer to the structure)
  */
-int l_getSize__cudaFatPtxEntry(const __cudaFatPtxEntry * pEntry, int * pCounter){
+static int l_getSize__cudaFatPtxEntry(const __cudaFatPtxEntry * pEntry, int * pCounter){
 	// the __cudaFatPtxEntry is an array and is terminated with entries
 	// that have NULL elements
 	int size = 0;
@@ -146,7 +146,7 @@ int l_getSize__cudaFatPtxEntry(const __cudaFatPtxEntry * pEntry, int * pCounter)
  * @oaram pEntriesCache (out) the cache for storing entries about FatEntries structures
  * @return the size of the entry (including the size of the pointer to the structure)
  */
-int l_getSize__cudaFatCubinEntry(const __cudaFatCubinEntry * pEntry, int * pCounter){
+static int l_getSize__cudaFatCubinEntry(const __cudaFatCubinEntry * pEntry, int * pCounter){
 	// the __cudaFatCubinEntry is an array and is terminated with entries
 	// that have NULL elements
 	int size = 0;
@@ -186,7 +186,7 @@ int l_getSize__cudaFatCubinEntry(const __cudaFatCubinEntry * pEntry, int * pCoun
  * @oaram pEntriesCache (out) the cache for storing entries about FatEntries structures
  * @return the size packet entry
  */
-int l_getSize__cudaFatDebugEntry(__cudaFatDebugEntry * pEntry, int * pCounter){
+static int l_getSize__cudaFatDebugEntry(__cudaFatDebugEntry * pEntry, int * pCounter){
 
 	// apparently the __cudaFatDebugEntry might be an array
 	// that's why we want to iterate through all this elements
@@ -229,7 +229,7 @@ int l_getSize__cudaFatDebugEntry(__cudaFatDebugEntry * pEntry, int * pCounter){
  * @param counter (out) a counter to count the entry symbols (zeroed)
  * @return the size of the entry (including the size of the pointer to the structure)
  */
-int l_getSize__cudaFatSymbolEntry(const __cudaFatSymbol * pEntry, int * pCounter){
+static int l_getSize__cudaFatSymbolEntry(const __cudaFatSymbol * pEntry, int * pCounter){
 	int size = 0;
 
 	// to store the number of entries
@@ -252,7 +252,7 @@ int l_getSize__cudaFatSymbolEntry(const __cudaFatSymbol * pEntry, int * pCounter
 	return size;
 }
 
-int l_getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t * pEntriesCache);
+static int l_getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t * pEntriesCache);
 
 /**
  * gets the size of the __cudaFatCudaBinary -> __cudaFatCubinEntry; includes the
@@ -265,7 +265,7 @@ int l_getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t
  * @oaram pCounter (out) the counter for the number of dependants
  * @return the size of the entry (including the size of the pointer to the structure)
  */
-int l_getSize__cudaFatBinaryEntry(__cudaFatCudaBinary * pEntry, cache_num_entries_t * pEntriesCache){
+static int l_getSize__cudaFatBinaryEntry(__cudaFatCudaBinary * pEntry, cache_num_entries_t * pEntriesCache){
 
 	// do not understand this implementation, and I am following the
 	// original implementation
@@ -295,7 +295,7 @@ int l_getSize__cudaFatBinaryEntry(__cudaFatCudaBinary * pEntry, cache_num_entrie
  * @oaram pCounter (out) the cache for storing number of elves (first zeroed)
  * @return the size of the entry (including the size of the pointer to the structure)
  */
-int l_getSize__cudaFatElfEntry(__cudaFatElfEntry * pEntry, int * pCounter){
+static int l_getSize__cudaFatElfEntry(__cudaFatElfEntry * pEntry, int * pCounter){
 
 	// apparently the __cudaFatElfEntry might be an array
 	// that's why we want to iterate through all this elements
@@ -453,7 +453,7 @@ cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCuda
 // -------------------------------
 // print functions
 // ------------------------------
-void l_printPtxE(__cudaFatPtxEntry * p){
+static void l_printPtxE(__cudaFatPtxEntry * p){
 	int i = 0;
 	p_debug( "__cudaFatPtxEntry: %p\n", p);
 
@@ -468,7 +468,7 @@ void l_printPtxE(__cudaFatPtxEntry * p){
 	}
 }
 
-void l_printCubinE(__cudaFatCubinEntry * p){
+static void l_printCubinE(__cudaFatCubinEntry * p){
 	int i = 0;
 	p_debug( "__cudaFatCubinEntry: %p\n", p);
 
@@ -483,7 +483,7 @@ void l_printCubinE(__cudaFatCubinEntry * p){
 	}
 }
 
-void l_printSymbolE(__cudaFatSymbol * p, char * name){
+static void l_printSymbolE(__cudaFatSymbol * p, char * name){
 	int i = 0;
 	p_debug( "__cudaFatSymbol: %s,  %p\n", name, p);
 
@@ -494,18 +494,18 @@ void l_printSymbolE(__cudaFatSymbol * p, char * name){
 	}
 }
 
-void l_printDebugE(__cudaFatDebugEntry * p){
+static void l_printDebugE(__cudaFatDebugEntry * p){
 	int i = 0;
 	p_debug( "__cudaFatDebugEntry: %p\n", p);
 	while( p ){
-		p_debug( "p[%d] (gpuProfileName, debug, next, size): %s, %s, %p, %d\n",
+		p_debug( "p[%d] (gpuProfileName, debug, next, size): %s, %s, %p, %u\n",
 				i, p->gpuProfileName, p->debug, p->next, p->size);
 		p = p->next;
 		i++;
 	}
 }
 
-void l_printDepE(__cudaFatCudaBinary * p){
+static void l_printDepE(__cudaFatCudaBinary * p){
 	int i = 0;
 
 	p_debug( "__cudaFatCudaBinary: %p\n", p);
@@ -518,24 +518,24 @@ void l_printDepE(__cudaFatCudaBinary * p){
 	}
 }
 
-void l_printElfE(__cudaFatElfEntry * p){
+static void l_printElfE(__cudaFatElfEntry * p){
 
 	int i = 0;
 	p_debug( "__cudaFatElfEntry: %p\n", p);
 
 	while( p ){
-		p_debug( "p[%d] (gpuProfileName, elf, next, size): %s, %p, %p, %d\n",
+		p_debug( "p[%d] (gpuProfileName, elf, next, size): %s, %p, %p, %u\n",
 				i, p->gpuProfileName,  p->elf, p->next, p->size);
 		p = p->next;
 		i++;
 	}
 }
 
-void l_printFatBinary(__cudaFatCudaBinary * pFatBin){
+void printFatBinary(__cudaFatCudaBinary * pFatBin){
 	if( pFatBin == NULL ){
 		p_info( "~~~~~~~~ FatBinary  = %p\n", pFatBin);
 	} else {
-		p_debug( "\tmagic: %ld, version: %ld , gpuInfoVersion: %ld\n",
+		p_debug( "\tmagic: %lu, version: %lu , gpuInfoVersion: %lu\n",
 				pFatBin->magic, pFatBin->version, pFatBin->gpuInfoVersion);
 		p_debug( "\tkey: %s, ident: %s, usageMode: %s\n",
 				pFatBin->key, pFatBin->ident, pFatBin->usageMode);
@@ -553,7 +553,7 @@ void l_printFatBinary(__cudaFatCudaBinary * pFatBin){
 	}
 }
 
-void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
+void printRegFunArgs(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize){
 	printd(DBG_DEBUG, "\t REG FUN ARGS:\n");
@@ -578,7 +578,7 @@ void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
 	printd(DBG_DEBUG, "wSize: %p\n", wSize);
 }
 
-void l_printRegVar(void **fatCubinHandle, char *hostVar,
+void printRegVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global){
 	p_debug( "\t REG VAR:\n");
@@ -596,7 +596,7 @@ void l_printRegVar(void **fatCubinHandle, char *hostVar,
 /**
  * Prints the device properties
  */
-int l_printCudaDeviceProp(const struct cudaDeviceProp * const pProp){
+int printCudaDeviceProp(const struct cudaDeviceProp * const pProp){
 	printd(DBG_INFO, "\nDevice \"%s\"\n",  pProp->name);
 	printd(DBG_INFO, "  CUDA Capability Major/Minor version number:    %d.%d\n", pProp->major, pProp->minor);
 	printd(DBG_INFO, "  Total amount of global memory:                 %llu bytes\n", (unsigned long long) pProp->totalGlobalMem);
@@ -644,7 +644,7 @@ int printFatCIArray(GArray * fcia){
 /**
  * prints the hash table of handlers and vars
  */
-void  l_printGPtrArr(gpointer key, gpointer value, gpointer user_data){
+static void  l_printGPtrArr(gpointer key, gpointer value, gpointer user_data){
 
 	GPtrArray* varArr = (GPtrArray*) value;
 	guint i;
@@ -654,9 +654,10 @@ void  l_printGPtrArr(gpointer key, gpointer value, gpointer user_data){
 //	g_ptr_array_foreach(varArr, (GFunc)printf, NULL);
 	for(i = 0; i < varArr->len; i++){
 		vars_val_t * v = g_ptr_array_index(varArr, i);
-		if( v != NULL )
-			p_debug("[%d] = hostVar: %p, deviceName: %s\n",
-					i, v->hostVar, v->deviceName);
+		if( v != NULL ) {
+			p_debug("[%u] = hostVar: %p, deviceName: %s\n",
+					i, (void*)v->hostVar, v->deviceName);
+		}
 	}
 	p_debug("]\n");
 }
@@ -683,7 +684,7 @@ int printRegVarTab(GHashTable * tab){
  *         update the pDst pointer
  *         ERROR if pDst is NULL
  */
-int l_packStr(char * pDst, const char *pSrc){
+static int l_packStr(char * pDst, const char *pSrc){
 	int offset;
 	int length;
 
@@ -724,7 +725,7 @@ int l_packStr(char * pDst, const char *pSrc){
  *         pSrc is NULL
  *         the pointer to the allocated string
  */
-char * l_unpackStr(const char *pSrc, int * pOffset){
+static char * l_unpackStr(const char *pSrc, int * pOffset){
 	size_pkt_field_t length;
 	char * pDst;
 
@@ -768,7 +769,7 @@ char * l_unpackStr(const char *pSrc, int * pOffset){
  *         NULL if (1) pSrc is NULL or (2) problems with memory
  *              or (3) size == 0;
  */
-char * l_unpackChars(char * pSrc, int size){
+static char * l_unpackChars(char * pSrc, int size){
 	char * pDst;
 
 	if ( NULL == pSrc || 0 == size )
@@ -799,7 +800,7 @@ char * l_unpackChars(char * pSrc, int size){
  *         ERROR if pDst is NULL
  *
  */
-int l_packPtx(char * pDst, const __cudaFatPtxEntry * pEntry, int n){
+static int l_packPtx(char * pDst, const __cudaFatPtxEntry * pEntry, int n){
 	int offset;
 	int tmp;
 	int i;
@@ -836,7 +837,7 @@ int l_packPtx(char * pDst, const __cudaFatPtxEntry * pEntry, int n){
  *        the begining of pSrc
  * @return the ptx entry or NULL if pDst is NULL
  */
-__cudaFatPtxEntry * l_unpackPtx(char * pSrc, int * pOffset){
+static __cudaFatPtxEntry * l_unpackPtx(char * pSrc, int * pOffset){
 	size_pkt_field_t n; 		// the number of entries
 	__cudaFatPtxEntry * pEntry;
 	unsigned int i;
@@ -893,7 +894,7 @@ __cudaFatPtxEntry * l_unpackPtx(char * pSrc, int * pOffset){
  *         ERROR if pDst is NULL
  *
  */
-int l_packCubin(char * pDst, const __cudaFatCubinEntry * pEntry, int n){
+static int l_packCubin(char * pDst, const __cudaFatCubinEntry * pEntry, int n){
 	int offset;
 	int tmp;
 	int i;
@@ -934,7 +935,7 @@ int l_packCubin(char * pDst, const __cudaFatCubinEntry * pEntry, int n){
  *        the begining of pSrc
  * @return the cubin entry or NULL if pDst is NULL
  */
-__cudaFatCubinEntry * l_unpackCubin(char * pSrc, int * pOffset){
+static __cudaFatCubinEntry * l_unpackCubin(char * pSrc, int * pOffset){
 	size_pkt_field_t n; 		// the number of entries
 	__cudaFatCubinEntry * pEntry;
 	unsigned int i;
@@ -989,7 +990,7 @@ __cudaFatCubinEntry * l_unpackCubin(char * pSrc, int * pOffset){
  *         ERROR if pDst is NULL
  *
  */
-int l_packDebug(char * pDst, __cudaFatDebugEntry * pEntry, int n){
+static int l_packDebug(char * pDst, __cudaFatDebugEntry * pEntry, int n){
 	int tmp;
 	int i = 0;
 	char * pDstOrig = pDst;
@@ -1036,7 +1037,7 @@ int l_packDebug(char * pDst, __cudaFatDebugEntry * pEntry, int n){
  * @return the debug entry or NULL if pDst is NULL or the size is NULL
  *         @todo should be done something with that
  */
-__cudaFatDebugEntry * l_unpackDebug(char * pSrc, int * pOffset){
+static __cudaFatDebugEntry * l_unpackDebug(char * pSrc, int * pOffset){
 	size_pkt_field_t n; 		// the number of entries
 	__cudaFatDebugEntry * pEntry;
 	unsigned int i;
@@ -1107,7 +1108,7 @@ __cudaFatDebugEntry * l_unpackDebug(char * pSrc, int * pOffset){
  *  You should always check if the return thing is an error or not
  *
  */
-int l_packElf(char * pDst, __cudaFatElfEntry * pEntry, int n){
+static int l_packElf(char * pDst, __cudaFatElfEntry * pEntry, int n){
 
 	int tmp;
 	int i = 0;
@@ -1161,7 +1162,7 @@ int l_packElf(char * pDst, __cudaFatElfEntry * pEntry, int n){
  * @return the debug entry or NULL if pDst is NULL or the size is NULL
  *         @todo should be done something with that
  */
-__cudaFatElfEntry * l_unpackElf(char * pSrc, int * pOffset){
+static __cudaFatElfEntry * l_unpackElf(char * pSrc, int * pOffset){
 	size_pkt_field_t n; 		// the number of entries
 	__cudaFatElfEntry * pEntry;
 	unsigned int i;
@@ -1237,7 +1238,7 @@ __cudaFatElfEntry * l_unpackElf(char * pSrc, int * pOffset){
  *         ERROR if pDst is NULL
  *
  */
-int l_packSymbol(char * pDst, const __cudaFatSymbol * pEntry, int n){
+static int l_packSymbol(char * pDst, const __cudaFatSymbol * pEntry, int n){
 	int offset = 0;
 	int tmp;
 	int i;
@@ -1274,7 +1275,7 @@ int l_packSymbol(char * pDst, const __cudaFatSymbol * pEntry, int n){
  *        the begining of pSrc
  * @return the cubin entry or NULL if pDst is NULL
  */
-__cudaFatSymbol * l_unpackSymbol(char * pSrc, int * pOffset){
+static __cudaFatSymbol * l_unpackSymbol(char * pSrc, int * pOffset){
 	size_pkt_field_t n; 		// the number of entries
 	__cudaFatSymbol * pEntry;
 	unsigned int i;
@@ -1314,7 +1315,7 @@ __cudaFatSymbol * l_unpackSymbol(char * pSrc, int * pOffset){
 	return pEntry;
 }
 
-int l_packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
+static int l_packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 		cache_num_entries_t * const pEntriesCache);
 
 /**
@@ -1333,13 +1334,9 @@ int l_packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
  * @todo Right now we do not support the dependends - dependends should
  * be NULL.
  */
-int l_packDep(char * pDst, __cudaFatCudaBinary * pEntry, int n){
+static int l_packDep(char * pDst, __cudaFatCudaBinary * pEntry, int n){
 	// to remember the offset
 	char * pDstOrig = pDst;
-	// for iterations
-	__cudaFatCudaBinary * p;
-	int offset;
-	int i = 0;
 
 	if( NULL == pDst )
 		return ERROR;
@@ -1359,6 +1356,11 @@ int l_packDep(char * pDst, __cudaFatCudaBinary * pEntry, int n){
 		return ERROR;
 	}
 
+#if 0
+	int offset;
+	__cudaFatCudaBinary * p;
+	// for iterations
+	int i = 0;
 	// now write the entries
 	p = pEntry;
 	while( p ){
@@ -1377,10 +1379,8 @@ int l_packDep(char * pDst, __cudaFatCudaBinary * pEntry, int n){
 	assert( i == n );
 
 	return pDst - pDstOrig;
+#endif
 }
-
-// forward declaration
-int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack);
 
 /**
  * Unpacks dependends
@@ -1389,7 +1389,7 @@ int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack);
  *
  * @return the offset
  */
-__cudaFatCudaBinary * l_unpackDep(char * pSrc, int * pOffset){
+static __cudaFatCudaBinary * l_unpackDep(char * pSrc, int * pOffset){
 	size_pkt_field_t n; 		// the number of entries
 	__cudaFatCudaBinary * pEntry;
 	unsigned int i;
@@ -1460,7 +1460,7 @@ int packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 	return pFatPack - pFatPackOrig;
 }
 
-int l_packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
+static int l_packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC,
 		cache_num_entries_t * const pEntriesCache){
 
 	// to enabling counting the offset
@@ -1586,7 +1586,7 @@ int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack){
 /**
  * Gets the size of teh packetized pointer to Uint3
  */
-int l_getUint3PtrPktSize(uint3 * p){
+static int l_getUint3PtrPktSize(uint3 * p){
 	if( p )
 		return sizeof(void*) + sizeof(uint3);
 	else
@@ -1596,7 +1596,7 @@ int l_getUint3PtrPktSize(uint3 * p){
 /**
  * Returns the size of the packetized pointer to Dim3
  */
-int l_getDim3PtrPktSize(dim3 * p){
+static int l_getDim3PtrPktSize(dim3 * p){
 	if( p )
 		return sizeof(void*) + sizeof(dim3);
 	else
@@ -1606,7 +1606,7 @@ int l_getDim3PtrPktSize(dim3 * p){
 /**
  * returns the size of the packetized pointer to int
  */
-int l_getIntPtrPktSize(int * p){
+static int l_getIntPtrPktSize(int * p){
 	if( p )
 		return sizeof(void*) + sizeof(int);
 	else
@@ -1682,7 +1682,7 @@ int getSize_regVar(void **fatCubinHandle, char *hostVar, char *deviceAddress,
  * @return offset we need to add to pDst later
  *         ERROR if pDst is NULL
  */
-int l_packUint3Ptr(char * pDst, const uint3 *pSrc){
+static int l_packUint3Ptr(char * pDst, const uint3 *pSrc){
 	// to allow to count the offset
 	char * pDstOrig = pDst;
 
@@ -1720,7 +1720,7 @@ int l_packUint3Ptr(char * pDst, const uint3 *pSrc){
  * @return a pointer to a new uint3
  *         NULL if problems with memory allocation or pSrc is NULL
  */
-uint3 * l_unpackUint3Ptr(const char *pSrc, int * pOffset){
+static uint3 * l_unpackUint3Ptr(const char *pSrc, int * pOffset){
 
 	uint3 * p;
 
@@ -1767,7 +1767,7 @@ uint3 * l_unpackUint3Ptr(const char *pSrc, int * pOffset){
  * @return offset we need to add to pDst later
  *         ERROR if pDst is NULL
  */
-int l_packDim3Ptr(char * pDst, const dim3 *pSrc){
+static int l_packDim3Ptr(char * pDst, const dim3 *pSrc){
 	// to allow to count the offset
 	char * pDstOrig = pDst;
 
@@ -1805,7 +1805,7 @@ int l_packDim3Ptr(char * pDst, const dim3 *pSrc){
  * @return a pointer to a new uint3
  *         NULL if problems with memory allocation or pSrc is NULL
  */
-dim3 * l_unpackDim3Ptr(const char *pSrc, int * pOffset){
+static dim3 * l_unpackDim3Ptr(const char *pSrc, int * pOffset){
 
 	dim3 * p;
 
@@ -1852,7 +1852,7 @@ dim3 * l_unpackDim3Ptr(const char *pSrc, int * pOffset){
  *         ERROR if pDst is NULL
  *
  */
-int l_packIntPtr(char * pDst, int *pSrc){
+static int l_packIntPtr(char * pDst, int *pSrc){
 	char * pDstOrig = pDst;
 
 	if( !pDst )
@@ -1879,7 +1879,7 @@ int l_packIntPtr(char * pDst, int *pSrc){
  * @return a pointer to a new uint3
  *         NULL if problems with memory allocation or pSrc is NULL
  */
-int * l_unpackIntPtr(const char *pSrc, int * pOffset){
+static int * l_unpackIntPtr(const char *pSrc, int * pOffset){
 	int * p;
 
 	if( !pSrc ){
@@ -2592,7 +2592,7 @@ void g_vars_remove_val(gpointer * value){
  * @return TRUE if the user_data has been found
  *         FALSE if the user_data has not been found
  */
-gboolean l_g_vars_find_hostVar(gpointer key, gpointer value, gpointer user_data) {
+static gboolean l_g_vars_find_hostVar(gpointer key, gpointer value, gpointer user_data) {
 	guint i ;
 	GPtrArray * varArr = (GPtrArray*)value;
 	GPtrArray * a = (GPtrArray *) user_data;
@@ -2630,7 +2630,7 @@ gboolean l_g_vars_find_hostVar(gpointer key, gpointer value, gpointer user_data)
  * @return TRUE if the user_data has been found
  *         FALSE if the user_data has not been found
  */
-gboolean l_g_vars_find_deviceName(gpointer key, gpointer value, gpointer user_data) {
+static gboolean l_g_vars_find_deviceName(gpointer key, gpointer value, gpointer user_data) {
 	guint i ;
 	GPtrArray * varArr = (GPtrArray*)value;
 	GPtrArray * a = (GPtrArray *) user_data;

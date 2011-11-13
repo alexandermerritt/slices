@@ -103,7 +103,7 @@ static void runtime_entry(group_event e, pid_t pid)
 		}
 		break;
 		default:
-			printd(DBG_ERROR, "Error: invalid membership event %d\n", e);
+			printd(DBG_ERROR, "Error: invalid membership event %u\n", e);
 			break;
 	}
 }

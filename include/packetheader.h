@@ -14,22 +14,19 @@
 #ifndef PACKETHEADER_H_
 #define PACKETHEADER_H_
 
-typedef unsigned char uint8_t;
-typedef unsigned short int uint16_t;
-typedef unsigned int uint32_t;
-typedef long int64_t;
-typedef unsigned long uint64_t;
-typedef uint32_t grant_ref_t;
+// System includes
+#include <pthread.h>
+#include <stdint.h>
 
-// include this file when not compiling from frontend driver
-// some crappy make issues due to include dependencies and path messup
+// CUDA includes
 #include <driver_types.h>
 #include <vector_types.h>
 
-#include <util/list.h>
-#include <pthread.h>
+// Project includes
 #include <method_id.h>
+#include <util/list.h>
 
+typedef uint32_t grant_ref_t;
 typedef pthread_t tid_t;
 
 #define MAX_ARGS 4       // most cuda calls so far
@@ -39,7 +36,7 @@ enum cuda_packet_flags
 	CUDA_PKT_REQUEST = 0x1,		/* This packet is flowing from app to assembly. */
 	CUDA_PKT_RESPONSE  = 0x2,	/* Assembly -> app; RPC already executed somewhere. */
 	//CUDA_PKT_MORE_DATA = 0x4, /* Not used. */
-	CUDA_PKT_ERROR    = 0x8,	/* Used to indicate if the RPC produced an error. */
+	CUDA_PKT_ERROR    = 0x8		/* Used to indicate if the RPC produced an error. */
 	//CUDA_PKT_PTR_DATA = 0x10, /* Not used. */
 	//CUDA_PKT_ADDR_MAPPED = 0x20, /* Not used. */
 	//CUDA_PKT_MEM_SHARED = 0x40, /* Not used. */

@@ -42,7 +42,7 @@ envBackendKeeneland = Environment(
       LIBPATH=[CUDA_ROOT + 'lib64',
                GLIB20 + 'lib'],
       CPPPATH=['.',
-      '../remote',
+#      '../remote',
       '../include',
       '../interposer',
       '../backend',
@@ -59,6 +59,7 @@ envBackendProst = envBackendKeeneland
 # Shiva, GT machine
 envBackendShiva = Environment(
       CC='/usr/local/bin/gcc4.4.4',
+      #CC='/home/alex/bin/icc',
       LIBS=['pthread', 
             'rt', 
             'dl', 
@@ -68,7 +69,6 @@ envBackendShiva = Environment(
             'glib-2.0' ],
       LIBPATH=[CUDA_ROOT + 'lib64', '../shmgrp/lib'],
       CPPPATH=['.',
-      '../remote',
       '../include',
       '../interposer',
       '../backend',
@@ -82,6 +82,8 @@ envBackendShiva = Environment(
 
 # Ifrit, GT machine
 envBackendIfrit = Environment(
+      CC='/usr/local/bin/gcc4.4.4',
+      #CC='/home/alex/bin/icc',
       LIBS=['pthread', 
             'rt', 
             'dl', 
@@ -91,7 +93,6 @@ envBackendIfrit = Environment(
             'glib-2.0' ],
       LIBPATH=[CUDA_ROOT + 'lib64', 'shmgrp/lib'],
       CPPPATH=['.',
-      '../remote',
       '../include',
       '../interposer',
       '../backend',
@@ -116,9 +117,7 @@ def build_backend(env):
             'runtime.c',
             'assembly.c',
             'localsink.c',
-            '../interposer/libciutils.c',
-            '../include/kidron_common_f.c',
-			'../common/libregistration.c'])
+            '../interposer/libciutils.c'])
 
 
 def build_program():

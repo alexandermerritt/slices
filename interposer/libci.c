@@ -59,7 +59,7 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <pthread.h>
-#include <stdbool.h> // because C doesn't have a bool type
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,19 +67,20 @@
 // CUDA includes
 #include <__cudaFatFormat.h>
 #include <cuda.h>
+#include <cuda_runtime_api.h>
 #include <driver_types.h>
 #include <vector_types.h>
 
 // Project includes
 #include <assembly.h>
 #include <config.h>
-#include <debug.h>			// printd, ERROR, OK
-#include <kidron_common_s.h> // for ini file
-#include <method_id.h>		// method identifiers
-#include <packetheader.h> 	// for cuda_packet_t
+#include <cuda_hidden.h>
+#include <debug.h>
+#include <method_id.h>
+#include <packetheader.h> 
 #include <shmgrp.h>
 #include <util/compiler.h>
-#include <util/x86_system.h> // memory barriers
+#include <util/x86_system.h>
 
 // Directory-immediate includes
 #include "libciutils.h"
@@ -90,10 +91,12 @@
 
 /*-------------------------------------- EXTERNS -----------------------------*/
 
+#if 0
 // from kidron_common_f.c
 extern int ini_getLocal(const ini_t* pIni);
 extern int ini_getIni(ini_t* pIni);
 extern int ini_freeIni(ini_t* pIni);
+#endif
 
 /*-------------------------------------- INTERNAL STATE ----------------------*/
 
@@ -168,7 +171,7 @@ __shm_has_regions(struct shm_regions *regions)
 
 // Should be called within the first CUDA call interposed. It is okay to call
 // this function more than once, it will only have an effect the first time.
-int attach_assembly_runtime(void)
+static int attach_assembly_runtime(void)
 {
 	int err;
 	if (cuda_regions)
@@ -194,7 +197,7 @@ int attach_assembly_runtime(void)
 
 // Should be called within the last CUDA call interposed. It is okay to call
 // this function more than once, it will only have an effect the first time.
-void detach_assembly_runtime(void)
+static void detach_assembly_runtime(void)
 {
 	int err;
 	struct shm_region *region, *tmp;
@@ -224,7 +227,7 @@ void detach_assembly_runtime(void)
 // the region list for us. This function must be thread-safe (newly detected
 // threads will ask for a new region, and will call this). If the tid has
 // already been allocated a memory region, we simply return that mapping.
-void * __add_shm(size_t size, pthread_t tid)
+static void * __add_shm(size_t size, pthread_t tid)
 {
 	int err;
 	struct shm_region *region;
@@ -334,7 +337,7 @@ cudaError_t cudaGetDeviceCount(int *count) {
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
-	*count = *((int *)((void *)shmpkt + shmpkt->args[0].argull));
+	*count = *((int *)((uintptr_t)shmpkt + shmpkt->args[0].argull));
 	printd(DBG_DEBUG, "%d\n", *count);
 	return shmpkt->ret_ex_val.err;
 }
@@ -356,7 +359,8 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
-	prop_shm = (struct cudaDeviceProp*)((void*)shmpkt + shmpkt->args[0].argull);
+	prop_shm = (struct cudaDeviceProp*)
+					((uintptr_t)shmpkt + shmpkt->args[0].argull);
 	memcpy(prop, prop_shm, sizeof(struct cudaDeviceProp));
 	return shmpkt->ret_ex_val.err;
 }
@@ -394,7 +398,7 @@ cudaError_t cudaGetDevice(int *device) {
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
-	*device = *((int*)((void*)shmpkt + shmpkt->args[0].argull));
+	*device = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
 	return shmpkt->ret_ex_val.err;
 }
 
@@ -460,7 +464,7 @@ cudaError_t cudaDriverGetVersion(int *driverVersion) {
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
-	*driverVersion = *((int*)((void*)shmpkt + shmpkt->args[0].argull));
+	*driverVersion = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
 	return shmpkt->ret_ex_val.err;
 }
 
@@ -477,7 +481,7 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion) {
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
-	*runtimeVersion = *((int*)((void*)shmpkt + shmpkt->args[0].argull));
+	*runtimeVersion = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
 	return shmpkt->ret_ex_val.err;
 }
 
@@ -489,7 +493,7 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset) {
 	shmpkt->method_id = CUDA_SETUP_ARGUMENT;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argull = sizeof(struct cuda_packet);
-	shm_ptr = ((void*)shmpkt + shmpkt->args[0].argull);
+	shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
 	memcpy(shm_ptr, arg, size);
 	shmpkt->args[1].arr_argi[0] = size;
 	shmpkt->args[1].arr_argi[1] = offset;
@@ -1236,7 +1240,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 			shmpkt->method_id = CUDA_MEMCPY_H2D;
 			shmpkt->args[0].argull = (unsigned long long)dst; // gpu ptr
 			shmpkt->args[1].argull = sizeof(struct cuda_packet);
-			shm_ptr = ((void*)shmpkt + shmpkt->args[1].argull);
+			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
 			memcpy(shm_ptr, src, count);
 		}
 		break;
@@ -1271,7 +1275,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 
 	// copy data to user-space region
 	if (shmpkt->method_id == CUDA_MEMCPY_D2H) {
-		shm_ptr = ((void*)shmpkt + shmpkt->args[0].argull);
+		shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
 		memcpy(dst, shm_ptr, count);
 	}
 
@@ -1441,7 +1445,7 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
 			// FIXME We assume symbols are ptr values, not strings.
 			// CUDA API states it may be either.
 			shmpkt->args[1].argull = sizeof(struct cuda_packet);
-			shm_ptr = ((void*)shmpkt + shmpkt->args[1].argull);
+			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
 			memcpy(shm_ptr, src, count);
 		}
 		break;
@@ -1511,7 +1515,7 @@ cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 		rmb();
 
 	if (kind == cudaMemcpyDeviceToHost) {
-		shm_ptr = ((void*)shmpkt + shmpkt->args[0].argull);
+		shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
 		memcpy(dst, shm_ptr, count);
 	}
 
@@ -2196,7 +2200,7 @@ void** __cudaRegisterFatBinary(void* cubin) {
 
 	// Serialize the complex cubin structure into the shared memory region,
 	// immediately after the location of the cuda packet.
-	cubin_shm = ((void*)shmpkt + shmpkt->args[0].argull);
+	cubin_shm = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
 	memset(&entries_in_cubin, 0, sizeof(entries_in_cubin));
 	cubin_size = getFatRecPktSize(cubin, &entries_in_cubin);
 	printd(DBG_DEBUG, "size of cubin: %d bytes\n", cubin_size);
@@ -2262,7 +2266,7 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 
 	shmpkt->args[0].argull = sizeof(struct cuda_packet);
 	// now pack it into the shm
-	var = ((void*)shmpkt + shmpkt->args[0].argull);
+	var = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
 	err = packRegFuncArgs(var, fatCubinHandle, hostFun, deviceFun,
 			deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
 	if (err < 0) {
@@ -2301,7 +2305,7 @@ void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 
 	shmpkt->args[0].argull = sizeof(struct cuda_packet);
 	// now pack it into the shm
-	var = ((void*)shmpkt + shmpkt->args[0].argull);
+	var = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
 	err = packRegVar(var, fatCubinHandle, hostVar, deviceAddress, deviceName,
 			ext, vsize, constant, global);
 	if (err < 0) {

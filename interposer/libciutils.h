@@ -116,13 +116,13 @@ cuda_packet_t * callocCudaPacket(const char * pFunctionName,
 		cudaError_t * pCudaError);
 
 // print utilities
-void l_printFatBinary(__cudaFatCudaBinary * pFatBin);
-void l_printRegFunArgs(void** fatCubinHandle, const char* hostFun,
+void printFatBinary(__cudaFatCudaBinary * pFatBin);
+void printRegFunArgs(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
-void l_printRegVar(void **fatCubinHandle, char *hostVar, char *deviceAddress,
+void printRegVar(void **fatCubinHandle, char *hostVar, char *deviceAddress,
 		const char *deviceName, int ext, int vsize, int constant, int global);
-int l_printCudaDeviceProp(const struct cudaDeviceProp * const pProp);
+int printCudaDeviceProp(const struct cudaDeviceProp * const pProp);
 int printFatCIArray(GArray * fcia);
 int printRegVarTab(GHashTable * tab);
 

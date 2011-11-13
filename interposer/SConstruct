@@ -67,6 +67,8 @@ envInterposerProst = envInterposerKeeneland
 
 # shiva
 envInterposerShiva = Environment(
+     #CC = '/home/alex/bin/icc',
+     CC = 'gcc4.4.4',
      LIBS = ['rt', 'dl', 
              'glib-2.0', 'shmgrp'],
      LIBPATH = [CUDA_ROOT + 'lib64', '/lib64', '../shmgrp/lib'],
@@ -108,7 +110,7 @@ envTestKeeneland = Environment(
     LIBPATH= [ '.', GLIB20 + 'lib'],
     CPPPATH= [CUDA_ROOT + 'include',
             '../include',
-            '../remote', 
+#            '../remote', 
             '../backend',
             GLIB20 + 'include/glib-2.0',
             GLIB20 + 'include/gio-unix-2.0',
@@ -124,7 +126,7 @@ envTestShiva = Environment(
       LIBPATH= ['.'],
       CPPPATH= [CUDA_ROOT + 'include',
                 '../include',
-                '../remote', 
+#                '../remote', 
                 '../backend',
                 '/usr/include/glib-2.0',
                 '/usr/include/gio-unix-2.0',
@@ -137,7 +139,7 @@ envTestIfrit = Environment(
       LIBPATH= ['.'],
       CPPPATH= [CUDA_ROOT + 'include',
                 '../include',
-                '../remote', 
+#                '../remote', 
                 '../backend',
                 '/usr/include/glib-2.0',
                 '/usr/include/gio-unix-2.0',
@@ -155,9 +157,7 @@ def build_interposer_lib(env):
     """
     env.SharedLibrary('libci.so', 
     [ 'libci.c',
-      'libciutils.c', 
-      '../include/kidron_common_f.c',
-	  '../common/libregistration.c'])
+      'libciutils.c' ])
     
     
 def build_tests(env):

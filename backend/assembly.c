@@ -9,19 +9,26 @@
  * the calls, leaving the Runtime API state uninitialized here.
  */
 
-#include <cuda.h>
-#include <cuda_runtime_api.h>
+// System includes
+#include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
+// CUDA includes
+#include <cuda.h>
+#include <cuda_runtime_api.h>
+
+// Project includes
 #include <assembly.h>
 #include <debug.h>
 #include <method_id.h>
-#include <sinks.h>
 #include <util/compiler.h>
 #include <util/list.h>
+
+// Directory-immediate includes
+#include "sinks.h"
 
 /*-------------------------------------- INTERNAL STRUCTURES -----------------*/
 
@@ -181,6 +188,15 @@ static int hack_getCudaInformation(struct node_participant *node)
 	int *drv_ver = &node->driverVersion;
 	int *cuda_ver = &node->runtimeVersion;
 
+	struct { // Layout of the shared memory region.
+		int _drv_ver;
+		int _cuda_ver;
+		struct cudaDeviceProp _props[32]; // here's that assumption
+	} *format;
+
+	void *shm = NULL;
+	size_t shm_size = sizeof(*format);
+
 	// Determine the number of GPUs. The CUDA Driver API doesn't act as screwy
 	// as the Runtime API, so this is safe to do.
 	CUresult cu_err;
@@ -197,13 +213,6 @@ static int hack_getCudaInformation(struct node_participant *node)
 	// has a separate instance of the CUDA Runtime library with which it can
 	// make function calls, unaffecting the parent.
 
-	struct { // Layout of the shared memory region.
-		int _drv_ver;
-		int _cuda_ver;
-		struct cudaDeviceProp _props[32]; // here's that assumption
-	} *format;
-	void *shm = NULL;
-	size_t shm_size = sizeof(*format);
 	// mmaping an 'anonymous' region doesn't require us to open a file
 	shm = mmap(NULL, shm_size, PROT_READ | PROT_WRITE,
 			MAP_SHARED | MAP_ANONYMOUS, -1, 0);
@@ -373,7 +382,7 @@ static struct assembly* compose_assembly(const struct assembly_cap_hint *hint)
 		printd(DBG_WARNING, "Hint asks for zero GPUs; providing 1\n");
 		assm->num_gpus = 1;
 	} else if (hint->num_gpus > ASSEMBLY_MAX_MAPPINGS) {
-		printd(DBG_WARNING, "Hint asks for %u GPUs; providing %u\n",
+		printd(DBG_WARNING, "Hint asks for %d GPUs; providing %d\n",
 				hint->num_gpus, ASSEMBLY_MAX_MAPPINGS);
 		assm->num_gpus = ASSEMBLY_MAX_MAPPINGS;
 	} else {
@@ -508,7 +517,7 @@ int assembly_runtime_init(enum node_type type)
 {
 	int err;
 	if (type >= NODE_TYPE_INVALID) {
-		printd(DBG_ERROR, "invalid type: %d\n", type);
+		printd(DBG_ERROR, "invalid type: %u\n", type);
 		goto fail;
 	}
 	if (internals) {
@@ -618,18 +627,6 @@ int assembly_set_batch_size(asmid_t id, int vgpu, unsigned int size)
 	return -1;
 }
 
-int assembly_rpc_nolock(asmid_t id, int vgpu, struct cuda_packet *pkt)
-{
-	// TODO May only be used by a sink directly. Idea is to not use any locking
-	// when traversing assembly list, etc. This can only be done if sinks are
-	// separate processes, as the assembly data is replicated. Sinks are not
-	// supposed to modify these lists, thus no writers.
-	//
-	// Or.... assembly_rpc in general will not lock. It's only going to be
-	// called by sinks anyway.
-	return -1;
-}
-
 /**
  * Execute an RPC (CUDA for now) in the runtime. Use of the vgpu identifier is
  * only needed for remote vgpu mappings, to determine which network connection
@@ -684,7 +681,7 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 
 		case CUDA_GET_DEVICE:
 			{
-				int *dev = ((void*)pkt + pkt->args[0].argull);
+				int *dev = (int*)((uintptr_t)pkt + pkt->args[0].argull);
 				struct vgpu_mapping *vgpu;
 				// A thread may or may not have previously called cudaSetDevice.
 				// If it has not, assign it to vgpu 0 and return that (this
@@ -700,7 +697,7 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 
 		case CUDA_GET_DEVICE_COUNT:
 			{
-				int *devs = ((void*)pkt + pkt->args[0].argull);
+				int *devs = (int*)((uintptr_t)pkt + pkt->args[0].argull);
 				*devs = assm->num_gpus;
 				printd(DBG_DEBUG, "num devices=%d\n", *devs);
 			}
@@ -710,7 +707,8 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 			{
 				struct cudaDeviceProp *prop;
 				int dev;
-				prop = ((void*)pkt + pkt->args[0].argull);
+				prop = (struct cudaDeviceProp*)
+							((uintptr_t)pkt + pkt->args[0].argull);
 				dev = pkt->args[1].argll;
 				if (unlikely(dev < 0 || dev >= assm->num_gpus)) {
 					printd(DBG_WARNING, "invalid dev id %d\n", dev);
@@ -725,7 +723,7 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 
 		case CUDA_DRIVER_GET_VERSION:
 			{
-				int *ver = ((void*)pkt + pkt->args[0].argull);
+				int *ver = (int*)((uintptr_t)pkt + pkt->args[0].argull);
 				*ver = assm->driverVersion;
 				printd(DBG_DEBUG, "driver ver=%d\n", *ver);
 			}
@@ -733,7 +731,7 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 
 		case CUDA_RUNTIME_GET_VERSION:
 			{
-				int *ver = ((void*)pkt + pkt->args[0].argull);
+				int *ver = (int*)((uintptr_t)pkt + pkt->args[0].argull);
 				*ver = assm->runtimeVersion;
 				printd(DBG_DEBUG, "runtime ver=%d\n", *ver);
 			}
@@ -741,15 +739,15 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 
 		case CUDA_SET_DEVICE:
 			{
-				int id = pkt->args[0].argll;
+				int devid = pkt->args[0].argll;
 				struct vgpu_mapping *vgpu;
-				if (id >= assm->num_gpus) { // failure at application
+				if (devid >= assm->num_gpus) { // failure at application
 					pkt->ret_ex_val.err = cudaErrorInvalidDevice;
 					break; // exit switch: don't pass to NVIDIA runtime
 				} else {
 					// Create association, then modify vgpu_id in pkt argument to be
 					// the physical device ID that the vgpu ID represents
-					vgpu = set_thread_association(assm, pkt->thr_id, id);
+					vgpu = set_thread_association(assm, pkt->thr_id, devid);
 					pkt->args[0].argll = vgpu->pgpu_id;
 				}
 				printd(DBG_DEBUG, "thread=%lu vgpu=%d pgpu=%d\n",
