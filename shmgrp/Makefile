@@ -10,6 +10,8 @@ LDFLAGS=-lrt -shared -Wl,-soname,libshmgrp.so
 
 all:	lib/libshmgrp.so
 
+.PHONY: all
+
 lib/libshmgrp.so:	src/common.o src/leader.o src/member.o
 	mkdir -p lib
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -26,3 +28,15 @@ src/member.o:	src/member.c
 
 clean:
 	rm -rf lib/ src/*.o
+
+.PHONY: clean
+
+install: all
+	install -m 0555 lib/libshmgrp.so /usr/local/lib/
+	ldconfig
+
+.PHONY: install
+
+uninstall:
+	rm -f /usr/local/lib/libshmgrp.so
+	ldconfig
