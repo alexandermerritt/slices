@@ -1,22 +1,77 @@
-Problems
+Tested so far, seems to work
+============================
 
-- Forking after setting notify on a message queue is bad. We'll have to break
-member joining in the leader into two steps: 1) upcall the leader to tell it we
-have a new member, then 2) let it call down to tell us to set notify on the mq
-	+ this has been coded, but not tested with a fork
+Randomness has been introduced where possible to try to hit any unknown race
+conditions.
 
-- When forked from the group_callback function, notify has not been set yet. It
-will be set when establish_member is called. Forking only copies the thread
-invoking fork(), which would be the inotify thread. In a child process, this
-inotify may go back to watching the directory again for members. But this should
-not happen because it already occurs in the parent (we'd get N inotify threads
-for N forks). Two solutions may exist:
-	1) init records the pid of the process. when inotify returns from calling
-the callback, it verifies the pid recorded has not changed. If so, it
-immediately exits.
-	2) the inotify thread could spawn a thread to call the notify callback each
-time. Thus fork would fork that thread that was spawned, since that one will
-have called fork() (and fork doesn't duplicate all threads, thus the inotify
-thread would not exist in the child).
+Only functionality has been tested. Memory leaks have not yet been examined.
 
-	I've implemented the second option.
+Single Leader
+-------------
++ One member, one thread
+	+ Join, pause, leave
+	+ Join, make region, destroy region, leave
+	+ Join, make N regions, destroy N regions, leave
+
++ Multiple members, one thread each
+	+ Join, pause, leave
+	+ Join, make region, destroy region, leave
+	+ Join, make N regions, destroy N regions, leave
+
+Known, potential issues or configurations not tested
+====================================================
+
+Single Leader
+-------------
+- One member, one thread
+	- Join, intermix creating and destroying N regions, leave
+
+- Multiple members, one thread each
+	- Join, intermix creating and destroying N regions, leave
+
+- One member, multiple threads (only first thread does join/leave)
+	Each thread does the following across separate executions:
+	- Make region, destroy region
+	- Make N regions, destroy N regions
+	- Intermix creating and destroying N regions
+
+There are many other permutations not yet tested, some noted below.
+
+Other notes
+-----------
+
+1. Joining and leaving a group by the same member in fast succession has not
+been tested (that's why a sleep is introduced). The inotify thread spawns worker
+threads to handle each event.  These worker threads merely invoke the caller's
+callback routine to complete the initialization (->establish_/destroy_member).
+It may be possible for:
+
+	a. the thread which removes the member to be scheduled before the thread
+	adding the member
+
+	b. a member to join and leave multiple times without the inotify registering
+	all of them (touch/rm/touch/rm/etc) and it may merge events together
+
+There is sufficient locking to allow multiple threads to handle joins and
+departures simultaneously, but this is noting that there may be issues when this
+happens from the same member too quickly.
+
+One workaround is to simply make sure code doesn't allow this to happen (e.g.
+our test code uses sleep).
+
+2. Leaving a group without explicitly closing all regions.
+
+3. Terminating the leader while there are still active members.
+
+4. Creating and destroying multiple regions simultaneously across multiple
+threads within a member.
+
+5. There are memory leaks within both the leader and member code. It is
+sufficient to merely join, sleep, then leave a group to experience leaks in both
+parties.
+
+6. Haven't tested one member joining multiple groups. That also means the leader
+hasn't been tested to open more than one group.
+
+7. Haven't tested a processes being both a member AND leader of two or more
+disjoint groups.
