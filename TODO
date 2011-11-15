@@ -36,6 +36,8 @@ Assembly Runtime
 		[C] multi-process-aware
 		[C] multi-threading-aware
 		[C] self-contained library
+		[ ] verify with multiple simultaneous members joining/leaving
+		[ ] verify with one multi-threaded member making/destroying regions
 
 	[C] support multiple fat binaries
 
