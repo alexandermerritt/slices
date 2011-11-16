@@ -73,10 +73,6 @@ struct group
 	pthread_mutex_t lock; //! Member lock
 	group_callback notify;
 	struct inotify_thread_state *inotify_thread;
-
-	// State to handle forking.
-	bool willfork; //! Value of willfork in shmgrp_open.
-	pid_t pid; //! PID of process which created this group.
 };
 
 struct groups
@@ -422,15 +418,6 @@ member_process_messages(struct member *memb)
 		}
 
 		else if (msg.type == MESSAGE_REMOVE_SHM) {
-			// If willfork=true, the child process needs to make sure that it
-			// does not introduce a race condition between us (this function on
-			// the MQ notify thread stack) and another thread in the child,
-			// which might presumably call destroy_member; destroy_member will
-			// lock the member as it removes it, preventing us from removing the
-			// region (which requires holding the same member lock) and
-			// unmapping resources. The root leader should instead signal all
-			// children to quit after it receives a MEMBERSHIP_LEAVE, assuming
-			// the application has rmreg'd all regions.
 			memb->notify(SHM_REMOVE_REGION, memb->pid, msg.m.region.id);
 			msg.m.region.status = member_remove_region(memb, msg.m.region.id);
 			err = member_send_message(memb, &msg); // spins on send unless error
@@ -525,6 +512,7 @@ group_member_join(struct group *group, pid_t pid,
 		goto fail;
 	}
 
+	// TODO Move this out into member_alloc and member_free functions.
 	memb = calloc(1, sizeof(*memb));
 	if (!memb) {
 		fprintf(stderr, "Out of memory\n");
@@ -647,23 +635,10 @@ group_member_leave(struct group *group, pid_t pid)
 	// removing regions from this member.
 	pthread_mutex_lock(&member->lock);
 
-	if (group->willfork && (group->pid == getpid())) {
-		// Client has multi-process leader, and is calling destroy_member from
-		// the root leader instead of the child which established the member.
-		// establish_member creates MQs, which if done in the child process, do
-		// not exist in the parent leader.
-		pthread_mutex_unlock(&member->lock);
-		pthread_mutex_unlock(&group->lock);
-		exit_errno = -EPROTO;
-		goto fail;
-	}
-
 	if (member_has_regions(member)) {
-		// FIXME What to do? These should all be cleared. One way these may
-		// still exist is if the member process does not remove its regions with
-		// us.
-		fprintf(stderr, "Warning: memory regions still"
-				" exist with member %d\n", member->pid);
+		// Borked. User is probably a crappy programmer?
+		fprintf(stderr, "member %d in group %s still has regions\n",
+				member->pid, group->user_key);
 	}
 
 	__group_rm_member(member);
@@ -699,6 +674,68 @@ group_member_leave(struct group *group, pid_t pid)
 
 fail:
 	return exit_errno;
+}
+
+/**
+ * Allocate a new group structure and set appropriate fields. This will not
+ * touch the filesystem or spawn any threads. It just creates a new instance of
+ * group metadata. The only field left that needs to be established is the
+ * inotify thread tid.
+ */
+static int
+group_alloc(const char *key, group_callback func, struct group **out_group)
+{
+	int exit_errno;
+	struct group *group = NULL;
+	struct inotify_thread_state *tstate = NULL;
+
+	group = calloc(1, sizeof(*group));
+	if (!group) {
+		exit_errno = -ENOMEM;
+		goto fail;
+	}
+
+	strncpy(group->user_key, key, strlen(key));
+	snprintf(group->memb_dir, MAX_LEN, MEMB_DIR_FMT, key);
+
+	tstate = calloc(1, sizeof(*tstate));
+	if (!group) {
+		exit_errno = -ENOMEM;
+		goto fail;
+	}
+
+	// cross link thread state and group
+	tstate->group = group;
+	group->inotify_thread = tstate;
+
+	// init remaining useful group fields
+	INIT_LIST_HEAD(&group->link);
+	INIT_LIST_HEAD(&group->member_list);
+	pthread_mutex_init(&group->lock, NULL);
+	group->notify = func;
+	group->inotify_thread->is_alive = false;
+
+	*out_group = group;
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+/**
+ * Deallocate a group structure and any heap data assigned to it. This does not
+ * close a group, but merely releases resources allocated to the metadata. From
+ * the user's perspective, the group should be _closed_ before this function is
+ * used on the group metadata object.
+ */
+static void
+group_free(struct group *group)
+{
+	if (!group)
+		return;
+	if (group->inotify_thread)
+		free(group->inotify_thread);
+	free(group);
 }
 
 /*
@@ -780,17 +817,9 @@ struct group_callback_args
 
 /**
  * Thread created for each invocation of the group_callback when the inotify
- * thread created for the group observes an event.
- *
- * The reason we spawn a thread, is in case the user does a fork() inside
- * group_notify. fork() recreates only the calling thread in the process. Should
- * we not create a thread to invoke the callback, the inotify thread will exist
- * in the child and will return: there will then be an additional thread
- * observing for group joins/leaves.  This may not be expected behavior. We can
- * always not create a thread in the future and do something else.
- *
- * TODO In the future, we can selectively spawn a thread to handle the notify
- * callback if we see group.willfork is set to true to reduce overhead.
+ * thread created for the group observes an event.  The reason we spawn a
+ * thread, is in case the user wants to have notification of many members
+ * joining, and doesn't want to serialize the entire process.
  */
 static void *
 group_notify_thread(void *arg)
@@ -984,44 +1013,37 @@ int shmgrp_tini_leader(void)
 	return 0;
 }
 
-int shmgrp_open(const char *key, group_callback func, bool willfork)
+int shmgrp_open(const char *key, group_callback func)
 {
 	int err, exit_errno;
 	struct group *new_grp = NULL;
 	struct stat statbuf;
-	struct inotify_thread_state *tstate = NULL;
 
 	if (!verify_userkey(key) || !func) {
 		exit_errno = -EINVAL;
 		goto fail;
 	}
 
-	memset(&statbuf, 0, sizeof(struct stat));
-
-	// To prevent multiple threads from opening a group with the same group key
-	// (FIXME prevent other processes from opening the same group) we lock the
-	// group list and attempt to locate the key. If found, exit. Else continue
-	// setting up the group with the lock held. If we instead add the group,
-	// unlock the list then proceed to finish initializing the group it will be
-	// in an inconsistent state for some time, which we do not want.
 	pthread_mutex_lock(&(groups->lock));
+
+	// Prevent multiple threads from opening a group with the same group key
 	new_grp = groups_get_group(groups, key);
 	if (new_grp) {
 		pthread_mutex_unlock(&(groups->lock));
 		exit_errno = -EEXIST;
 		goto fail;
 	}
-	new_grp = calloc(1, sizeof(*new_grp));
-	if (!new_grp) {
+
+	err = group_alloc(key, func, &new_grp);
+	if (err < 0) {
 		pthread_mutex_unlock(&(groups->lock));
-		exit_errno = -ENOMEM;
+		exit_errno = err;
 		goto fail;
 	}
-	strncpy(new_grp->user_key, key, strlen(key));
 
 	// Construct the membership directory path and verify that it does not
 	// already exist.
-	snprintf(new_grp->memb_dir, MAX_LEN, MEMB_DIR_FMT, key);
+	memset(&statbuf, 0, sizeof(struct stat));
 	err = stat(new_grp->memb_dir, &statbuf); // only allow errno of ENOENT
 	if (err < 0 && errno != ENOENT) {
 		pthread_mutex_unlock(&(groups->lock));
@@ -1041,23 +1063,8 @@ int shmgrp_open(const char *key, group_callback func, bool willfork)
 
 	// Begin accepting registration requests. Spawn an inotify thread on the
 	// membership directory we just created.
-	tstate = calloc(1, sizeof(*tstate));
-	if (!tstate) {
-		pthread_mutex_unlock(&(groups->lock));
-		exit_errno = -ENOMEM;
-		goto fail;
-	}
-	// cross link thread and group
-	tstate->group = new_grp;
-	new_grp->inotify_thread = tstate;
-	// init remaining useful group fields
-	INIT_LIST_HEAD(&new_grp->link);
-	INIT_LIST_HEAD(&new_grp->member_list);
-	pthread_mutex_init(&new_grp->lock, NULL);
-	new_grp->notify = func;
-	new_grp->willfork = willfork;
-
-	err = pthread_create(&(tstate->tid), NULL, inotify_thread, tstate);
+	err = pthread_create(&new_grp->inotify_thread->tid, NULL, inotify_thread,
+			new_grp->inotify_thread);
 	if (err < 0) {
 		exit_errno = -(errno); // possible internal error, maybe don't expose this?
 		goto fail;
@@ -1070,10 +1077,8 @@ int shmgrp_open(const char *key, group_callback func, bool willfork)
 	return 0;
 
 fail:
-	if (tstate)
-		free(tstate);
 	if (new_grp)
-		free(new_grp);
+		group_free(new_grp);
 	// No need to cancel the inotify thread, because we can never get to the
 	// label fail if the thread was successfully created :)
 	return exit_errno;
@@ -1090,10 +1095,9 @@ int shmgrp_close(const char *key)
 		goto fail;
 	}
 
-	memset(path, 0, MAX_LEN);
+	pthread_mutex_lock(&groups->lock);
 
 	// Look up key. Remove group from list.
-	pthread_mutex_lock(&groups->lock);
 	group = groups_get_group(groups, key);
 	if (!group) {
 		pthread_mutex_unlock(&groups->lock);
@@ -1110,12 +1114,13 @@ int shmgrp_close(const char *key)
 		// go through all members and terminate all our state relating to these
 		// members, such as mmaped regions, etc
 		// delete all the inotify files?? that might be good
+		fprintf(stderr, "group %s still has members\n", group->user_key);
 	}
 
 	// Grab the path before releasing memory resources.
 	snprintf(path, MAX_LEN, MEMB_DIR_FMT, group->user_key);
-	free(group->inotify_thread);
-	free(group);
+
+	group_free(group);
 
 	// Attempt to remove the membership directory. We assume at this point that
 	// it is empty.
@@ -1152,13 +1157,6 @@ int shmgrp_establish_member(const char *key, pid_t pid, shm_callback func)
 	if (!group) {
 		pthread_mutex_unlock(&groups->lock);
 		exit_errno = -EINVAL;
-		goto fail;
-	}
-
-	// Verify consistency of willfork.
-	if (group->willfork && (group->pid == getpid())) {
-		pthread_mutex_unlock(&groups->lock);
-		exit_errno = -EPROTO;
 		goto fail;
 	}
 
@@ -1274,6 +1272,128 @@ int shmgrp_member_region(const char *key, pid_t pid,
 
 	pthread_mutex_unlock(&member->lock);
 	pthread_mutex_unlock(&group->lock);
+	pthread_mutex_unlock(&groups->lock);
+	return 0;
+
+fail:
+	return exit_errno;
+}
+
+/*-------------------------------------- SPECIAL FUNCTIONS -------------------*/
+
+/*
+ * Do not call these functions unless your name is Alex Merritt. Their
+ * prototypes don't exist in the header for a reason.
+ *
+ * These functions should be called from a child process which was exec'd after
+ * a fork from the real leader, as we assume there to be a blank library state
+ * upon initial execution.
+ *
+ * Processes which call the below functions must conform to the following call
+ * trace:
+ *
+ * 		shmgrp_init()
+ * 		__shmgrp_insert_group()
+ * 		shmgrp_establish_member()
+ *
+ * 		... do work on the shm regions ...
+ *
+ * 		shmgrp_destroy_member()
+ * 		__shmgrp_dump_group()
+ * 		shmgrp_tini()
+ *
+ * Technically, you should be able to insert/dump any number of groups for which
+ * you establish/destroy members for. Just do not call join or leave.
+ */
+
+/**
+ * Add metadata associated with this key (group) to library state.
+ *
+ * This will NOT create an inotify thread to accept incoming connections, nor
+ * look at or modify the filesystem (for the membership directory, etc). Its
+ * SOLE purpose is to enable subsequent calls to establish_member and
+ * destroy_member to succeed.  Such functionality is needed for the leader to be
+ * multi-process, where the singular parent is responsible for joins/leaves and
+ * child processes for associating with each new member (to operate on the
+ * memory regions).
+ */
+int __shmgrp_insert_group(const char *key)
+{
+	int err, exit_errno;
+	struct group *new_grp = NULL;
+
+	// You'll notice much of the code is duplicated with shmgrp_open. That's
+	// fine. The difference is that we do not invoke stat, mkdir, or
+	// pthread_create. Otherwise that would actually define "opening" a group :)
+
+	if (!verify_userkey(key)) {
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	pthread_mutex_lock(&(groups->lock));
+
+	// Don't add duplicate groups.
+	new_grp = groups_get_group(groups, key);
+	if (new_grp) {
+		pthread_mutex_unlock(&(groups->lock));
+		exit_errno = -EEXIST;
+		goto fail;
+	}
+
+	// Providing a NULL callback is okay, because we don't create an inotify
+	// thread for this group.
+	err = group_alloc(key, NULL, &new_grp);
+	if (err < 0) {
+		pthread_mutex_unlock(&(groups->lock));
+		exit_errno = err;
+		goto fail;
+	}
+
+	groups_add_group(groups, new_grp);
+	pthread_mutex_unlock(&groups->lock);
+	return 0;
+
+fail:
+	return exit_errno;
+}
+
+/**
+ * This does the opposite of the above function. It slyly removes group metadata
+ * from the library state.
+ */
+int __shmgrp_dump_group(const char *key)
+{
+	int exit_errno;
+	struct group *group = NULL;
+
+	// You'll notice much of the code is duplicated with shmgrp_open. That's
+	// fine. The difference is that we do not invoke stat, mkdir, or
+	// pthread_create. Otherwise that would actually define "opening" a group :)
+
+	if (!verify_userkey(key)) {
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	pthread_mutex_lock(&(groups->lock));
+
+	// Don't add duplicate groups.
+	group = groups_get_group(groups, key);
+	if (!group) {
+		pthread_mutex_unlock(&(groups->lock));
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	__groups_rm_group(group);
+
+	if (group_has_members(group)) {
+		// Borked
+		fprintf(stderr, "group %s still has members\n", group->user_key);
+	}
+
+	group_free(group);
 	pthread_mutex_unlock(&groups->lock);
 	return 0;
 
