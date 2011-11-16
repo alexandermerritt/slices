@@ -14,7 +14,9 @@
 /**
  * Distinguish between the centralized location where state of all assemblies is
  * located, or an instance on another node (minion) that forwards RPCs to the
- * main node to carry out the work.
+ * main node to carry out the work. The third option is to initialize the
+ * library to be a mapper, meaning it will import exported assemblies created by
+ * a MAIN or MINION node for execution.
  */
 enum node_type
 {
@@ -52,7 +54,13 @@ asmid_t assembly_request(const struct assembly_cap_hint *hint);
 int assembly_num_vgpus(asmid_t id);
 int assembly_vgpu_is_remote(asmid_t id, int vgpu);
 int assembly_set_batch_size(asmid_t id, int vgpu, unsigned int size);
+
 int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt);
+
+/**
+ * Shutdown and remove state associated with an assembly. May be called after
+ * having requested an assembly, as well as after having mapped it.
+ */
 int assembly_teardown(asmid_t id);
 
 #endif

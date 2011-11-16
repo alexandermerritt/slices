@@ -53,7 +53,8 @@ static void runtime_entry(group_event e, pid_t pid)
 			// give them the same assembly. Perhaps provide this in the hint
 			// structure.
 			pid_t childpid;
-			printd(DBG_INFO, "Process %d is requesting to join the assembly\n", pid);
+			printd(DBG_INFO, "Process %d is requesting to join the assembly\n",
+					pid);
 			asmid = assembly_request(&hint);
 			if (!VALID_ASSEMBLY_ID(asmid)) {
 				printd(DBG_ERROR, "Error requesting assembly\n");
@@ -75,9 +76,12 @@ static void runtime_entry(group_event e, pid_t pid)
 		break;
 		case MEMBERSHIP_LEAVE:
 		{
-			int ret; // return val of child
 			printd(DBG_INFO, "Application %d is leaving the runtime\n", pid);
+
+#ifndef LOCALSINK_USE_THREAD
+
 			// Tell it to stop, then wait for it to disappear.
+			int ret; // return val of child
 			err = kill(sink_child.pid, SINK_TERM_SIG);
 			if (err < 0) {
 				printd(DBG_ERROR, "Could not send signal %d to child %d\n",
@@ -89,6 +93,9 @@ static void runtime_entry(group_event e, pid_t pid)
 						sink_child.pid);
 			}
 			printd(DBG_DEBUG, "Child exited with code %d\n", ret);
+
+#endif				/* LOCALSINK_USE_THREAD */
+
 			// Now kill its assembly
 			// XXX XXX XXX
 			// Only kill its assembly IF there are no longer any processes in
@@ -126,7 +133,7 @@ static int start_runtime(void)
 		printd(DBG_ERROR, "Could not initialize shmgrp state\n");
 		return -1;
 	}
-	err = shmgrp_open(ASSEMBLY_SHMGRP_KEY, runtime_entry, true);
+	err = shmgrp_open(ASSEMBLY_SHMGRP_KEY, runtime_entry);
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not open shmgrp %s\n", ASSEMBLY_SHMGRP_KEY);
 		shmgrp_tini();

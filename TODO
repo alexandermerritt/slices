@@ -74,6 +74,13 @@ Monitoring
 	[ ] build library code to expose this API (Alex + Naila)
 	[ ] glue global monitor and library with shmgrp (Alex + Naila)
 
+Build Environment
+=================
+	[ ] remove build dependences of backend/ on interposer/ etc
+		[ ] move pack/unpack functions outside of interposer/
+	[ ] perhaps create an SConstruct for each machine this may be built on
+		instead of having globals inside one file
+
 Other details
 =============
 	[ ]	registered variables (the symbols) are assumed at the moment to be

@@ -24,7 +24,6 @@
 #include <assembly.h>
 #include <debug.h>
 #include <method_id.h>
-#include <util/compiler.h>
 #include <util/list.h>
 
 // Directory-immediate includes
@@ -151,7 +150,7 @@ __find_assembly(asmid_t id)
 	list_for_each_entry(assm, &internals->assembly_list, link)
 		if (assm->id == id)
 			break;
-	if (unlikely(!assm || assm->id != id)) {
+	if (!assm || assm->id != id) {
 		printd(DBG_ERROR, "unknown assembly id %lu\n", id);
 	}
 	return assm;
@@ -182,7 +181,6 @@ __find_assembly(asmid_t id)
  */
 static int hack_getCudaInformation(struct node_participant *node)
 {
-	int err;
 	struct cudaDeviceProp *props = node->dev_prop;
 	int *num_gpus = &node->num_gpus;
 	int *drv_ver = &node->driverVersion;
@@ -206,6 +204,31 @@ static int hack_getCudaInformation(struct node_participant *node)
 	cu_err = cuDeviceGetCount(num_gpus);
 	if (cu_err != CUDA_SUCCESS)
 		goto fail;
+
+#ifdef HACK_NOFORK
+
+	format = calloc(1, sizeof(*format));
+	if (!format)
+		goto fail;
+
+	int dev;
+	cudaError_t cuda_err;
+
+	cuda_err = cudaDriverGetVersion(&format->_drv_ver);
+	if (cuda_err != cudaSuccess)
+		goto fail;
+	cuda_err = cudaRuntimeGetVersion(&format->_cuda_ver);
+	if (cuda_err != cudaSuccess)
+		goto fail;
+	for (dev = 0; dev < *num_gpus; dev++) {
+		cuda_err = cudaGetDeviceProperties(&format->_props[dev], dev);
+		if (cuda_err != cudaSuccess)
+			goto fail;
+	}
+
+#else				/* !HACK_NOFORK */
+
+	int err;
 
 	// Create a shared memory region and fork a child process to do the work.
 	// The child will write the array of cudaDeviceProp structs to this region
@@ -247,13 +270,20 @@ static int hack_getCudaInformation(struct node_participant *node)
 		goto fail;
 	}
 
+#endif				/* HACK_NOFORK */
+
 	// Copy results to user-supplied arguments.
 	memcpy(props, format->_props, (*num_gpus * sizeof(struct cudaDeviceProp)));
 	*drv_ver = format->_drv_ver;
 	*cuda_ver = format->_cuda_ver;
+
+#ifdef HACK_NOFORK
+	free(format);
+#else				/* !HACK_NOFORK */
 	err = munmap(shm, shm_size);
 	shm = NULL;
 	if (err != 0) goto fail;
+#endif
 
 	return 0;
 
@@ -422,9 +452,6 @@ static struct assembly* compose_assembly(const struct assembly_cap_hint *hint)
 	assm->runtimeVersion = node->runtimeVersion;
 	assm->driverVersion = node->driverVersion;
 
-	// TODO For remote GPUs, construct data paths necessary to reach them.
-	// After that, calls to assembly_rpc() should work.
-
 	return assm;
 
 fail:
@@ -544,12 +571,7 @@ int assembly_runtime_init(enum node_type type)
 		if (err < 0)
 			goto fail;
 	}
-
-	printd(DBG_INFO, "Assembly node configured as %s.\n",
-			(type == NODE_TYPE_MAIN ? "main" : "minion"));
-
 	return 0;
-
 fail:
 	return -1;
 }
@@ -662,7 +684,7 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 	// search assembly list for the id, search for indicated vgpu, then RPC CUDA
 	// packet to it.
 	assm = __find_assembly(id);
-	if (unlikely(!assm)) {
+	if (!assm) {
 		printd(DBG_ERROR, "could not locate assembly %lu\n", id);
 		err = pthread_mutex_unlock(&internals->lock);
 		if (err < 0) {
@@ -710,7 +732,7 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 				prop = (struct cudaDeviceProp*)
 							((uintptr_t)pkt + pkt->args[0].argull);
 				dev = pkt->args[1].argll;
-				if (unlikely(dev < 0 || dev >= assm->num_gpus)) {
+				if (dev < 0 || dev >= assm->num_gpus) {
 					printd(DBG_WARNING, "invalid dev id %d\n", dev);
 					pkt->ret_ex_val.err = cudaErrorInvalidDevice;
 					break;
@@ -745,8 +767,8 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 					pkt->ret_ex_val.err = cudaErrorInvalidDevice;
 					break; // exit switch: don't pass to NVIDIA runtime
 				} else {
-					// Create association, then modify vgpu_id in pkt argument to be
-					// the physical device ID that the vgpu ID represents
+					// Create association, then modify vgpu_id in pkt argument
+					// to be the physical device ID that the vgpu ID represents
 					vgpu = set_thread_association(assm, pkt->thr_id, devid);
 					pkt->args[0].argll = vgpu->pgpu_id;
 				}

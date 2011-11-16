@@ -8,6 +8,7 @@
 
 // System includes
 #include <assert.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
@@ -63,7 +64,8 @@ static void region_request(shm_event e, pid_t memb_pid, shmgrp_region_id id)
 				break;
 			}
 			shm = region.addr;
-			printd(DBG_DEBUG, "Process %d created a shm region: id=%d @%p bytes=%lu\n",
+			printd(DBG_DEBUG, "Process %d created a shm region:"
+					" id=%d @%p bytes=%lu\n",
 					memb_pid, id, region.addr, region.size);
 			fflush(stdout);
 			process_rpc = true; // Set this last, after shm has been set
@@ -78,7 +80,8 @@ static void region_request(shm_event e, pid_t memb_pid, shmgrp_region_id id)
 						" for process %d\n", id, memb_pid);
 				break;
 			}
-			printd(DBG_DEBUG, "Process %d destroyed an shm region: id=%d @%p bytes=%lu\n",
+			printd(DBG_DEBUG, "Process %d destroyed an shm region:"
+					" id=%d @%p bytes=%lu\n",
 					memb_pid, id, region.addr, region.size);
 			fflush(stdout);
 			// wait for the loop to see our change to process_rpc before
@@ -91,24 +94,70 @@ static void region_request(shm_event e, pid_t memb_pid, shmgrp_region_id id)
 	}
 }
 
+#ifdef LOCALSINK_USE_THREAD
+
+struct thread_localsink_arg
+{
+	asmid_t asmid;
+	pid_t pid;
+};
+
+static void * thread_localsink(void * arg)
+{
+	struct thread_localsink_arg *args =
+		(struct thread_localsink_arg *) arg;
+	localsink(args->asmid, args->pid);
+	pthread_exit(NULL);
+}
+
+#else			/* !LOCALSINK_USE_THREAD */
+
 static void sigterm_handler(int sig)
 {
 	; // Do nothing, just prevent it from killing us
 }
 
+#endif			/* LOCALSINK_USE_THREAD */
+
 /*-------------------------------------- PUBLIC FUNCTIONS --------------------*/
 
 /**
  * The main() function for forked sink processes. It must not be allowed to
- * return. Once it completes its work, it waits on a termination signal from the
- * runtime coordinator before exiting. That signal is sent when the CUDA process
- * tells the runtime it wants to leave the assembly runtime.
+ * return within the child process. Once it completes its work, it waits on a
+ * termination signal from the runtime coordinator before exiting. That signal
+ * is sent when the CUDA process tells the runtime it wants to leave the
+ * assembly runtime.
  *
  * The parent process will simply leave this function after invoking fork.
  */
 int fork_localsink(asmid_t asmid, pid_t memb_pid, pid_t *child_pid)
 {
 	int err;
+
+#ifdef LOCALSINK_USE_THREAD
+
+	pthread_t sink_tid;
+
+	struct thread_localsink_arg *arg = malloc(sizeof(*arg));
+	if (!arg)
+		goto fail;
+	arg->asmid = asmid;
+	arg->pid = memb_pid;
+
+	err = pthread_create(&sink_tid, NULL, thread_localsink, arg);
+	if (err < 0) {
+		printd(DBG_ERROR, "Error creating pthread for localsink\n");
+		goto fail;
+	}
+	printd(DBG_INFO, "Spawned thread for localsink\n");
+
+	return 0;
+
+fail:
+	return -1;
+
+#else			/* !LOCALSINK_USE_THREAD */
+
 	sigset_t mask;
 	struct sigaction action;
 
@@ -159,6 +208,7 @@ int fork_localsink(asmid_t asmid, pid_t memb_pid, pid_t *child_pid)
 
 fail:
 	exit(-1);
+#endif			/* LOCALSINK_USE_THREAD */
 }
 
 /**
