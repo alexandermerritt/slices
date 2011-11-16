@@ -97,7 +97,7 @@ static int do_join(bool perform_shm, int num_shm)
 		return -1;
 	}
 
-	PRINTF("Joining group %s\n", GRPKEY1);
+	PRINTF("PID %d joining group %s\n", getpid(), GRPKEY1);
 	err = shmgrp_join(GRPKEY1);
 	if (err < 0) {
 		FPRINTF(stderr, "Error: shmgrp_join(%s): %s\n",
@@ -183,7 +183,7 @@ int main(int argc, char *argv[])
 			// Pause a random amount of time before joining or leaving.
 			srand(getpid());
 			usleep(rand() % 5000000 + 250000);
-			err = do_join(true, num_shm);
+			err = do_join((num_shm > 0), num_shm);
 			if (err < 0)
 				exit(-1);
 			else
