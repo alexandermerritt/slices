@@ -90,7 +90,7 @@ int main(void)
 	}
 
 	printf_locked("Opening group %s\n", GRPKEY1);
-	err = shmgrp_open(GRPKEY1, cudarpc_callback, false);
+	err = shmgrp_open(GRPKEY1, cudarpc_callback);
 	if (err < 0) {
 		fprintf_locked(stderr, "Error: shmgrp_open(%s): %s\n",
 				GRPKEY1, strerror(-err));

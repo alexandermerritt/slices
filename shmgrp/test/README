@@ -1,0 +1,23 @@
+Run test_leader in one terminal.
+Run test_member in another, passing arguments as specified by the help output
+when executed without any arguments.
+
+test_member will create multiple processes that each attempt to join the group
+opened by test_leader. If you specify regions to create, each member will
+additionally open/close that many number of regions, reading the first four
+bytes in the region as a signed integer and printing out the value as hex.
+
+----
+
+To test the special (hidden) functions, run hacktest_leader in one terminal.
+Run test_member in another, like before.
+
+hacktest_leader will, instead of establish_member for each member that JOINs,
+will instead fork/exec hacktest_child, passing the PID of the member as an
+argument to that new process, upon which that child then uses the special
+functions to create the state needed in the shmgrp library to establish new
+members.
+
+----
+
+hacktest_child is not to be invoked by the user directly.
