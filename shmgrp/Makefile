@@ -3,19 +3,20 @@
 ## @date 2011-11-08
 ## @brief Makefile to build the shmgrp dynamic library
 
-CC=gcc
-#CC=icc
-CCFLAGS=-fPIC -ggdb -Wall -Werror -Wextra -Wno-unused-parameter -Iinclude/
-LDFLAGS=-lrt -shared -Wl,-soname,libshmgrp.so
+PREFIX=/usr/local
+SONAME=libshmgrp.so
 
-all:	lib/libshmgrp.so
+CC=gcc
+CCFLAGS=-fPIC -ggdb -Wall -Werror -Wextra -Wno-unused-parameter -Iinclude/
+LDFLAGS=-lrt -shared -Wl,-soname,$(SONAME)
+
+all:	lib/$(SONAME)
 
 .PHONY: all
 
-lib/libshmgrp.so:	src/common.o src/leader.o src/member.o
+lib/$(SONAME):	src/common.o src/leader.o src/member.o
 	mkdir -p lib
 	$(CC) $(LDFLAGS) -o $@ $^
-	echo Append lib/ to LD_LIBRARY_PATH before executing your program.
 
 src/common.o:	src/common.c
 	$(CC) $(CCFLAGS) -c -o $@ $<
@@ -32,11 +33,13 @@ clean:
 .PHONY: clean
 
 install: all
-	install -m 0555 lib/libshmgrp.so /usr/local/lib/
+	install -m 0444 include/shmgrp.h $(PREFIX)/include
+	install -m 0555 lib/$(SONAME) $(PREFIX)/lib
 	ldconfig
 
 .PHONY: install
 
 uninstall:
-	rm -f /usr/local/lib/libshmgrp.so
+	rm -f $(PREFIX)/include/shmgrp.h
+	rm -f $(PREFIX)/lib/$(SONAME)
 	ldconfig
