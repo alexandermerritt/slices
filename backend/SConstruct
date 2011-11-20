@@ -60,19 +60,14 @@ envBackendProst = envBackendKeeneland
 envBackendShiva = Environment(
       CC='/usr/local/bin/gcc4.4.4',
       #CC='/home/alex/bin/icc',
-      LIBS=['pthread', 
-            'rt', 
-            'dl', 
-            'cudart', 
-            'cuda', 
-			'shmgrp',
-            'glib-2.0' ],
-      LIBPATH=[CUDA_ROOT + 'lib64', '../shmgrp/lib'],
+      LIBS=['pthread', 'rt', 'dl', 'glib-2.0',
+            'cudart', 'cuda', 
+			'shmgrp'],
+      LIBPATH=[CUDA_ROOT + 'lib64', '/usr/local/hati/lib'],
       CPPPATH=['.',
       '../include',
       '../interposer',
-      '../backend',
-	  '../shmgrp/include',
+	  '/usr/local/hati/include',
       CUDA_ROOT + 'include',
       '/usr/include/glib-2.0',
       '/usr/include/gio-unix-2.0',
@@ -84,19 +79,14 @@ envBackendShiva = Environment(
 envBackendIfrit = Environment(
       CC='/usr/local/bin/gcc4.4.4',
       #CC='/home/alex/bin/icc',
-      LIBS=['pthread', 
-            'rt', 
-            'dl', 
-            'cudart', 
-            'cuda', 
-			'shmgrp',
-            'glib-2.0' ],
-      LIBPATH=[CUDA_ROOT + 'lib64', 'shmgrp/lib'],
+      LIBS=['pthread', 'rt', 'dl', 'glib-2.0',
+            'cudart', 'cuda', 
+			'shmgrp'],
+      LIBPATH=[CUDA_ROOT + 'lib64', '/usr/local/hati/lib'],
       CPPPATH=['.',
       '../include',
       '../interposer',
-      '../backend',
-	  '../shmgrp/include',
+	  '/usr/local/hati/include',
       CUDA_ROOT + 'include',
       '/usr/include/glib-2.0',
       '/usr/include/gio-unix-2.0',
@@ -115,9 +105,11 @@ def build_backend(env):
     """
     env.Program('runtime', [
             'runtime.c',
-            'assembly.c',
+            'assembly/assembly.c',
+            'assembly/rpc.c',
             'localsink.c',
-            '../interposer/libciutils.c'])
+            'sock.c', # MOVE THIS SOMEWHERE ELSE
+            '../interposer/libciutils.c']) # REMOVE THIS COUPLING, BACKEND SHOULD NOT REQUIRE INTERPOSER CODE
 
 
 def build_program():

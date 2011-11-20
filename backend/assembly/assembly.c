@@ -4,15 +4,29 @@
  * @author Alex Merritt, merritt.alex@gatech.edu
  * @brief
  *
- * Restriction: DO NOT call into the CUDA Runtime API within this file, use
- * hack_getCudaInformation to obtain CUDA information. It forks a child to make
- * the calls, leaving the Runtime API state uninitialized here.
+ * FIXME Remove hardcoding of char arrays with size 255 everywhere.
+ * FIXME Remove hardcoding of IP addresses everywhere, too
+ *
+ * MAIN
+ * Calls into the API will directly invoke the respective internal functions to
+ * carry out the work. Spawn thread that listens and accepts incoming assembly
+ * RPCs, which represent the API (public functions below) directly. The thread
+ * directly calls the API functions as if it were some external entity
+ * (essentially it is, acting as a proxy). As part of the registration by minion
+ * nodes, their participation information (num gpus, etc) is added.
+ *
+ * MINION
+ * Calls into the API get sent as RPCs to the main node. No proxy thread is
+ * created, as this type of node does not accept incoming requests.
  */
 
 // System includes
+#include <errno.h>
+#include <ifaddrs.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -27,6 +41,7 @@
 #include <util/list.h>
 
 // Directory-immediate includes
+#include "rpc.h"
 #include "sinks.h"
 
 /*-------------------------------------- INTERNAL STRUCTURES -----------------*/
@@ -48,8 +63,8 @@ struct vgpu_mapping
 	enum vgpu_fixation fixation;
 
 	int vgpu_id; //! vgpu ID given to the application
-	char vgpu_hostname[255];
-	char vgpu_ip[255];
+	char vgpu_hostname[255]; // FIXME this will be different for all MPI ranks
+	char vgpu_ip[255]; // FIXME this will be different for all MPI ranks
 
 	int pgpu_id; //! physical gpu ID assigned by the local driver
 	char pgpu_hostname[255];
@@ -83,6 +98,7 @@ struct assembly
 };
 
 #define PARTICIPANT_MAX_GPUS	4
+#define PARTICIPANT_MAX_NICS	4
 
 /**
  * State describing a node that has registered to participate in the assembly
@@ -93,12 +109,17 @@ struct assembly
 struct node_participant
 {
 	struct list_head link;
+	enum node_type type;
+
+	// Network information
 	char hostname[255];
-	char ip[255];
+	char ip[PARTICIPANT_MAX_NICS][255];
+	char nic_name[PARTICIPANT_MAX_NICS][255];
+
+	// GPU information
 	int num_gpus;
 	struct cudaDeviceProp dev_prop[PARTICIPANT_MAX_GPUS];
 	int driverVersion, runtimeVersion;
-	enum node_type type;
 };
 
 struct main_state
@@ -108,12 +129,15 @@ struct main_state
 
 	//! List of node_participant structures representing available nodes.
 	struct list_head participants;
+	
+	// RPC thread state is contained inside rpc.c
+	// Functions exist to determine if the thread is alive or not
 };
 
 struct minion_state
 {
-	// TODO
-	// Location of main server.
+	//! State associated with an RPC connection to the MAIN node
+	struct rpc_connection rpc_connection;
 };
 
 /**
@@ -139,159 +163,117 @@ static struct internals_state *internals = NULL;
 
 #define NEXT_ASMID	(internals->n.main.next_asmid++)
 
+static int
+init_internals(void)
+{
+	if (internals)
+		return 0;
+	internals = calloc(1, sizeof(*internals));
+	if (!internals)
+		return -ENOMEM;
+	pthread_mutex_init(&internals->lock, NULL);
+	INIT_LIST_HEAD(&internals->assembly_list);
+	return 0;
+}
+
+/**
+ * Fill in a participant structure with information about ourself. The caller
+ * is responsible for setting the participant type and initializing the link
+ * structure if necesary.
+ *
+ * @return	0 no issues
+ * 			-ENETDOWN for errors obtaining network information
+ * 			-ENODEV for errors with any CUDA Runtime or Driver API calls, or
+ * 					if there are no GPUs detectable in the system
+ */
+static int
+self_participant(struct node_participant *p)
+{
+	int err, exit_errno;
+	struct ifaddrs *addrstruct = NULL, *ifa = NULL;
+	void *addr = NULL; // actually some crazy sock type
+	char addr_buffer[INET_ADDRSTRLEN];
+	cudaError_t cuda_err;
+	int idx = 0; // used for arrays in node_participant
+
+	// Get our hostname.
+	err = gethostname(p->hostname, 255);
+	if (err < 0) {
+		exit_errno = -ENETDOWN;
+		goto fail;
+	}
+
+	// Figure out all our IP addresses.
+	// http://stackoverflow.com/questions/212528/ (cont.)
+	// 		linux-c-get-the-ip-address-of-local-computer
+	err = getifaddrs(&addrstruct); // OS gives us a list of addresses
+	if (err < 0) {
+		exit_errno = -ENETDOWN;
+		goto fail;
+	}
+	idx = 0;
+	for (ifa = addrstruct; !ifa; ifa = ifa->ifa_next) { // iterate the list
+		if (ifa->ifa_addr->sa_family == AF_INET) { // IPv4
+			addr = &((struct sockaddr_in*)ifa->ifa_addr)->sin_addr;
+			inet_ntop(AF_INET, addr, addr_buffer, INET_ADDRSTRLEN);
+			snprintf(p->ip[idx], 255, "%s", ifa->ifa_name); // name of NIC
+			snprintf(p->nic_name[idx], 255, "%s", addr_buffer); // NIC IP
+			idx++;
+			if (idx >= PARTICIPANT_MAX_NICS)
+				break;
+		}
+	}
+	freeifaddrs(addrstruct);
+
+	// GPU count and their properties
+	cuda_err = cudaGetDeviceCount(&p->num_gpus);
+	if (cuda_err != CUDA_SUCCESS) {
+		exit_errno = -ENODEV;
+		goto fail;
+	}
+	if (p->num_gpus == 0) { // require nodes to have GPUs
+		exit_errno = -ENODEV;
+		goto fail;
+	}
+	for (idx = 0; idx < p->num_gpus; idx++) {
+		cuda_err = cudaGetDeviceProperties(&p->dev_prop[idx], idx);
+		if (cuda_err != CUDA_SUCCESS) {
+			exit_errno = -ENODEV;
+			goto fail;
+		}
+	}
+
+	// Driver and runtime versions
+	cuda_err = cudaDriverGetVersion(&p->driverVersion);
+	if (cuda_err != CUDA_SUCCESS) {
+		exit_errno = -ENODEV;
+		goto fail;
+	}
+	cuda_err = cudaRuntimeGetVersion(&p->runtimeVersion);
+	if (cuda_err != CUDA_SUCCESS) {
+		exit_errno = -ENODEV;
+		goto fail;
+	}
+	return 0;
+
+fail:
+	return exit_errno;
+}
+
 /**
  * Locate the assembly structure given the ID. Assumes locks governing the list
  * have been acquired by the caller.
  */
-static struct assembly*
+static struct assembly *
 __find_assembly(asmid_t id)
 {
-	struct assembly *assm = NULL;
+	struct assembly *assm;
 	list_for_each_entry(assm, &internals->assembly_list, link)
 		if (assm->id == id)
 			break;
-	if (!assm || assm->id != id) {
-		printd(DBG_ERROR, "unknown assembly id %lu\n", id);
-	}
+	if (!assm || assm->id != id)
+		assm = NULL;
 	return assm;
-}
-
-/**
- * This is a hack. Child processes forked from parent processes which have made
- * calls into the CUDA Runtime API are not able to call into the Runtime API
- * themselves.  Functions return an error indicating "no device available". This
- * function allows the caller to invoke certain CUDA Runtime functions without
- * initializing any context within its address space.
- *
- * This problem has been confirmed with CUDA v3.2 and is visible all over the
- * NVIDIA forums. A solution was needed for the assembly runtime, as the first
- * process executed within the backend needs to probe the system for available
- * GPUs as part of registering in the runtime. When apps 'connect' to the
- * runtime, this process will fork a child 'sink' process to handle the
- * requests. If the first makes calls into the Runtime API, the latter will fail
- * to handle CUDA RPCs to local GPUs.
- *
- * This function assumes a machine has no more than 32 GPUs contained within it.
- *
- * @param node		Node participant data structure that will be updated with
- * 					regards to the number of GPUs present, all their device
- * 					properties and the driver and runtime version numbers.
- *
- * @return	0 okay, -1 not okay
- */
-static int hack_getCudaInformation(struct node_participant *node)
-{
-	struct cudaDeviceProp *props = node->dev_prop;
-	int *num_gpus = &node->num_gpus;
-	int *drv_ver = &node->driverVersion;
-	int *cuda_ver = &node->runtimeVersion;
-
-	struct { // Layout of the shared memory region.
-		int _drv_ver;
-		int _cuda_ver;
-		struct cudaDeviceProp _props[32]; // here's that assumption
-	} *format;
-
-	void *shm = NULL;
-	size_t shm_size = sizeof(*format);
-
-	// Determine the number of GPUs. The CUDA Driver API doesn't act as screwy
-	// as the Runtime API, so this is safe to do.
-	CUresult cu_err;
-	cu_err = cuInit(0);
-	if (cu_err != CUDA_SUCCESS)
-		goto fail;
-	cu_err = cuDeviceGetCount(num_gpus);
-	if (cu_err != CUDA_SUCCESS)
-		goto fail;
-
-#ifdef HACK_NOFORK
-
-	format = calloc(1, sizeof(*format));
-	if (!format)
-		goto fail;
-
-	int dev;
-	cudaError_t cuda_err;
-
-	cuda_err = cudaDriverGetVersion(&format->_drv_ver);
-	if (cuda_err != cudaSuccess)
-		goto fail;
-	cuda_err = cudaRuntimeGetVersion(&format->_cuda_ver);
-	if (cuda_err != cudaSuccess)
-		goto fail;
-	for (dev = 0; dev < *num_gpus; dev++) {
-		cuda_err = cudaGetDeviceProperties(&format->_props[dev], dev);
-		if (cuda_err != cudaSuccess)
-			goto fail;
-	}
-
-#else				/* !HACK_NOFORK */
-
-	int err;
-
-	// Create a shared memory region and fork a child process to do the work.
-	// The child will write the array of cudaDeviceProp structs to this region
-	// which the parent (the caller of the function) can then read in. The child
-	// has a separate instance of the CUDA Runtime library with which it can
-	// make function calls, unaffecting the parent.
-
-	// mmaping an 'anonymous' region doesn't require us to open a file
-	shm = mmap(NULL, shm_size, PROT_READ | PROT_WRITE,
-			MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-	if (shm == MAP_FAILED)
-		goto fail;
-	format = shm;
-
-	pid_t pid;
-	pid = fork();
-	if (pid == 0) { // Child process does all the CUDA Runtime calls.
-		cudaError_t cuda_err;
-		int dev;
-		cuda_err = cudaDriverGetVersion(&format->_drv_ver);
-		if (cuda_err != cudaSuccess)
-			exit(-1);
-		cuda_err = cudaRuntimeGetVersion(&format->_cuda_ver);
-		if (cuda_err != cudaSuccess)
-			exit(-1);
-		for (dev = 0; dev < *num_gpus; dev++) {
-			cuda_err = cudaGetDeviceProperties(&format->_props[dev], dev);
-			if (cuda_err != cudaSuccess)
-				exit(-1);
-		}
-		exit(0);
-	} else if (pid > 0) { // Parent process
-		int status = 0;
-		pid_t _pid;
-		_pid = waitpid(pid, &status, 0); // Wait for the child to exit.
-		if (_pid < 0 || (_pid != pid))
-			goto fail;
-	} else { // fork() failure
-		goto fail;
-	}
-
-#endif				/* HACK_NOFORK */
-
-	// Copy results to user-supplied arguments.
-	memcpy(props, format->_props, (*num_gpus * sizeof(struct cudaDeviceProp)));
-	*drv_ver = format->_drv_ver;
-	*cuda_ver = format->_cuda_ver;
-
-#ifdef HACK_NOFORK
-	free(format);
-#else				/* !HACK_NOFORK */
-	err = munmap(shm, shm_size);
-	shm = NULL;
-	if (err != 0) goto fail;
-#endif
-
-	return 0;
-
-fail:
-	if (shm)
-		munmap(shm, shm_size); // What if this also fails??
-	shm = NULL;
-	return -1;
 }
 
 /**
@@ -366,29 +348,13 @@ set_thread_association(struct assembly *assm, pthread_t tid, int vgpu_id)
 }
 
 /**
- * MAIN
- * Calls into the API will directly invoke the respective internal functions to
- * carry out the work. Spawn thread that listens and accepts incoming assembly
- * RPCs, which represent the API (public functions below) directly. The thread
- * directly calls the API functions as if it were some external entity
- * (essentially it is, acting as a proxy). As part of the registration by minion
- * nodes, their participation information (num gpus, etc) is added.
- *
- * MINION
- * Calls into the API get sent as RPCs to the main node. No proxy thread is
- * created, as this type of node does not accept incoming requests.
- *
- * The functions that go remote may include only request and teardown. Caching
- * assemblies per node will allow other calls to return more quickly. To
- * maintain consistency, it may asynchronously send a packet to the main node.
- */
-
-/**
  * Figure out the composition of a new assembly given the hints, monitoring
- * state and currently existing assemblies. Assumes locks are held by caller.
- * This function will become quite large, I assume. If not, then this file will.
+ * state and currently existing assemblies. hostname is used to verify the host
+ * has joined the assembly network (i.e. is in the participants list) and is
+ * used to identify a new assembly's source.
  */
-static struct assembly* compose_assembly(const struct assembly_cap_hint *hint)
+static struct assembly *
+compose_assembly(const struct assembly_cap_hint *hint)
 {
 	struct node_participant *node = NULL;
 	struct assembly *assm = calloc(1, sizeof(struct assembly));
@@ -448,7 +414,8 @@ static struct assembly* compose_assembly(const struct assembly_cap_hint *hint)
 	// FIXME Verify cuda/runtime versions on all nodes the assembly was mapped
 	// to are equal. For now, just use the values from the first node in the
 	// list.
-	node = list_first_entry(&internals->n.main.participants, struct node_participant, link);
+	node = list_first_entry(&internals->n.main.participants,
+			struct node_participant, link);
 	assm->runtimeVersion = node->runtimeVersion;
 	assm->driverVersion = node->driverVersion;
 
@@ -460,45 +427,62 @@ fail:
 	return NULL;
 }
 
-static int node_main_init(void)
+static int
+node_main_init(void)
 {
-	struct node_participant *p;
 	int err;
+	struct node_participant *p;
+	struct main_state *main_state;
 
-	internals->n.main.next_asmid = 1UL;
-	INIT_LIST_HEAD(&internals->n.main.participants);
+	internals->type = NODE_TYPE_MAIN;
+	main_state = &internals->n.main;
+	main_state->next_asmid = 1UL;
+	INIT_LIST_HEAD(&main_state->participants);
 
-	p = calloc(1, sizeof(struct node_participant));
-	if (!p) {
-		printd(DBG_ERROR, "out of memory\n");
-		fprintf(stderr, "out of memory\n");
+	// participant state
+	p = calloc(1, sizeof(*p));
+	if (!p)
 		goto fail;
+	err = self_participant(p);
+	switch (err) {
+		case 0: break;
+		case -ENODEV:
+			fprintf(stderr, "Error: no GPUs in node,"
+						" or error with CUDA runtime/driver\n");
+			goto fail;
+		case -ENETDOWN:
+			fprintf(stderr, "Error: cannot access network information\n");
+			goto fail;
+		default:
+			goto fail;
 	}
-	INIT_LIST_HEAD(&p->link);
-	
-	// FIXME don't hardcode, figure out at runtime
-	strcpy(p->ip, "10.0.0.1");
-	err = hack_getCudaInformation(p);
-	if (err < 0)
-		goto fail;
-	printd(DBG_DEBUG, "node: gpus=%d drv ver=%d cuda ver=%d\n",
-			p->num_gpus, p->driverVersion, p->runtimeVersion);
-	strcpy(p->hostname, "ifrit"); // just for identification, not routing
 	p->type = NODE_TYPE_MAIN;
+	INIT_LIST_HEAD(&p->link);
 
 	// no need to lock list, as nobody else exists at this point
 	list_add(&p->link, &internals->n.main.participants);
 
-	// TODO Spawn RPC thread.
+	err = rpc_enable();
+	if (err < 0)
+		goto fail;
 
 	return 0;
+
 fail:
 	return -1;
 }
 
-static int node_main_shutdown(void)
+static int
+node_main_shutdown(void)
 {
+	int err, exit_errno = 0;
 	struct node_participant *node_pos = NULL, *node_tmp = NULL;
+
+	err = rpc_disable();
+	if (err < 0) {
+		exit_errno = -EPROTO;
+		fprintf(stderr, "Error halting internal assembly RPC\n");
+	}
 
 	// Free participant list. We assume all minions have unregistered at this
 	// point (meaning only one entry in the list).
@@ -514,6 +498,7 @@ static int node_main_shutdown(void)
 	// We assume minions have shutdown their assemblies, leaving this list
 	// empty.
 	if (!list_empty(&internals->assembly_list)) {
+		exit_errno = -EPROTO;
 		printd(DBG_ERROR, "Assemblies still exist!\n");
 		fprintf(stderr, "Assemblies still exist!\n");
 	}
@@ -521,21 +506,76 @@ static int node_main_shutdown(void)
 	free(internals);
 	internals = NULL;
 
+	return exit_errno;
+}
+
+static int
+node_minion_init(const char *main_ip)
+{
+#if 0
+	int err, exit_errno = -1;
+	struct node_participant p;
+
+	// minion state
+	internals->type = NODE_TYPE_MINION;
+	// FIXME rpc_init_conn internals->u.minion.conn
+
+	// participant state
+	p = calloc(1, sizeof(*p));
+	if (!p)
+		goto fail;
+	err = self_participant(p);
+	switch (err) {
+		case 0: break;
+		case -ENODEV:
+			fprintf(stderr, "Error: no GPUs in node,"
+						" or error with CUDA runtime/driver\n");
+			goto fail;
+		case -ENETDOWN:
+			fprintf(stderr, "Error: cannot access network information\n");
+			goto fail;
+		default:
+			goto fail;
+	}
+	p->type = NODE_TYPE_MINION;
+	INIT_LIST_HEAD(&p->link);
+
+#error rpc_send_join
+
 	return 0;
+
+fail:
+	if (rpc_buffer)
+		free(rpc_buffer);
+	return exit_errno;
+#endif
+	return -1;
 }
 
-static int node_minion_init(void)
+static int
+node_minion_shutdown(void)
 {
-	// TODO Register with main if we are a minion.
+	// TODO Unregister with main
 	fprintf(stderr, "Minion node not yet supported\n");
 	return -1;
 }
 
-static int node_minion_shutdown(void)
+/*-------------------------------------- EXTERNAL FUNCTIONS ------------------*/
+
+/*
+ * These functions are callable outside this file, but are not part of the API.
+ * They're used in rpc.c to support a distributed assembly runtime.
+ */
+
+// Return the assembly structure associated with the given ID.
+struct assembly *
+assembly_find(asmid_t id)
 {
-	// TODO Register with main if we are a minion.
-	fprintf(stderr, "Minion node not yet supported\n");
-	return -1;
+	struct assembly *assm;
+	pthread_mutex_lock(&internals->lock);
+	assm = __find_assembly(id);
+	pthread_mutex_unlock(&internals->lock);
+	return assm;
 }
 
 /*-------------------------------------- PUBLIC FUNCTIONS --------------------*/
@@ -547,30 +587,16 @@ int assembly_runtime_init(enum node_type type)
 		printd(DBG_ERROR, "invalid type: %u\n", type);
 		goto fail;
 	}
-	if (internals) {
-		printd(DBG_ERROR, "init already called\n");
+	err = init_internals();
+	if (err < 0)
 		goto fail;
-	}
-	internals = calloc(1, sizeof(struct internals_state));
-	if (!internals) {
-		printd(DBG_ERROR, "out of memory\n");
-		fprintf(stderr, "Out of memory\n");
-		goto fail;
-	}
-	internals->type = type;
-	INIT_LIST_HEAD(&internals->assembly_list);
-
-	// TODO Discover configuration of local node to add to participant data.
-
 	if (type == NODE_TYPE_MINION) {
-		err = node_minion_init();
-		if (err < 0)
-			goto fail;
+		err = node_minion_init("10.0.0.1");
 	} else if (type == NODE_TYPE_MAIN) {
 		err = node_main_init();
-		if (err < 0)
-			goto fail;
 	}
+	if (err < 0)
+		goto fail;
 	return 0;
 fail:
 	return -1;

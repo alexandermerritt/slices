@@ -7,7 +7,10 @@
 #ifndef _ASSEMBLY_H
 #define _ASSEMBLY_H
 
+// Project includes
 #include <packetheader.h>
+
+/*-------------------------------------- DEFINITIONS -------------------------*/
 
 #define ASSEMBLY_SHMGRP_KEY "cudarpc"
 
@@ -46,6 +49,8 @@ struct assembly_cap_hint
 
 	// int num_cpus?
 };
+
+/*-------------------------------------- FUNCTIONS ---------------------------*/
 
 int assembly_runtime_init(enum node_type type);
 int assembly_runtime_shutdown(void);
