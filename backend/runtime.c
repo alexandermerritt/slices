@@ -120,10 +120,10 @@ static void sigint_handler(int sig)
 	; // Do nothing, just prevent it from killing us
 }
 
-static int start_runtime(void)
+static int start_runtime(enum node_type type, const char *main_ip)
 {
 	int err;
-	err = assembly_runtime_init(NODE_TYPE_MAIN); // TODO Take a command arg
+	err = assembly_runtime_init(type, main_ip);
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not initialize assembly runtime\n");
 		return -1;
@@ -156,27 +156,67 @@ static void shutdown_runtime(void)
 	err = assembly_runtime_shutdown();
 	if (err < 0)
 		printd(DBG_ERROR, "Could not shutdown assembly runtime\n");
-	printd(DBG_INFO, "\nAssembly runtime shut down.\n");
+	printf("\nAssembly runtime shut down.\n");
 
+}
+
+static bool verify_args(int argc, char *argv[], enum node_type *type)
+{
+	const char main_str[] = "main";
+	const char minion_str[] = "minion";
+	if (!argv)
+		return false;
+	if (argc < 2 || argc > 3)
+		return false;
+	if (argc == 2) { // ./runtime main
+		if (strncmp(argv[1], main_str, strlen(main_str)) != 0)
+			return false;
+		*type = NODE_TYPE_MAIN;
+	} else if (argc == 3) { // ./runtime minion <ip-addr>
+		if (strncmp(argv[1], minion_str, strlen(minion_str)) != 0)
+			return false;
+		// TODO verify ip via regex
+		*type = NODE_TYPE_MINION;
+	}
+	return true;
+}
+
+static void print_usage(void)
+{
+	const char usage_str[] =
+		"Usage: ./runtime <type> [main-ip]\n"
+		"		type		main, minion\n"
+		"		main-ip		IP of main node, if type = minion\n";
+	fprintf(stderr, usage_str);
 }
 
 /*-------------------------------------- ENTRY -------------------------------*/
 
-int main(void)
+int main(int argc, char *argv[])
 {
 	int err;
 	sigset_t mask;
 	struct sigaction action;
+	enum node_type type;
 
 	// Block all signals.
-	sigfillset(&mask);
-	sigprocmask(SIG_BLOCK, &mask, NULL);
+	//sigfillset(&mask);
+	//sigprocmask(SIG_BLOCK, &mask, NULL);
 
-	err = start_runtime();
-	if (err < 0)
+	if (!verify_args(argc, argv, &type)) {
+		print_usage();
 		return -1;
+	}
 
-	printd(DBG_INFO, "Assembly runtime ready to accept new CUDA applications.\n");
+	if (argc == 2)
+		err = start_runtime(type, NULL);
+	else if (argc == 3)
+		err = start_runtime(type, argv[2]);
+	if (err < 0) {
+		fprintf(stderr, "Could not initialize. Check your arguments.\n");
+		fprintf(stderr, "The main node must be started before minions.\n");
+		return -1;
+	}
 
 	// Install a new handler for SIGINT.
 	memset(&action, 0, sizeof(action));
@@ -189,8 +229,11 @@ int main(void)
 		return -1;
 	}
 
+	printf("Assembly runtime up. Start other participants and/or CUDA applications.\n");
+
 	// Atomically unblock SIGINT and wait for it.
-	sigdelset(&mask, SIGINT);
+	sigemptyset(&mask);
+	//sigdelset(&mask, SIGINT);
 	sigsuspend(&mask);
 
 	shutdown_runtime();

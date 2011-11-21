@@ -52,7 +52,7 @@ struct assembly_cap_hint
 
 /*-------------------------------------- FUNCTIONS ---------------------------*/
 
-int assembly_runtime_init(enum node_type type);
+int assembly_runtime_init(enum node_type type, const char *main_ip);
 int assembly_runtime_shutdown(void);
 
 asmid_t assembly_request(const struct assembly_cap_hint *hint);

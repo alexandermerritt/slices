@@ -42,85 +42,9 @@
 
 // Directory-immediate includes
 #include "rpc.h"
-#include "sinks.h"
+#include "types.h"
 
 /*-------------------------------------- INTERNAL STRUCTURES -----------------*/
-
-enum vgpu_fixation
-{
-	VGPU_LOCAL = 0,
-	VGPU_REMOTE
-};
-
-#define MAPPING_MAX_SET_TID 4
-
-/**
- * State associating a vgpu with a pgpu.
- */
-struct vgpu_mapping
-{
-	struct assembly *assm; //! Assembly holding this vgpu
-	enum vgpu_fixation fixation;
-
-	int vgpu_id; //! vgpu ID given to the application
-	char vgpu_hostname[255]; // FIXME this will be different for all MPI ranks
-	char vgpu_ip[255]; // FIXME this will be different for all MPI ranks
-
-	int pgpu_id; //! physical gpu ID assigned by the local driver
-	char pgpu_hostname[255];
-	char pgpu_ip[255];
-	struct cudaDeviceProp cudaDevProp;
-
-	//! threads which have called setDevice on this vgpu
-	pthread_t set_tids[MAPPING_MAX_SET_TID];
-	int num_set_tids;
-};
-
-#define ASSEMBLY_MAX_MAPPINGS	24
-
-/**
- * State that represents an assembly once created.
- *
- * TODO Should we store the fat binary and other vars/funcs/textures in this
- * structure? Currently, it is being stored in localsink.c. But that is
- * temporary.
- */
-struct assembly
-{
-	struct list_head link;
-	asmid_t id;
-	int num_gpus;
-	struct vgpu_mapping mappings[ASSEMBLY_MAX_MAPPINGS];
-	int driverVersion, runtimeVersion;
-	// TODO array of static gpu properties
-	// TODO link to dynamic load data?
-	// TODO location of node containing application
-};
-
-#define PARTICIPANT_MAX_GPUS	4
-#define PARTICIPANT_MAX_NICS	4
-
-/**
- * State describing a node that has registered to participate in the assembly
- * runtime. Minions send RPCs to the main node to register. Not using any
- * pointers in this structure as that eliminates the need to serialize it when
- * sending it as part of an RPC.
- */
-struct node_participant
-{
-	struct list_head link;
-	enum node_type type;
-
-	// Network information
-	char hostname[255];
-	char ip[PARTICIPANT_MAX_NICS][255];
-	char nic_name[PARTICIPANT_MAX_NICS][255];
-
-	// GPU information
-	int num_gpus;
-	struct cudaDeviceProp dev_prop[PARTICIPANT_MAX_GPUS];
-	int driverVersion, runtimeVersion;
-};
 
 struct main_state
 {
@@ -129,6 +53,7 @@ struct main_state
 
 	//! List of node_participant structures representing available nodes.
 	struct list_head participants;
+	pthread_mutex_t plock; //! participant list lock
 	
 	// RPC thread state is contained inside rpc.c
 	// Functions exist to determine if the thread is alive or not
@@ -137,7 +62,7 @@ struct main_state
 struct minion_state
 {
 	//! State associated with an RPC connection to the MAIN node
-	struct rpc_connection rpc_connection;
+	struct rpc_connection rpc_conn;
 };
 
 /**
@@ -212,12 +137,12 @@ self_participant(struct node_participant *p)
 		goto fail;
 	}
 	idx = 0;
-	for (ifa = addrstruct; !ifa; ifa = ifa->ifa_next) { // iterate the list
+	for (ifa = addrstruct; ifa; ifa = ifa->ifa_next) { // iterate the list
 		if (ifa->ifa_addr->sa_family == AF_INET) { // IPv4
 			addr = &((struct sockaddr_in*)ifa->ifa_addr)->sin_addr;
 			inet_ntop(AF_INET, addr, addr_buffer, INET_ADDRSTRLEN);
-			snprintf(p->ip[idx], 255, "%s", ifa->ifa_name); // name of NIC
-			snprintf(p->nic_name[idx], 255, "%s", addr_buffer); // NIC IP
+			snprintf(p->nic_name[idx], 255, "%s", ifa->ifa_name); // name of NIC
+			snprintf(p->ip[idx], 255, "%s", addr_buffer); // NIC IP
 			idx++;
 			if (idx >= PARTICIPANT_MAX_NICS)
 				break;
@@ -377,10 +302,10 @@ compose_assembly(const struct assembly_cap_hint *hint)
 	if (hint->num_gpus == 0) {
 		printd(DBG_WARNING, "Hint asks for zero GPUs; providing 1\n");
 		assm->num_gpus = 1;
-	} else if (hint->num_gpus > ASSEMBLY_MAX_MAPPINGS) {
+	} else if (hint->num_gpus > MAX_VGPUS) {
 		printd(DBG_WARNING, "Hint asks for %d GPUs; providing %d\n",
-				hint->num_gpus, ASSEMBLY_MAX_MAPPINGS);
-		assm->num_gpus = ASSEMBLY_MAX_MAPPINGS;
+				hint->num_gpus, MAX_VGPUS);
+		assm->num_gpus = MAX_VGPUS;
 	} else {
 		assm->num_gpus = hint->num_gpus;
 	}
@@ -395,7 +320,6 @@ compose_assembly(const struct assembly_cap_hint *hint)
 			if (vgpu_id >= node->num_gpus)
 				break; // skip to next node
 			vgpu = &assm->mappings[vgpu_id];
-			vgpu->assm = assm;
 			vgpu->fixation = VGPU_LOCAL;
 			vgpu->vgpu_id = vgpu_id;
 			vgpu->pgpu_id = vgpu_id;
@@ -427,19 +351,23 @@ fail:
 	return NULL;
 }
 
+// forward declaration
+int add_participant(struct node_participant *p);
+
 static int
 node_main_init(void)
 {
 	int err;
-	struct node_participant *p;
-	struct main_state *main_state;
+	struct node_participant *p = NULL;
+	struct main_state *state;
+	int iface;
 
 	internals->type = NODE_TYPE_MAIN;
-	main_state = &internals->n.main;
-	main_state->next_asmid = 1UL;
-	INIT_LIST_HEAD(&main_state->participants);
+	state = &internals->n.main;
+	state->next_asmid = 1UL;
+	INIT_LIST_HEAD(&state->participants);
 
-	// participant state
+	// Create a participant describing ourself
 	p = calloc(1, sizeof(*p));
 	if (!p)
 		goto fail;
@@ -459,37 +387,48 @@ node_main_init(void)
 	p->type = NODE_TYPE_MAIN;
 	INIT_LIST_HEAD(&p->link);
 
-	// no need to lock list, as nobody else exists at this point
-	list_add(&p->link, &internals->n.main.participants);
+	// Print out which interfaces we discovered for the user.
+	printf("Listening on interfaces:");
+	for (iface = 0; iface < PARTICIPANT_MAX_NICS; iface++) {
+		if (*(p->nic_name[iface]) == '\0')
+			break;
+		printf(" (%s:%s)", p->nic_name[iface], p->ip[iface]);
+	}
+	printf("\n");
 
 	err = rpc_enable();
 	if (err < 0)
 		goto fail;
 
+	err = add_participant(p);
+	if (err < 0) { // this is never expected
+		goto fail;
+	}
+
 	return 0;
 
 fail:
+	rpc_disable();
+	if (p) free(p);
 	return -1;
 }
 
 static int
 node_main_shutdown(void)
 {
-	int err, exit_errno = 0;
+	int exit_errno = 0;
 	struct node_participant *node_pos = NULL, *node_tmp = NULL;
 
-	err = rpc_disable();
-	if (err < 0) {
-		exit_errno = -EPROTO;
-		fprintf(stderr, "Error halting internal assembly RPC\n");
-	}
+	rpc_disable();
 
 	// Free participant list. We assume all minions have unregistered at this
 	// point (meaning only one entry in the list).
+	// FIXME Still need to do this
 	list_for_each_entry_safe(node_pos, node_tmp,
 			&internals->n.main.participants, link) {
 		if (node_pos->type == NODE_TYPE_MINION) { // oops...
-			printd(DBG_ERROR, "minion still connected: TODO\n");
+			printd(DBG_ERROR, "Remote host %s still connected!\n",
+					node_pos->hostname);
 		}
 		list_del(&node_pos->link);
 		free(node_pos);
@@ -497,6 +436,7 @@ node_main_shutdown(void)
 
 	// We assume minions have shutdown their assemblies, leaving this list
 	// empty.
+	// FIXME Still need to do this
 	if (!list_empty(&internals->assembly_list)) {
 		exit_errno = -EPROTO;
 		printd(DBG_ERROR, "Assemblies still exist!\n");
@@ -509,21 +449,43 @@ node_main_shutdown(void)
 	return exit_errno;
 }
 
+/**
+ * Initialize a node to be of type minion. No participant list is maintained. An
+ * assembly list is maintained, but only for those for which we've received
+ * requests.  Initialization includes creating populating a participant
+ * structure, and sending it to the main node. Departure from the assembly
+ * network, requesting and tearing down assemblies require command RPCs with the
+ * main node.
+ */
 static int
 node_minion_init(const char *main_ip)
 {
-#if 0
-	int err, exit_errno = -1;
-	struct node_participant p;
+	int err, exit_errno;
+	struct node_participant *p = NULL;
+	struct minion_state *state;
 
-	// minion state
+	BUG(!internals);
 	internals->type = NODE_TYPE_MINION;
-	// FIXME rpc_init_conn internals->u.minion.conn
+	state = &internals->n.minion;
 
-	// participant state
-	p = calloc(1, sizeof(*p));
-	if (!p)
+	// Connect to the main node
+	err = rpc_init_conn(&state->rpc_conn);
+	if (err < 0) {
+		exit_errno = err;
 		goto fail;
+	}
+	err = rpc_connect(&state->rpc_conn, main_ip);
+	if (err < 0) {
+		exit_errno = err;
+		goto fail;
+	}
+
+	// Create a participant describing ourself
+	p = calloc(1, sizeof(*p));
+	if (!p) {
+		exit_errno = -ENOMEM;
+		goto fail;
+	}
 	err = self_participant(p);
 	switch (err) {
 		case 0: break;
@@ -538,33 +500,79 @@ node_minion_init(const char *main_ip)
 			goto fail;
 	}
 	p->type = NODE_TYPE_MINION;
-	INIT_LIST_HEAD(&p->link);
 
-#error rpc_send_join
+	// Send our registration, equivalent to add_participant in main_init
+	err = rpc_send_join(&state->rpc_conn, p);
+	if (err < 0) {
+		// errors may include network death, main out of memory, message
+		// corruption, duplicate participant entry etc
+		exit_errno = err;
+		goto fail;
+	}
 
+	free(p);
 	return 0;
 
 fail:
-	if (rpc_buffer)
-		free(rpc_buffer);
+	rpc_close(&state->rpc_conn);
+	if (p) free(p);
 	return exit_errno;
-#endif
-	return -1;
 }
 
 static int
 node_minion_shutdown(void)
 {
-	// TODO Unregister with main
-	fprintf(stderr, "Minion node not yet supported\n");
-	return -1;
+	int err, exit_errno;
+	struct minion_state *state = NULL;
+
+	BUG(!internals);
+	state = &internals->n.minion;
+
+	// XXX FIXME If there are still assemblies, remove them one-by-one.
+
+	// Stop on the first error as all of these involve network communication. In
+	// the worst case, Linux will close all our file descriptors for us when we
+	// exit or crash. The MAIN node is able to detect this and will attempt to
+	// clean up for us, anyway.
+	err = rpc_send_leave(&state->rpc_conn);
+	if (err < 0) {
+		exit_errno = err;
+		goto fail;
+	}
+	err = rpc_close(&state->rpc_conn);
+	if (err < 0) {
+		exit_errno = err;
+		goto fail;
+	}
+	err = rpc_tini_conn(&state->rpc_conn);
+	if (err < 0) {
+		exit_errno = err;
+		goto fail;
+	}
+	return 0;
+fail:
+	return exit_errno;
+}
+
+//! Same as get_participant, but without locking. Not accessible externally.
+static struct node_participant *
+__get_participant(const char *hostname)
+{
+	struct node_participant *iter = NULL;
+	list_for_each_entry(iter, &internals->n.main.participants, link)
+		if (strncmp(hostname, iter->hostname, HOST_LEN) == 0)
+			break;
+	if (iter && strncmp(hostname, iter->hostname, HOST_LEN) == 0)
+		return iter;
+	return NULL;
 }
 
 /*-------------------------------------- EXTERNAL FUNCTIONS ------------------*/
 
 /*
  * These functions are callable outside this file, but are not part of the API.
- * They're used in rpc.c to support a distributed assembly runtime.
+ * They're used both within this file and in rpc.c to support a distributed
+ * assembly runtime.
  */
 
 // Return the assembly structure associated with the given ID.
@@ -578,22 +586,86 @@ assembly_find(asmid_t id)
 	return assm;
 }
 
+/**
+ * Look for a participant in the list with the given hostname. Return true if
+ * yes and false if no.
+ */
+bool
+participant_exists(const char *hostname)
+{
+	struct node_participant *exists = NULL;
+	pthread_mutex_lock(&internals->n.main.plock);
+	exists = __get_participant(hostname);
+	pthread_mutex_unlock(&internals->n.main.plock);
+	return (exists != NULL);
+}
+
+/**
+ * Add a participant structure to the list the MAIN node maintains. MINION nodes
+ * do not have such a list, as it is only used to map assemblies. Assumes the
+ * list has been initialized and the argument is valid.  For all error
+ * conditions returned, the participant is NOT added to the list.
+ *
+ * @return	-EEXIST if a participant with the same hostname as one in the list
+ *			is given.
+ */
+int
+add_participant(struct node_participant *p)
+{
+	struct node_participant *existing = NULL;
+	pthread_mutex_lock(&internals->n.main.plock);
+	existing = __get_participant(p->hostname);
+	if (existing) {
+		pthread_mutex_unlock(&internals->n.main.plock);
+		return -EEXIST;
+	}
+	list_add(&p->link, &internals->n.main.participants);
+	pthread_mutex_unlock(&internals->n.main.plock);
+	return 0;
+}
+
+/**
+ * Remove a participant structure from the list the MAIN node maintains. It uses
+ * the hostname for comparison only. Assumes the list has been initialized and
+ * the argument is valid.
+ *
+ * @param	removed		If hostname matches a participant in the list, this will
+ * 						point to the structure removed from the list matching
+ * 						that hostname.
+ * @return	-EINVAL if no participant in the list has a hostname matching the
+ * 			given hostname.
+ */
+int
+rm_participant(const char *hostname, struct node_participant **removed)
+{
+	struct node_participant *existing = NULL;
+	pthread_mutex_lock(&internals->n.main.plock);
+	existing = __get_participant(hostname);
+	if (!existing) {
+		pthread_mutex_unlock(&internals->n.main.plock);
+		return -EINVAL;
+	}
+	list_del(&existing->link);
+	*removed = existing; // pointer copy
+	pthread_mutex_unlock(&internals->n.main.plock);
+	return 0;
+}
+
+
 /*-------------------------------------- PUBLIC FUNCTIONS --------------------*/
 
-int assembly_runtime_init(enum node_type type)
+int assembly_runtime_init(enum node_type type, const char *main_ip)
 {
 	int err;
-	if (type >= NODE_TYPE_INVALID) {
-		printd(DBG_ERROR, "invalid type: %u\n", type);
-		goto fail;
-	}
 	err = init_internals();
 	if (err < 0)
 		goto fail;
 	if (type == NODE_TYPE_MINION) {
-		err = node_minion_init("10.0.0.1");
+		err = node_minion_init(main_ip);
 	} else if (type == NODE_TYPE_MAIN) {
 		err = node_main_init();
+	} else {
+		goto fail;
 	}
 	if (err < 0)
 		goto fail;
@@ -662,18 +734,8 @@ fail:
 	return -1;
 }
 
-int assembly_vgpu_is_remote(asmid_t id, int vgpu)
-{
-	// check id, return state of cached assembly, maybe also send rpc
-	return -1;
-}
-
-int assembly_set_batch_size(asmid_t id, int vgpu, unsigned int size)
-{
-	// check id, return state of cached assembly, maybe also send rpc
-	// lock something
-	return -1;
-}
+// forward declaration
+extern int nv_exec_pkt(volatile struct cuda_packet *pkt);
 
 /**
  * Execute an RPC (CUDA for now) in the runtime. Use of the vgpu identifier is
