@@ -34,7 +34,7 @@
 
 // XXX We assume a single-process single-threaded CUDA application for now. Thus
 // one assembly, one hint and one sink child.
-static struct assembly_cap_hint hint;
+static struct assembly_hint hint;
 static struct sink_child sink_child;
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/

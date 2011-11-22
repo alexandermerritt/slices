@@ -281,7 +281,7 @@ set_thread_association(struct assembly *assm, pthread_t tid, int vgpu_id)
  * used to identify a new assembly's source.
  */
 static struct assembly *
-compose_assembly(const struct assembly_cap_hint *hint)
+compose_assembly(const struct assembly_hint *hint)
 {
 	struct node_participant *node = NULL;
 	struct assembly *assm = calloc(1, sizeof(struct assembly));
@@ -879,7 +879,7 @@ fail:
 	return -1;
 }
 
-asmid_t assembly_request(const struct assembly_cap_hint *hint)
+asmid_t assembly_request(const struct assembly_hint *hint)
 {
 	int err;
 	struct assembly *assm = NULL;

@@ -35,7 +35,7 @@ int rpc_connect(struct rpc_connection *conn, const char *main_ip);
 // functions analogous to those in the assembly API which the MAIN node must see
 int rpc_send_join(struct rpc_connection *conn, struct node_participant *p);
 int rpc_send_request(struct rpc_connection *conn,
-		const struct assembly_cap_hint *hint,
+		const struct assembly_hint *hint,
 		struct assembly *assm);
 int rpc_send_teardown(struct rpc_connection *conn, asmid_t asmid);
 int rpc_send_leave(struct rpc_connection *conn);

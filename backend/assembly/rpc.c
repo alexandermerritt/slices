@@ -44,7 +44,7 @@ struct rpc_join
 struct rpc_request
 {
 	union {
-		struct assembly_cap_hint hint;	// sent to MAIN
+		struct assembly_hint hint;	// sent to MAIN
 		struct assembly assembly;		// response from MAIN
 	} u;
 };
@@ -208,7 +208,7 @@ do_msg(struct rpc_msg *msg)
 	}
 	
 	else if (msg->action == ASSEMBLY_REQUEST) {
-		struct assembly_cap_hint *hint = &msg->u.request.u.hint;
+		struct assembly_hint *hint = &msg->u.request.u.hint;
 		struct assembly *assm = NULL;
 		asmid_t asmid = assembly_request(hint);
 		if (!(VALID_ASSEMBLY_ID(asmid))) {
@@ -541,7 +541,7 @@ fail:
 }
 
 int rpc_send_request(struct rpc_connection *conn,
-		const struct assembly_cap_hint *hint,
+		const struct assembly_hint *hint,
 		struct assembly *assm)
 {
 	int err, exit_errno;

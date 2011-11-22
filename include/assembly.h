@@ -37,7 +37,7 @@ typedef unsigned long asmid_t;
  * Structure used by clients/apps/etc to specify how they want their assembly
  * cooked. Thus, 'hint'.
  */
-struct assembly_cap_hint
+struct assembly_hint
 {
 	int num_gpus;
 
@@ -55,7 +55,7 @@ struct assembly_cap_hint
 int assembly_runtime_init(enum node_type type, const char *main_ip);
 int assembly_runtime_shutdown(void);
 
-asmid_t assembly_request(const struct assembly_cap_hint *hint);
+asmid_t assembly_request(const struct assembly_hint *hint);
 int assembly_num_vgpus(asmid_t id);
 int assembly_vgpu_is_remote(asmid_t id, int vgpu);
 int assembly_set_batch_size(asmid_t id, int vgpu, unsigned int size);
