@@ -68,4 +68,7 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt);
  */
 int assembly_teardown(asmid_t id);
 
+//! Print human-readable format of an assembly configuration.
+void assembly_print(asmid_t id);
+
 #endif

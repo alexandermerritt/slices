@@ -49,19 +49,17 @@ static void runtime_entry(group_event e, pid_t pid)
 	switch (e) {
 		case MEMBERSHIP_JOIN:
 		{
-			// TODO in the future, detect multi-rank MPI applications, and
+			// TODO in the future, detect multi-process MPI applications, and
 			// give them the same assembly. Perhaps provide this in the hint
 			// structure.
 			pid_t childpid;
-			printd(DBG_INFO, "Process %d is requesting to join the assembly\n",
-					pid);
+			printf("Process %d is joining the runtime.\n", pid);
 			asmid = assembly_request(&hint);
 			if (!VALID_ASSEMBLY_ID(asmid)) {
 				printd(DBG_ERROR, "Error requesting assembly\n");
 				break;
 			}
-			printd(DBG_INFO, "Acquired assembly %lu with %d GPUs\n",
-					asmid, assembly_num_vgpus(asmid));
+			assembly_print(asmid);
 			err = fork_localsink(asmid, pid, &childpid);
 			// XXX ONLY the parent should return from here!
 			if (err < 0) {
@@ -76,7 +74,7 @@ static void runtime_entry(group_event e, pid_t pid)
 		break;
 		case MEMBERSHIP_LEAVE:
 		{
-			printd(DBG_INFO, "Application %d is leaving the runtime\n", pid);
+			printf("Process %d is leaving the runtime.\n", pid);
 
 #ifndef LOCALSINK_USE_THREAD
 
@@ -184,9 +182,8 @@ static bool verify_args(int argc, char *argv[], enum node_type *type)
 static void print_usage(void)
 {
 	const char usage_str[] =
-		"Usage: ./runtime <type> [main-ip]\n"
-		"		type		main, minion\n"
-		"		main-ip		IP of main node, if type = minion\n";
+		"Usage: ./runtime main\n"
+		"       ./runtime minion <ip-addr>\n";
 	fprintf(stderr, usage_str);
 }
 
@@ -198,10 +195,9 @@ int main(int argc, char *argv[])
 	sigset_t mask;
 	struct sigaction action;
 	enum node_type type;
-
-	// Block all signals.
-	//sigfillset(&mask);
-	//sigprocmask(SIG_BLOCK, &mask, NULL);
+	const char start_msg[] =
+		"Assembly runtime up. Start other participants and/or CUDA applications.\n"
+		"Type [Ctrl+c] or issue [kill -s SIGINT] to pid %d to shutdown.\n";
 
 	if (!verify_args(argc, argv, &type)) {
 		print_usage();
@@ -214,7 +210,6 @@ int main(int argc, char *argv[])
 		err = start_runtime(type, argv[2]);
 	if (err < 0) {
 		fprintf(stderr, "Could not initialize. Check your arguments.\n");
-		fprintf(stderr, "The main node must be started before minions.\n");
 		return -1;
 	}
 
@@ -229,11 +224,10 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	printf("Assembly runtime up. Start other participants and/or CUDA applications.\n");
+	printf(start_msg, getpid());
 
-	// Atomically unblock SIGINT and wait for it.
+	// Wait for any signal.
 	sigemptyset(&mask);
-	//sigdelset(&mask, SIGINT);
 	sigsuspend(&mask);
 
 	shutdown_runtime();

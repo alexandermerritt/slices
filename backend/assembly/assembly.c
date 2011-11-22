@@ -141,6 +141,8 @@ self_participant(struct node_participant *p)
 		if (ifa->ifa_addr->sa_family == AF_INET) { // IPv4
 			addr = &((struct sockaddr_in*)ifa->ifa_addr)->sin_addr;
 			inet_ntop(AF_INET, addr, addr_buffer, INET_ADDRSTRLEN);
+			if (strncmp(ifa->ifa_name, "lo", 3) == 0)
+				continue; // skip 127.0.0.1
 			snprintf(p->nic_name[idx], 255, "%s", ifa->ifa_name); // name of NIC
 			snprintf(p->ip[idx], 255, "%s", addr_buffer); // NIC IP
 			idx++;
@@ -360,7 +362,6 @@ node_main_init(void)
 	int err;
 	struct node_participant *p = NULL;
 	struct main_state *state;
-	int iface;
 
 	internals->type = NODE_TYPE_MAIN;
 	state = &internals->n.main;
@@ -386,15 +387,6 @@ node_main_init(void)
 	}
 	p->type = NODE_TYPE_MAIN;
 	INIT_LIST_HEAD(&p->link);
-
-	// Print out which interfaces we discovered for the user.
-	printf("Listening on interfaces:");
-	for (iface = 0; iface < PARTICIPANT_MAX_NICS; iface++) {
-		if (*(p->nic_name[iface]) == '\0')
-			break;
-		printf(" (%s:%s)", p->nic_name[iface], p->ip[iface]);
-	}
-	printf("\n");
 
 	err = rpc_enable();
 	if (err < 0)
@@ -497,7 +489,8 @@ node_minion_init(const char *main_ip)
 			fprintf(stderr, "Error: cannot access network information\n");
 			goto fail;
 		default:
-			goto fail;
+			BUG(1);
+			break;
 	}
 	p->type = NODE_TYPE_MINION;
 
@@ -702,10 +695,6 @@ int assembly_num_vgpus(asmid_t id)
 	struct assembly *assm = NULL;
 	unsigned int num_gpus = 0U;
 	int err;
-	if (id == 0U) {
-		printd(DBG_ERROR, "Invalid assembly ID: 0\n");
-		goto fail;
-	}
 	if (!internals) {
 		printd(DBG_ERROR, "assembly runtime not initialized\n");
 		goto fail;
@@ -894,61 +883,93 @@ asmid_t assembly_request(const struct assembly_cap_hint *hint)
 {
 	int err;
 	struct assembly *assm = NULL;
-	if (!internals) {
-		printd(DBG_ERROR, "assembly runtime not initialized\n");
-		goto fail;
-	}
-	err = pthread_mutex_lock(&internals->lock);
-	if (err < 0) {
-		printd(DBG_ERROR, "Could not lock internals\n");
-		goto fail;
-	}
-	assm = compose_assembly(hint);
-	if (!assm) {
-		printd(DBG_ERROR, "Could not compose assembly\n");
-		pthread_mutex_unlock(&internals->lock);
-		goto fail;
-	}
-	list_add(&assm->link, &internals->assembly_list);
-	err = pthread_mutex_unlock(&internals->lock);
-	if (err < 0) {
-		printd(DBG_ERROR, "Could not unlock internals\n");
-	}
-	return assm->id;
+	BUG(!internals);
+	pthread_mutex_lock(&internals->lock);
 
+	if (internals->type == NODE_TYPE_MAIN) {
+		assm = compose_assembly(hint);
+		if (assm == NULL) {
+			pthread_mutex_unlock(&internals->lock);
+			goto fail;
+		}
+	}
+
+	else if (internals->type == NODE_TYPE_MINION) {
+		struct assembly *new_assm = calloc(1, sizeof(*new_assm));
+		if (!new_assm) {
+			pthread_mutex_unlock(&internals->lock);
+			goto fail;
+		}
+		// ask the main node for an assembly
+		err = rpc_send_request(&internals->n.minion.rpc_conn, hint, new_assm);
+		if (err < 0) { // could not acquire assembly
+			free(new_assm);
+			goto fail;
+		}
+		assm = new_assm;
+	}
+
+	list_add(&assm->link, &internals->assembly_list);
+	pthread_mutex_unlock(&internals->lock);
+	return assm->id;
 fail:
 	return INVALID_ASSEMBLY_ID;
 }
 
 int assembly_teardown(asmid_t id)
 {
-	// TODO send rpc to main to close the assembly if a minion, but we do not
-	// unregister ourself with main
-	int err;
+	int err, exit_errno;
 	struct assembly *assm = NULL;
-	if (!internals) {
-		printd(DBG_ERROR, "assembly runtime not initialized\n");
-		goto fail;
-	}
-	err = pthread_mutex_lock(&internals->lock);
-	if (err < 0) {
-		printd(DBG_ERROR, "Could not lock internals\n");
-		goto fail;
-	}
+	BUG(!internals);
+	pthread_mutex_lock(&internals->lock);
+
 	assm = __find_assembly(id);
 	if (!assm) {
-		printd(DBG_ERROR, "Invalid assembly ID %lu\n", id);
+		pthread_mutex_unlock(&internals->lock);
+		exit_errno = -EINVAL;
 		goto fail;
 	}
+
+	if (internals->type == NODE_TYPE_MINION) {
+		// let the main node before we remove our state
+		err = rpc_send_teardown(&internals->n.minion.rpc_conn, id);
+		if (err < 0) {
+			exit_errno = err; // failure could be so many things...
+			pthread_mutex_unlock(&internals->lock);
+			goto fail;
+		}
+	}
+
 	list_del(&assm->link);
 	free(assm);
-	err = pthread_mutex_unlock(&internals->lock);
-	if (err < 0) {
-		printd(DBG_ERROR, "Could not unlock internals\n");
-		goto fail;
-	}
+	pthread_mutex_unlock(&internals->lock);
 	return 0;
-
 fail:
-	return -1;
+	return exit_errno;
+}
+
+void assembly_print(asmid_t id)
+{
+	struct assembly *assm = NULL;
+	int dev;
+	BUG(!internals);
+	pthread_mutex_lock(&internals->lock);
+	assm = __find_assembly(id);
+	if (!assm) {
+		pthread_mutex_unlock(&internals->lock);
+		return;
+	}
+	pthread_mutex_unlock(&internals->lock);
+
+	printf("Assembly --------\n");
+	printf("  ID           %04lu\n", assm->id);
+	printf("  vGPUs        %04d\n", assm->num_gpus);
+	for (dev = 0; dev < assm->num_gpus; dev++) {
+	printf("         %02d maps to %d@%s\n",
+				assm->mappings[dev].vgpu_id,
+				assm->mappings[dev].pgpu_id,
+				assm->mappings[dev].pgpu_hostname);
+	}
+	printf("  Drv API      %d\n", assm->driverVersion);
+	printf("  Runtime API  %d\n", assm->runtimeVersion);
 }

@@ -208,11 +208,20 @@ do_msg(struct rpc_msg *msg)
 	}
 	
 	else if (msg->action == ASSEMBLY_REQUEST) {
-		printd(DBG_ERROR, "ASSEMBLY_REQUEST not supported\n");
+		struct assembly_cap_hint *hint = &msg->u.request.u.hint;
+		struct assembly *assm = NULL;
+		asmid_t asmid = assembly_request(hint);
+		if (!(VALID_ASSEMBLY_ID(asmid))) {
+			msg->status = -1;
+		} else {
+			msg->status = 0;
+			assm = assembly_find(asmid);
+			msg->u.request.u.assembly = *assm;
+		}
 	}
 	
 	else if (msg->action == ASSEMBLY_TEARDOWN) {
-		printd(DBG_ERROR, "ASSEMBLY_TEARDOWN not supported\n");
+		msg->status = assembly_teardown(msg->u.teardown.asmid);
 	}
 
 	else if (msg->action == ASSEMBLY_LEAVE) {
@@ -320,12 +329,14 @@ admission_cleanup(void *arg)
 	}
 #undef EXIT_STRING
 
-	free(admin_thread);
+	// FIXME Check to see if we have other minion threads. Keep in mind
+	// halt_rpc_thread does a join, but the admission thread detached them.
 
-	// FIXME check minion list
+	free(admin_thread);
 }
 
-// this one thread will manage connections from all nodes in the system
+// this thread enables remote machines to join the assembly network by spawning
+// minion threads to interact 1:1 with each remote host
 static void *
 admission_thread(void *arg)
 {
@@ -344,6 +355,9 @@ admission_thread(void *arg)
 		state->exit_code = -ENETDOWN;
 		pthread_exit(NULL);
 	}
+
+	// TODO Print out or control which interfaces to listen on. I think
+	// conn_localbind listens on the given port across all interfaces.
 
 	// Listen for new connections. For each one, create a new thread.
 	while (1) {
@@ -372,7 +386,7 @@ admission_thread(void *arg)
 			state->exit_code = -EPROTO;
 			break;
 		}
-		err = pthread_detach(new_state->tid);
+		err = pthread_detach(new_state->tid); // we'll never pthread_join it
 		if (err < 0) {
 			state->exit_code = -EPROTO;
 			break;
@@ -515,6 +529,51 @@ int rpc_send_leave(struct rpc_connection *conn)
 		exit_errno = err;
 		goto fail;
 	}
+
+	err = __send_msg(conn, msg);
+	if (err < 0) {
+		exit_errno = err;
+		goto fail;
+	}
+	return (msg->status);
+fail:
+	return exit_errno;
+}
+
+int rpc_send_request(struct rpc_connection *conn,
+		const struct assembly_cap_hint *hint,
+		struct assembly *assm)
+{
+	int err, exit_errno;
+	struct rpc_msg *msg = (struct rpc_msg*) conn->buffer;
+
+	BUG(!msg);
+
+	memset(msg, 0, sizeof(*msg));
+	msg->action = ASSEMBLY_REQUEST;
+	msg->u.request.u.hint = *hint; // whole struct copy
+
+	err = __send_msg(conn, msg);
+	if (err < 0) {
+		exit_errno = err;
+		goto fail;
+	}
+	*assm = msg->u.request.u.assembly; // whole struct copy
+	return (msg->status);
+fail:
+	return exit_errno;
+}
+
+int rpc_send_teardown(struct rpc_connection *conn, asmid_t asmid)
+{
+	int err, exit_errno;
+	struct rpc_msg *msg = (struct rpc_msg*) conn->buffer;
+
+	BUG(!msg);
+
+	memset(msg, 0, sizeof(*msg));
+	msg->action = ASSEMBLY_TEARDOWN;
+	msg->u.teardown.asmid = asmid;
 
 	err = __send_msg(conn, msg);
 	if (err < 0) {
