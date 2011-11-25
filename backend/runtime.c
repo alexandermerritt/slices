@@ -13,6 +13,7 @@
 
 // System includes
 #include <assert.h>
+#include <errno.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -30,14 +31,93 @@
 // Directory-immediate includes
 #include "sinks.h"
 
+/*-------------------------------------- EXTERNAL VARIABLES ------------------*/
+
+// Current process' environment variables (POSIX). Modified with putenv.
+// man 7 environ
+extern char **environ;
+
 /*-------------------------------------- INTERNAL STATE ----------------------*/
 
 // XXX We assume a single-process single-threaded CUDA application for now. Thus
 // one assembly, one hint and one sink child.
 static struct assembly_hint hint;
-static struct sink_child sink_child;
+static struct sink sink;
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
+
+int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
+{
+	int err;
+
+	*sink_pid = fork();
+
+	// Fork error.
+	if (*sink_pid < 0) {
+		printd(DBG_ERROR, "fork failed: %s\n", strerror(errno));
+		return -1;
+	}
+
+	// Parent does nothing more.
+	if (*sink_pid > 0) {
+		return 0;
+	}
+
+	// For some reason, the damn POSIX variable is set to NULL in the child
+	// sometimes
+	BUG(!environ);
+
+	/*
+	 * We're the child process. Add our environment variables needed to
+	 * configure the sink, then exec the sink. It will read these and configure
+	 * itself. Environment variables we add here don't affect the parent, since
+	 * we already forked. Variables we set are preserved across exec*
+	 *
+	 * After this point, it is imperative that return is not used to quit.
+	 * _exit() should be used instead, since we don't want to return up the
+	 * forksink callstack.
+	 */
+
+	// Need separate strings for the environment variables we add, because
+	// putenv does NOT copy the strings, it merely sets pointers to these arrays
+	char env_uuid[ENV_MAX_LEN];
+	char env_pid[ENV_MAX_LEN];
+	memset(env_uuid, 0, ENV_MAX_LEN);
+	memset(env_pid, 0, ENV_MAX_LEN);
+
+	// Export the assembly to get the UUID
+	char uuid_str[64];
+	assembly_key_uuid key;
+	err = assembly_export(asmid, key);
+	if (err < 0) {
+		printd(DBG_ERROR, "Could not export assembly %lu\n", asmid);
+		_exit(-1);
+	}
+	uuid_unparse(key, uuid_str);
+	snprintf(env_uuid, ENV_MAX_LEN, "%s=%s", SINK_ASSM_EXPORT_KEY_ENV, uuid_str);
+	err = putenv(env_uuid);
+	if (err < 0) {
+		printd(DBG_ERROR, "Could not add assembly key env var\n");
+		_exit(-1);
+	}
+
+	// Set the application PID
+	snprintf(env_pid, ENV_MAX_LEN, "%s=%d", SINK_SHMGRP_PID, memb_pid);
+	err = putenv(env_pid);
+	if (err < 0) {
+		printd(DBG_ERROR, "Could not add member PID env var\n");
+		_exit(-1);
+	}
+
+	// Go!
+	err = execle("localsink", SINK_EXEC_NAME, NULL, environ);
+	if (err < 0) {
+		printd(DBG_ERROR, "Could not execle: %s\n", strerror(errno));
+		_exit(-1);
+	}
+
+	return -0xb00b; // satisfy the compiler gods
+}
 
 static void runtime_entry(group_event e, pid_t pid)
 {
@@ -49,9 +129,7 @@ static void runtime_entry(group_event e, pid_t pid)
 	switch (e) {
 		case MEMBERSHIP_JOIN:
 		{
-			// TODO in the future, detect multi-process MPI applications, and
-			// give them the same assembly. Perhaps provide this in the hint
-			// structure.
+			// TODO detect process groups (e.g. MPI)
 			pid_t childpid;
 			printf("Process %d is joining the runtime.\n", pid);
 			asmid = assembly_request(&hint);
@@ -60,39 +138,33 @@ static void runtime_entry(group_event e, pid_t pid)
 				break;
 			}
 			assembly_print(asmid);
-			err = fork_localsink(asmid, pid, &childpid);
-			// XXX ONLY the parent should return from here!
+			err = forksink(asmid, pid, &childpid);
 			if (err < 0) {
-				printd(DBG_ERROR, "Error forking localsink for assembly %lu\n",
-						asmid);
+				printd(DBG_ERROR, "Could not fork\n");
 				break;
 			}
-			sink_child.pid = childpid;
-			sink_child.type = SINK_EXEC_LOCAL;
-			sink_child.asmid = asmid;
+			sink.pid = childpid;
+			sink.type = SINK_EXEC_LOCAL;
+			sink.asmid = asmid;
 		}
 		break;
 		case MEMBERSHIP_LEAVE:
 		{
 			printf("Process %d is leaving the runtime.\n", pid);
 
-#ifndef LOCALSINK_USE_THREAD
-
 			// Tell it to stop, then wait for it to disappear.
 			int ret; // return val of child
-			err = kill(sink_child.pid, SINK_TERM_SIG);
+			err = kill(sink.pid, SINK_TERM_SIG);
 			if (err < 0) {
 				printd(DBG_ERROR, "Could not send signal %d to child %d\n",
-						SINK_TERM_SIG, sink_child.pid);
+						SINK_TERM_SIG, sink.pid);
 			}
-			err = waitpid(sink_child.pid, &ret, 0);
+			err = waitpid(sink.pid, &ret, 0);
 			if (err < 0) {
 				printd(DBG_ERROR, "Could not wait on child %d\n",
-						sink_child.pid);
+						sink.pid);
 			}
 			printd(DBG_DEBUG, "Child exited with code %d\n", ret);
-
-#endif				/* LOCALSINK_USE_THREAD */
 
 			// Now kill its assembly
 			// XXX XXX XXX
@@ -100,10 +172,10 @@ static void runtime_entry(group_event e, pid_t pid)
 			// its application group using the assembly! Not sure how to verify
 			// this.
 			// XXX XXX XXX
-			err = assembly_teardown(sink_child.asmid);
+			err = assembly_teardown(sink.asmid);
 			if (err < 0) {
 				printd(DBG_ERROR, "Could not destroy assembly %lu\n",
-						sink_child.asmid);
+						sink.asmid);
 			}
 		}
 		break;
@@ -138,7 +210,7 @@ static int start_runtime(enum node_type type, const char *main_ip)
 		return -1;
 	}
 	// FIXME Initialize a list of sinks instead of one child.
-	memset(&sink_child, 0, sizeof(sink_child));
+	memset(&sink, 0, sizeof(sink));
 	return 0;
 }
 

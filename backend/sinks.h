@@ -17,13 +17,26 @@
 //! Signal sinks should wait for from the parent runtime for termination.
 #define SINK_TERM_SIG	SIGTERM
 
+//! Environment variable used to pass the UUID to the local sinks.
+#define SINK_ASSM_EXPORT_KEY_ENV	"ASSM_KEY"
+
+//! Environment variable used to pass the PID a local sink attaches to.
+#define SINK_SHMGRP_PID				"SHMGRP_PID"
+
+//! Max length of a VAR=VAL environment setting. -1 for the NUL byte
+#define ENV_MAX_LEN		511
+
+//! argv[0] of the exec'd sink, so we know it was created by us and not executed
+//! on the command line (a crude method)
+#define SINK_EXEC_NAME	"814227d8-a367-40ce-be9f-b965c8376369"
+
 /*-------------------------------------- DATA TYPES --------------------------*/
 
 /**
  * Structure to hold state pertaining to each sink forked from the runtime
  * process.
  */
-struct sink_child
+struct sink
 {
 	struct list_head link;
 	pid_t pid;

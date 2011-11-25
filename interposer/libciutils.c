@@ -1041,7 +1041,7 @@ static __cudaFatDebugEntry * l_unpackDebug(char * pSrc, int * pOffset){
 	size_pkt_field_t n; 		// the number of entries
 	__cudaFatDebugEntry * pEntry;
 	unsigned int i;
-	int offset;
+	int offset = 0;
 	// to remember the start position to allow to say
 	// how many bytes we have read
 	char * pSrcOrig = pSrc;
@@ -1166,7 +1166,7 @@ static __cudaFatElfEntry * l_unpackElf(char * pSrc, int * pOffset){
 	size_pkt_field_t n; 		// the number of entries
 	__cudaFatElfEntry * pEntry;
 	unsigned int i;
-	int offset;
+	int offset = 0;
 	// to remember the start position to allow to say
 	// how many bytes we have read
 	char * pSrcOrig = pSrc;
@@ -1279,7 +1279,7 @@ static __cudaFatSymbol * l_unpackSymbol(char * pSrc, int * pOffset){
 	size_pkt_field_t n; 		// the number of entries
 	__cudaFatSymbol * pEntry;
 	unsigned int i;
-	int offset;
+	int offset = 0;
 	// to remember the start position to allow to say
 	// how many bytes we have read
 	char * pSrcOrig = pSrc;

@@ -21,4 +21,6 @@ extern void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global);
 
+// TODO register texture
+
 #endif

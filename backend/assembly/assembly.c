@@ -4,9 +4,6 @@
  * @author Alex Merritt, merritt.alex@gatech.edu
  * @brief
  *
- * FIXME Remove hardcoding of char arrays with size 255 everywhere.
- * FIXME Remove hardcoding of IP addresses everywhere, too
- *
  * MAIN
  * Calls into the API will directly invoke the respective internal functions to
  * carry out the work. Spawn thread that listens and accepts incoming assembly
@@ -25,7 +22,7 @@
 #include <ifaddrs.h>
 #include <stdint.h>
 #include <string.h>
-#include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -37,6 +34,7 @@
 // Project includes
 #include <assembly.h>
 #include <debug.h>
+#include <fatcubininfo.h>
 #include <method_id.h>
 #include <util/list.h>
 
@@ -63,11 +61,19 @@ struct minion_state
 {
 	//! State associated with an RPC connection to the MAIN node
 	struct rpc_connection rpc_conn;
+
+	// We do not maintain a participant list, as that list's sole purpose is for
+	// assisting in creating assemblies, which the main node is responsible for.
 };
 
 /**
  * Assembly module internal state. Describes node configuration and contains set
- * of assemblies created.
+ * of assemblies created. The assembly list within the main node will contain
+ * ALL assemblies through the network. Within minions it will only be populated
+ * with assemblies for which the minion directly has requested from the main
+ * node (via local applications starting up). Mappers are merely tools and don't
+ * do anything logistically (tool=one who lacks the mental capacity to know he
+ * is being used).
  */
 struct internals_state
 {
@@ -77,6 +83,7 @@ struct internals_state
 	union node_specific {
 		struct main_state main;
 		struct minion_state minion;
+		// no mapper state required
 	} n;
 };
 
@@ -122,7 +129,7 @@ self_participant(struct node_participant *p)
 	int idx = 0; // used for arrays in node_participant
 
 	// Get our hostname.
-	err = gethostname(p->hostname, 255);
+	err = gethostname(p->hostname, HOST_LEN);
 	if (err < 0) {
 		exit_errno = -ENETDOWN;
 		goto fail;
@@ -143,8 +150,8 @@ self_participant(struct node_participant *p)
 			inet_ntop(AF_INET, addr, addr_buffer, INET_ADDRSTRLEN);
 			if (strncmp(ifa->ifa_name, "lo", 3) == 0)
 				continue; // skip 127.0.0.1
-			snprintf(p->nic_name[idx], 255, "%s", ifa->ifa_name); // name of NIC
-			snprintf(p->ip[idx], 255, "%s", addr_buffer); // NIC IP
+			snprintf(p->nic_name[idx], HOST_LEN, "%s", ifa->ifa_name); // name of NIC
+			snprintf(p->ip[idx], HOST_LEN, "%s", addr_buffer); // NIC IP
 			idx++;
 			if (idx >= PARTICIPANT_MAX_NICS)
 				break;
@@ -325,17 +332,13 @@ compose_assembly(const struct assembly_hint *hint)
 			vgpu->fixation = VGPU_LOCAL;
 			vgpu->vgpu_id = vgpu_id;
 			vgpu->pgpu_id = vgpu_id;
-			memcpy(vgpu->vgpu_hostname, node->hostname, 255);
-			memcpy(vgpu->pgpu_hostname, node->hostname, 255);
-			memcpy(vgpu->vgpu_ip, node->ip, 255);
-			memcpy(vgpu->pgpu_ip, node->ip, 255);
+			memcpy(vgpu->hostname, node->hostname, HOST_LEN);
+			memcpy(vgpu->ip, node->ip, HOST_LEN);
 			memcpy(&vgpu->cudaDevProp, &node->dev_prop[vgpu_id],
 					sizeof(struct cudaDeviceProp));
 		}
 	}
-	if (vgpu_id <= assm->num_gpus) {
-		printf("Warning: Could not assign all vGPUs\n");
-	}
+	// FIXME check that all vgpus has been assigned
 
 	// FIXME Verify cuda/runtime versions on all nodes the assembly was mapped
 	// to are equal. For now, just use the values from the first node in the
@@ -344,6 +347,15 @@ compose_assembly(const struct assembly_hint *hint)
 			struct node_participant, link);
 	assm->runtimeVersion = node->runtimeVersion;
 	assm->driverVersion = node->driverVersion;
+
+	assm->cubins = malloc(sizeof(struct fatcubins));
+	if (!assm->cubins) {
+		fprintf(stderr, "Out of memory\n");
+		goto fail;
+	}
+	cubins_init(assm->cubins);
+
+	assm->mapped = false;
 
 	return assm;
 
@@ -547,6 +559,24 @@ fail:
 	return exit_errno;
 }
 
+static int
+node_mapper_shutdown(void)
+{
+	struct assembly *assm = NULL, *tmp = NULL;
+	// Remove the imported assemblies this mapper added (we actually only expect
+	// each mapper to import one assembly). A parent process will be responsible
+	// for calling assembly_request and assembly_teardown. Between these this
+	// parent will export assemblies that mappers import. So here we only free
+	// the state.
+	pthread_mutex_lock(&internals->lock);
+	list_for_each_entry_safe(assm, tmp, &internals->assembly_list, link) {
+		list_del(&assm->link);
+		free(assm);
+	}
+	pthread_mutex_unlock(&internals->lock);
+	return 0;
+}
+
 //! Same as get_participant, but without locking. Not accessible externally.
 static struct node_participant *
 __get_participant(const char *hostname)
@@ -558,6 +588,90 @@ __get_participant(const char *hostname)
 	if (iter && strncmp(hostname, iter->hostname, HOST_LEN) == 0)
 		return iter;
 	return NULL;
+}
+
+static int
+demultiplex_call(
+		struct assembly *assm,			// needed for fatcubins
+		struct vgpu_mapping *mapping,	// needed for ops (and network state)
+		struct cuda_packet *pkt)		// call info + associated data
+{
+	if (mapping->fixation == VGPU_REMOTE) {
+		printd(DBG_ERROR, "Remote GPUs not yet supported\n");
+		return -1;
+	}
+
+	// just test one call exists, and assume ops was set correctly
+	BUG(!mapping->ops.registerFatBinary);
+
+	// TODO Once we do support remote GPUs, will need to add additional argument
+	// to these calls containing cuda_rpc_state or something.
+
+	switch (pkt->method_id) {
+
+		// Functions which take only a cuda_packet*
+		case CUDA_CONFIGURE_CALL:
+			mapping->ops.configureCall(pkt);
+			break;
+		case CUDA_FREE:
+			mapping->ops.free(pkt);
+			break;
+		case CUDA_MALLOC:
+			mapping->ops.malloc(pkt);
+			break;
+		case CUDA_MEMCPY_D2D:
+			mapping->ops.memcpyD2D(pkt);
+			break;
+		case CUDA_MEMCPY_D2H:
+			mapping->ops.memcpyD2H(pkt);
+			break;
+		case CUDA_MEMCPY_H2D:
+			mapping->ops.memcpyH2D(pkt);
+			break;
+		case CUDA_SET_DEVICE:
+			mapping->ops.setDevice(pkt);
+			break;
+		case CUDA_SETUP_ARGUMENT:
+			mapping->ops.setupArgument(pkt);
+			break;
+		case CUDA_THREAD_EXIT:
+			mapping->ops.threadExit(pkt);
+			break;
+		case CUDA_THREAD_SYNCHRONIZE:
+			mapping->ops.threadSynchronize(pkt);
+			break;
+		case __CUDA_UNREGISTER_FAT_BINARY:
+			mapping->ops.unregisterFatBinary(pkt);
+			break;
+
+		// Functions which take a cuda_packet* and fatcubins*
+		case CUDA_LAUNCH:
+			mapping->ops.launch(pkt, assm->cubins);
+			break;
+		case CUDA_MEMCPY_FROM_SYMBOL_D2H:
+			mapping->ops.memcpyFromSymbolD2H(pkt, assm->cubins);
+			break;
+		case CUDA_MEMCPY_TO_SYMBOL_H2D:
+			mapping->ops.memcpyToSymbolH2D(pkt, assm->cubins);
+			break;
+		case __CUDA_REGISTER_FAT_BINARY:
+			mapping->ops.registerFatBinary(pkt, assm->cubins);
+			break;
+		case __CUDA_REGISTER_FUNCTION:
+			mapping->ops.registerFunction(pkt, assm->cubins);
+			break;
+		case __CUDA_REGISTER_VARIABLE:
+			mapping->ops.registerVar(pkt, assm->cubins);
+			break;
+
+		default:
+			printd(DBG_ERROR, "Method %d not supported in demultiplex\n",
+					pkt->method_id);
+			goto fail;
+	}
+	return 0;
+fail:
+	return -1;
 }
 
 /*-------------------------------------- EXTERNAL FUNCTIONS ------------------*/
@@ -653,13 +767,14 @@ int assembly_runtime_init(enum node_type type, const char *main_ip)
 	err = init_internals();
 	if (err < 0)
 		goto fail;
-	if (type == NODE_TYPE_MINION) {
+	if (type == NODE_TYPE_MINION)
 		err = node_minion_init(main_ip);
-	} else if (type == NODE_TYPE_MAIN) {
+	else if (type == NODE_TYPE_MAIN)
 		err = node_main_init();
-	} else {
+	else if (type == NODE_TYPE_MAPPER)
+		; // no initialization function right now
+	else
 		goto fail;
-	}
 	if (err < 0)
 		goto fail;
 	return 0;
@@ -669,7 +784,7 @@ fail:
 
 int assembly_runtime_shutdown(void)
 {
-	int err;
+	int err = 0;
 	if (!internals) {
 		printd(DBG_WARNING, "assembly runtime not initialized\n");
 		return 0;
@@ -678,6 +793,8 @@ int assembly_runtime_shutdown(void)
 		err = node_main_shutdown();
 	else if (internals->type == NODE_TYPE_MINION)
 		err = node_minion_shutdown();
+	else if (internals->type == NODE_TYPE_MAPPER)
+		err = node_mapper_shutdown();
 	if (err < 0)
 		goto fail;
 	if (internals)
@@ -723,9 +840,6 @@ fail:
 	return -1;
 }
 
-// forward declaration
-extern int nv_exec_pkt(volatile struct cuda_packet *pkt);
-
 /**
  * Execute an RPC (CUDA for now) in the runtime. Use of the vgpu identifier is
  * only needed for remote vgpu mappings, to determine which network connection
@@ -747,7 +861,7 @@ extern int nv_exec_pkt(volatile struct cuda_packet *pkt);
  * TODO Will need to duplicate all register calls to each remote node within the
  * assembly.
  */
-int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
+int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 {
 	int err;
 	struct assembly *assm = NULL;
@@ -779,100 +893,94 @@ int assembly_rpc(asmid_t id, int vgpu_id, volatile struct cuda_packet *pkt)
 	switch (pkt->method_id) {
 
 		case CUDA_GET_DEVICE:
-			{
-				int *dev = (int*)((uintptr_t)pkt + pkt->args[0].argull);
-				struct vgpu_mapping *vgpu;
-				// A thread may or may not have previously called cudaSetDevice.
-				// If it has not, assign it to vgpu 0 and return that (this
-				// models the behavior of the CUDA runtime). If it has, then
-				// simply return what that association is.
-				vgpu = get_thread_association(assm, pkt->thr_id, NULL);
-				if (!vgpu)
-					vgpu = set_thread_association(assm, pkt->thr_id, 0);
-				*dev = vgpu->vgpu_id;
-				printd(DBG_DEBUG, "getDev=%d\n", *dev);
-			}
-			break;
+		{
+			int *dev = (int*)((uintptr_t)pkt + pkt->args[0].argull);
+			struct vgpu_mapping *vgpu;
+			// A thread may or may not have previously called cudaSetDevice.
+			// If it has not, assign it to vgpu 0 and return that (this
+			// models the behavior of the CUDA runtime). If it has, then
+			// simply return what that association is.
+			vgpu = get_thread_association(assm, pkt->thr_id, NULL);
+			if (!vgpu)
+				vgpu = set_thread_association(assm, pkt->thr_id, 0);
+			*dev = vgpu->vgpu_id;
+			printd(DBG_DEBUG, "getDev=%d\n", *dev);
+		}
+		break;
 
 		case CUDA_GET_DEVICE_COUNT:
-			{
-				int *devs = (int*)((uintptr_t)pkt + pkt->args[0].argull);
-				*devs = assm->num_gpus;
-				printd(DBG_DEBUG, "num devices=%d\n", *devs);
-			}
-			break;
+		{
+			int *devs = (int*)((uintptr_t)pkt + pkt->args[0].argull);
+			*devs = assm->num_gpus;
+			printd(DBG_DEBUG, "num devices=%d\n", *devs);
+		}
+		break;
 
 		case CUDA_GET_DEVICE_PROPERTIES:
-			{
-				struct cudaDeviceProp *prop;
-				int dev;
-				prop = (struct cudaDeviceProp*)
-							((uintptr_t)pkt + pkt->args[0].argull);
-				dev = pkt->args[1].argll;
-				if (dev < 0 || dev >= assm->num_gpus) {
-					printd(DBG_WARNING, "invalid dev id %d\n", dev);
-					pkt->ret_ex_val.err = cudaErrorInvalidDevice;
-					break;
-				}
-				memcpy(prop, &assm->mappings[dev].cudaDevProp,
-						sizeof(struct cudaDeviceProp));
-				printd(DBG_DEBUG, "name=%s\n", prop->name);
+		{
+			struct cudaDeviceProp *prop;
+			int dev;
+			prop = (struct cudaDeviceProp*)
+				((uintptr_t)pkt + pkt->args[0].argull);
+			dev = pkt->args[1].argll;
+			if (dev < 0 || dev >= assm->num_gpus) {
+				printd(DBG_WARNING, "invalid dev id %d\n", dev);
+				pkt->ret_ex_val.err = cudaErrorInvalidDevice;
+				break;
 			}
-			break;
+			memcpy(prop, &assm->mappings[dev].cudaDevProp,
+					sizeof(struct cudaDeviceProp));
+			printd(DBG_DEBUG, "name=%s\n", prop->name);
+		}
+		break;
 
 		case CUDA_DRIVER_GET_VERSION:
-			{
-				int *ver = (int*)((uintptr_t)pkt + pkt->args[0].argull);
-				*ver = assm->driverVersion;
-				printd(DBG_DEBUG, "driver ver=%d\n", *ver);
-			}
-			break;
+		{
+			int *ver = (int*)((uintptr_t)pkt + pkt->args[0].argull);
+			*ver = assm->driverVersion;
+			printd(DBG_DEBUG, "driver ver=%d\n", *ver);
+		}
+		break;
 
 		case CUDA_RUNTIME_GET_VERSION:
-			{
-				int *ver = (int*)((uintptr_t)pkt + pkt->args[0].argull);
-				*ver = assm->runtimeVersion;
-				printd(DBG_DEBUG, "runtime ver=%d\n", *ver);
-			}
-			break;
+		{
+			int *ver = (int*)((uintptr_t)pkt + pkt->args[0].argull);
+			*ver = assm->runtimeVersion;
+			printd(DBG_DEBUG, "runtime ver=%d\n", *ver);
+		}
+		break;
 
 		case CUDA_SET_DEVICE:
-			{
-				int devid = pkt->args[0].argll;
-				struct vgpu_mapping *vgpu;
-				if (devid >= assm->num_gpus) { // failure at application
-					pkt->ret_ex_val.err = cudaErrorInvalidDevice;
-					break; // exit switch: don't pass to NVIDIA runtime
-				} else {
-					// Create association, then modify vgpu_id in pkt argument
-					// to be the physical device ID that the vgpu ID represents
-					vgpu = set_thread_association(assm, pkt->thr_id, devid);
-					pkt->args[0].argll = vgpu->pgpu_id;
-				}
-				printd(DBG_DEBUG, "thread=%lu vgpu=%d pgpu=%d\n",
-						pkt->thr_id, vgpu->vgpu_id, vgpu->pgpu_id);
+		{
+			int devid = pkt->args[0].argll;
+			struct vgpu_mapping *vgpu;
+			if (devid >= assm->num_gpus) { // failure at application
+				pkt->ret_ex_val.err = cudaErrorInvalidDevice;
+				break; // exit switch: don't pass to NVIDIA runtime
+			} else {
+				// Create association, then modify vgpu_id in pkt argument
+				// to be the physical device ID that the vgpu ID represents
+				vgpu = set_thread_association(assm, pkt->thr_id, devid);
+				pkt->args[0].argll = vgpu->pgpu_id;
 			}
+			printd(DBG_DEBUG, "thread=%lu vgpu=%d pgpu=%d\n",
+					pkt->thr_id, vgpu->vgpu_id, vgpu->pgpu_id);
 			// Let setDevice fall through to NVIDIA runtime, as driver also
 			// needs to maintain a mapping for real thread contexts.
+			vgpu->ops.setDevice(pkt);
+		}
+		break;
 
 		default: // Send to NVIDIA runtime.
-			{
-				struct vgpu_mapping *vgpu = &assm->mappings[vgpu_id];
-				if (vgpu->fixation == VGPU_REMOTE) {
-					// TODO Implement this path when the networking code becomes
-					// available.
-					printd(DBG_ERROR, "Remote vgpus not yet supported\n");
-					goto fail;
-				} else {
-					err = nv_exec_pkt(pkt);
-					if (err < 0) {
-						printd(DBG_ERROR,
-								"Failed executing packet at NV runtime\n");
-						goto fail;
-					}
-				} // vgpu fixation
-			} // switch default
-			break;
+		{
+			struct vgpu_mapping *vgpu = &assm->mappings[vgpu_id];
+			err = demultiplex_call(assm, vgpu, pkt);
+			if (err < 0) {
+				printd(DBG_ERROR, "demultiplex_call failed\n");
+				goto fail;
+			}
+		}
+		break;
 	} // switch method_id
 	return 0;
 fail:
@@ -920,16 +1028,16 @@ int assembly_teardown(asmid_t id)
 {
 	int err, exit_errno;
 	struct assembly *assm = NULL;
-	BUG(!internals);
-	pthread_mutex_lock(&internals->lock);
 
+	BUG(!internals);
+
+	pthread_mutex_lock(&internals->lock);
 	assm = __find_assembly(id);
 	if (!assm) {
 		pthread_mutex_unlock(&internals->lock);
 		exit_errno = -EINVAL;
 		goto fail;
 	}
-
 	if (internals->type == NODE_TYPE_MINION) {
 		// let the main node before we remove our state
 		err = rpc_send_teardown(&internals->n.minion.rpc_conn, id);
@@ -939,7 +1047,6 @@ int assembly_teardown(asmid_t id)
 			goto fail;
 		}
 	}
-
 	list_del(&assm->link);
 	free(assm);
 	pthread_mutex_unlock(&internals->lock);
@@ -952,7 +1059,9 @@ void assembly_print(asmid_t id)
 {
 	struct assembly *assm = NULL;
 	int dev;
+
 	BUG(!internals);
+
 	pthread_mutex_lock(&internals->lock);
 	assm = __find_assembly(id);
 	if (!assm) {
@@ -968,8 +1077,137 @@ void assembly_print(asmid_t id)
 	printf("         %02d maps to %d@%s\n",
 				assm->mappings[dev].vgpu_id,
 				assm->mappings[dev].pgpu_id,
-				assm->mappings[dev].pgpu_hostname);
+				assm->mappings[dev].hostname);
 	}
 	printf("  Drv API      %d\n", assm->driverVersion);
 	printf("  Runtime API  %d\n", assm->runtimeVersion);
+}
+
+// establish remote data paths, including vgpu ops
+int assembly_map(asmid_t id)
+{
+	int exit_errno;
+	struct assembly *assm = NULL;
+	struct vgpu_mapping *vgpu = NULL;
+	int vgpu_id;
+
+	assm = assembly_find(id);
+	if (!assm) {
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+
+	for (vgpu_id = 0; vgpu_id < assm->num_gpus; vgpu_id++) {
+		vgpu = &assm->mappings[vgpu_id];
+		if (vgpu->fixation == VGPU_REMOTE) {
+			// FIXME
+			printd(DBG_ERROR, "Cannot map remote vgpus yet\n");
+			exit_errno = -1;
+			goto fail;
+			// once we do support it, set the ops, connect to the remote node
+			// and initialize the rpc state needed
+		} else if (vgpu->fixation == VGPU_LOCAL) {
+			vgpu->ops = exec_ops;
+		} else {
+			BUG(1); // unknown fixation
+		}
+	}
+	assm->mapped = true;
+	return 0;
+fail:
+	return exit_errno;
+}
+
+/*******************************************************************************
+ * These functions (export/import) only exist because I (stupidly or not)
+ * decided to make a stateful library out of this assembly code, and _also_
+ * decided to make the backend runtime multi-process... so these functions are
+ * needed to transfer state across address spaces.
+ *
+ * The idea of exporting and importing was a suggestion by Hrishikesh Amur.
+ */
+
+// the uuid can be converted to a string using uuid_unparse(3)
+extern int export_assembly(const uuid_t, const struct assembly *assm);
+int assembly_export(asmid_t id, assembly_key_uuid key_uuid)
+{
+	int err, exit_errno;
+	struct assembly *assm = NULL;
+	uuid_t uuid;
+
+	BUG(!internals);
+
+	pthread_mutex_lock(&internals->lock);
+	assm = __find_assembly(id);
+	if (!assm) {
+		pthread_mutex_unlock(&internals->lock);
+		exit_errno = -EINVAL;
+		goto fail;
+	}
+	pthread_mutex_unlock(&internals->lock);
+
+	if (assm->mapped) {
+		exit_errno = -1;
+		goto fail;
+	}
+
+	// TODO should I keep the lock while exporting?
+	uuid_generate(uuid);
+	err = export_assembly(uuid, assm);
+	if (err < 0) {
+		exit_errno = -EIO;
+		goto fail;
+	}
+	memcpy(key_uuid, uuid, sizeof(uuid_t));
+	return 0;
+
+fail:
+	return exit_errno;
+}
+
+// the uuid can be converted from a string using uuid_parse(3)
+extern int import_assembly(const uuid_t, struct assembly *assm);
+int assembly_import(asmid_t *id, const assembly_key_uuid uuid)
+{
+	int err, exit_errno;
+	struct assembly *assm = NULL;
+
+	BUG(!internals);
+
+	assm = calloc(1, sizeof(*assm));
+	if (!assm) {
+		exit_errno = -ENOMEM;
+		goto fail;
+	}
+	err = import_assembly(uuid, assm);
+	if (err < 0) {
+		if (err == -ENOENT)
+			exit_errno = -EINVAL;
+		else
+			exit_errno = -EIO;
+		goto fail;
+	}
+
+	// Unfortunately there are few more things that need to be "cleaned up"
+	// before the state is consistent with what compose_assembly would return.
+	// That includes anything that relies on pointers and heap-allocated data.
+	INIT_LIST_HEAD(&assm->link);
+	assm->cubins = malloc(sizeof(struct fatcubins));
+	if (!assm->cubins) {
+		goto fail;
+	}
+	cubins_init(assm->cubins);
+
+	BUG(assm->num_gpus < 1);
+
+	pthread_mutex_lock(&internals->lock);
+	list_add(&assm->link, &internals->assembly_list);
+	pthread_mutex_unlock(&internals->lock);
+
+	*id = assm->id;
+	return 0;
+fail:
+	if (assm)
+		free(assm);
+	return exit_errno;
 }

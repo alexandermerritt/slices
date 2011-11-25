@@ -14,12 +14,14 @@
 #ifndef _FAT_CUBIN_INFO_H
 #define _FAT_CUBIN_INFO_H
 
+// System includes
 #include <stdlib.h>
 
+// CUDA includes
 #include <__cudaFatFormat.h>
 
+// Project includes
 #include <debug.h>
-#include <util/compiler.h>
 #include <util/list.h>
 
 /*-------------------------------------- DATA STRUCTURES ---------------------*/
@@ -135,7 +137,7 @@ static inline struct cuda_fatcubin_info *
 find_fatcubin_info(struct fatcubins *cubins, void **handle)
 {
 	struct cuda_fatcubin_info *cuda_cubin;
-	if (unlikely(!cubins)) {
+	if (!cubins) {
 		printd(DBG_ERROR, "NULL cubins\n");
 		return NULL;
 	}
@@ -151,7 +153,7 @@ find_fatcubin_info(struct fatcubins *cubins, void **handle)
 static inline void
 cubins_init(struct fatcubins *cubins)
 {
-	if (unlikely(!cubins)) {
+	if (!cubins) {
 		printd(DBG_ERROR, "NULL cubins\n");
 		return;
 	}
@@ -168,7 +170,7 @@ cubins_add_cubin(struct fatcubins *cubins,
 		__cudaFatCudaBinary *cuda_cubin, void **handle)
 {
 	struct cuda_fatcubin_info *cubin_info = calloc(1, sizeof(*cubin_info));
-	if (unlikely(!cubin_info)) {
+	if (!cubin_info) {
 		printd(DBG_ERROR, "NULL arg\n");
 		return -1;
 	}
@@ -186,12 +188,12 @@ static inline void
 cubins_rm_cubin(struct fatcubins *cubins, void **handle)
 {
 	struct cuda_fatcubin_info *cuda_cubin;
-	if (unlikely(!cubins)) {
+	if (!cubins) {
 		printd(DBG_ERROR, "NULL arg\n");
 		return;
 	}
 	cuda_cubin = find_fatcubin_info(cubins, handle);
-	if (unlikely(!cuda_cubin)) {
+	if (!cuda_cubin) {
 		printd(DBG_ERROR, "NULL cuda_cubin\n");
 		return;
 	}
@@ -209,12 +211,12 @@ cubins_add_function(struct fatcubins *cubins,
 		void **handle, struct list_head *link)
 {
 	struct cuda_fatcubin_info *cuda_cubin;
-	if (unlikely(!cubins || !link)) {
+	if (!cubins || !link) {
 		printd(DBG_ERROR, "NULL arg\n");
 		return;
 	}
 	cuda_cubin = find_fatcubin_info(cubins, handle);
-	if (unlikely(!cuda_cubin)) {
+	if (!cuda_cubin) {
 		printd(DBG_ERROR, "NULL cuda_cubin\n");
 		return;
 	}
@@ -231,12 +233,12 @@ cubins_add_variable(struct fatcubins *cubins,
 		void **handle, struct list_head *link)
 {
 	struct cuda_fatcubin_info *cuda_cubin;
-	if (unlikely(!cubins || !link)) {
+	if (!cubins || !link) {
 		printd(DBG_ERROR, "NULL arg\n");
 		return;
 	}
 	cuda_cubin = find_fatcubin_info(cubins, handle);
-	if (unlikely(!cuda_cubin)) {
+	if (!cuda_cubin) {
 		printd(DBG_ERROR, "NULL cuda_cubin\n");
 		return;
 	}
@@ -253,12 +255,12 @@ cubins_add_texture(struct fatcubins *cubins,
 		void **handle, struct list_head *link)
 {
 	struct cuda_fatcubin_info *cuda_cubin;
-	if (unlikely(!cubins || !link)) {
+	if (!cubins || !link) {
 		printd(DBG_ERROR, "NULL arg\n");
 		return;
 	}
 	cuda_cubin = find_fatcubin_info(cubins, handle);
-	if (unlikely(!cuda_cubin)) {
+	if (!cuda_cubin) {
 		printd(DBG_ERROR, "NULL cuda_cubin\n");
 		return;
 	}

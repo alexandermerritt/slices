@@ -28,8 +28,7 @@ Assembly Runtime
 	[C] design assembly interface
 	[L] implement framework
 		[C] starting runtime does self-discovery
-		[L] node adds self to participants
-			(not yet distributed)
+		[C] node adds self to participants
 		[L] start assembly composition
 	- shared memory library
 		[C] "libregistration" - now obsolete
@@ -44,11 +43,12 @@ Assembly Runtime
 	- network API (Magda)
 		[L] IB
 			some bugs at the moment
-		[C] sockets
-		[C] single library
+		[L] sockets
+			accept() callable only once
+		[ ] single library
 
 	- distributed assembly (Alex)
-		[ ] assembly RPC thread
+		[C] assembly RPC thread
 		[ ] [support executing apps on nodes w/o GPUs]
 		[ ] implement separation of local/remote assembly interfaces
 		[ ] add use of monitoring API to assembly composition
@@ -67,12 +67,15 @@ Assembly Runtime
 
 Monitoring
 ==========
-	[ ] Design data structure(s) for exporting Lynx data (Naila)
-	[ ] glue Lynx and local monitor with shmgrp (Naila + Alex)
+	[C] Design data structure(s) for exporting Lynx data (Naila)
+	[ ] glue Lynx and local monitor with MQs (Naila)
 	[ ] push Lynx data from local->global monitor (Alex + Magda)
 	[ ] design API to access all of monitoring data (Naila + Alex)
 	[ ] build library code to expose this API (Alex + Naila)
 	[ ] glue global monitor and library with shmgrp (Alex + Naila)
+	[ ] Assembly can add a Lynx instrumentor pattern to implement during the
+		import/export protocol. State will need to be added somewhere, and
+		configured before the export happens.
 
 Build Environment
 =================
@@ -88,3 +91,4 @@ Other details
 		assumption
 			libci.c : cudaMemcpy[To|From]Symbol
 			localsink.c : nv_exec_pkt
+	[ ] move cuda_app/ to test/

@@ -8,17 +8,19 @@
 #define _TYPES_H
 
 // System includes
+#include <stdbool.h>
 
 // CUDA includes
 #include <cuda_runtime_api.h>
 
 // Project includes
+#include <cuda/ops.h>
 #include <util/list.h>
 
 /*-------------------------------------- TYPES -------------------------------*/
 
 //! Length of IP addresses, hostnames, etc
-#define HOST_LEN	255
+#define HOST_LEN	64
 
 //! Maximum number of threads that can setDevice to a vgpu
 #define MAX_SET_TIDS 	4
@@ -34,21 +36,20 @@ enum vgpu_fixation
  */
 struct vgpu_mapping
 {
-	enum vgpu_fixation fixation;
-
-	int vgpu_id; //! vgpu ID given to the application
-	char vgpu_hostname[HOST_LEN]; // FIXME this will be different for all MPI ranks
-	char vgpu_ip[HOST_LEN]; // FIXME this will be different for all MPI ranks
-
-	int pgpu_id; //! physical gpu ID assigned by the local driver
-	char pgpu_hostname[HOST_LEN];
-	char pgpu_ip[HOST_LEN];
-	struct cudaDeviceProp cudaDevProp;
+	enum vgpu_fixation fixation; //! Type, used by assembly_rpc
+	int vgpu_id; //! Virtual ID given to the application
+	int pgpu_id; //! Physical gpu ID assigned by the local driver on hostname
+	char hostname[HOST_LEN]; //! Location of physical GPU
+	char ip[HOST_LEN]; //! Location of physical GPU
+	struct cudaDeviceProp cudaDevProp; //! Properties of physical GPU
 
 	//! threads which have called setDevice on this vgpu, probably won't see
 	//! more than one thread set to the same GPU ever, could remove as array
 	pthread_t set_tids[MAX_SET_TIDS];
 	int num_set_tids;
+
+	//! Function jump table. Execute locally or via RPC.
+	struct cuda_ops ops;
 };
 
 /**
@@ -75,6 +76,9 @@ struct assembly
 	// TODO array of static gpu properties
 	// TODO link to dynamic load data?
 	// TODO location of node containing application
+	struct fatcubins *cubins;
+	//! Whether this assembly was mapped.
+	bool mapped;
 };
 
 #define PARTICIPANT_MAX_GPUS	4
