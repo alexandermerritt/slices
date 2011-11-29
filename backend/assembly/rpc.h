@@ -12,7 +12,7 @@
 #include <stdbool.h>
 
 // Project includes
-#include <sock.h>
+#include <io/sock.h>
 
 // Directory-immediate includes
 #include "types.h"

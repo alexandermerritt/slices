@@ -50,14 +50,13 @@ struct vgpu_mapping
 
 	//! Function jump table. Execute locally or via RPC.
 	struct cuda_ops ops;
+
+	//! Connection state for remote data/control paths
+	struct sockconn *rpc_conn;
 };
 
-/**
- * Maximum number of vgpus in an assembly. We have this as the assembly
- * structure is passed from the MAIN node to MINION nodes. It must be a flat
- * structure to avoid marshalling it.
- */
-#define MAX_VGPUS	24
+//! Maximum number of vgpu mappings in an assembly.
+#define MAX_VGPUS	16
 
 /**
  * State that represents an assembly once created.

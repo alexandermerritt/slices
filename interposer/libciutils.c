@@ -686,7 +686,8 @@ int printRegVarTab(GHashTable * tab){
  */
 static int l_packStr(char * pDst, const char *pSrc){
 	int offset;
-	int length;
+	size_pkt_field_t length;
+	size_pkt_field_t *p = (size_pkt_field_t *)pDst;
 
 	if( pDst == NULL )
 		return ERROR;
@@ -699,7 +700,7 @@ static int l_packStr(char * pDst, const char *pSrc){
 	}
 
 	// write the size
-	memcpy(pDst,&length, sizeof(size_pkt_field_t) );
+	p[0] = length;
 	pDst += sizeof(size_pkt_field_t);
 	offset = sizeof(size_pkt_field_t);
 
@@ -728,12 +729,12 @@ static int l_packStr(char * pDst, const char *pSrc){
 static char * l_unpackStr(const char *pSrc, int * pOffset){
 	size_pkt_field_t length;
 	char * pDst;
+	size_pkt_field_t * p = (size_pkt_field_t *) pSrc;
 
 	if( pSrc == NULL )
 		return NULL;
 
 	// read the length
-	size_pkt_field_t * p = (size_pkt_field_t *) pSrc;
 	length = p[0];
 	pSrc += sizeof(size_pkt_field_t);
 	*pOffset = sizeof(size_pkt_field_t);
@@ -1520,8 +1521,8 @@ static int l_packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC
 
 /**
  * Unpacks the binary
- * @param pFatC the destination
- * @param pFatPack our source
+ * @param pFatC	Pointer to the unmarshaled fat cubin
+ * @param pFatPack	Pointer to the marshaled fat cubin
  *
  * @return OK everything went smoothly
  *         ERROR there were some errors

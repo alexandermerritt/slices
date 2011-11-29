@@ -28,7 +28,7 @@
 
 //! argv[0] of the exec'd sink, so we know it was created by us and not executed
 //! on the command line (a crude method)
-#define SINK_EXEC_NAME	"814227d8-a367-40ce-be9f-b965c8376369"
+#define SINK_EXEC_NAME	"localsink-814227d8-a367-40ce-be9f-b965c8376369"
 
 /*-------------------------------------- DATA TYPES --------------------------*/
 

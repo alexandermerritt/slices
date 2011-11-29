@@ -81,8 +81,8 @@ int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
 	// Need separate strings for the environment variables we add, because
 	// putenv does NOT copy the strings, it merely sets pointers to these arrays
 	char env_uuid[ENV_MAX_LEN];
-	char env_pid[ENV_MAX_LEN];
 	memset(env_uuid, 0, ENV_MAX_LEN);
+	char env_pid[ENV_MAX_LEN];
 	memset(env_pid, 0, ENV_MAX_LEN);
 
 	// Export the assembly to get the UUID
@@ -110,7 +110,7 @@ int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
 	}
 
 	// Go!
-	err = execle("localsink", SINK_EXEC_NAME, NULL, environ);
+	err = execle("./localsink", SINK_EXEC_NAME, NULL, environ);
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not execle: %s\n", strerror(errno));
 		_exit(-1);

@@ -9,6 +9,8 @@
 #ifndef _CUDA_HIDDEN_H
 #define _CUDA_HIDDEN_H
 
+#include <cuda_runtime_api.h>
+
 extern void** __cudaRegisterFatBinary(void*);
 
 extern void __cudaUnregisterFatBinary(void**);

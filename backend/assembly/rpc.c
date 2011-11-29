@@ -98,6 +98,8 @@ extern int add_participant(struct node_participant *p);
 extern int rm_participant(const char *hostname,
 		struct node_participant **removed);
 extern bool participant_exists(const char *hostname);
+extern struct assembly * request_assembly(
+		const struct assembly_hint*, const char*);
 
 /*-------------------------------------- INTERNAL STATE ----------------------*/
 
@@ -121,6 +123,72 @@ static inline void
 __rm_minion(struct rpc_thread *state)
 {
 	list_del(&state->link);
+}
+
+/**
+ * Process an RPC message. The hostname string must be verified to not be NULL
+ * if it is required for a certain message.
+ */
+static void
+do_msg(struct rpc_msg *msg, const char *hostname)
+{
+	int err;
+	// JOIN: message return status is -ENOMEM, zero or whatever add_participant
+	// returns
+	if (msg->action == ASSEMBLY_JOIN) {
+		struct node_participant *new_node = malloc(sizeof(*new_node));
+		if (!new_node) {
+			fprintf(stderr, "Out of memory\n");
+			printd(DBG_ERROR, "Out of memory\n");
+			msg->status = -ENOMEM;
+			return;
+		}
+		*new_node = msg->u.join.participant; // full structure copy
+		INIT_LIST_HEAD(&new_node->link);
+		err = add_participant(new_node);
+		if (err < 0) { // participant could not be added, free it up
+			printd(DBG_ERROR, "Host %s requesting join more than once\n",
+					new_node->hostname);
+			free(new_node);
+		} else {
+			printf("Host %s joined the assembly network\n",
+					new_node->hostname);
+		}
+		msg->status = err;
+	}
+	
+	else if (msg->action == ASSEMBLY_REQUEST) {
+		struct assembly_hint *hint = &msg->u.request.u.hint;
+		struct assembly *assm = request_assembly(hint, hostname);
+		if (!assm) {
+			msg->status = -1;
+		} else {
+			msg->status = 0;
+			msg->u.request.u.assembly = *assm; // whole struct copy
+		}
+	}
+	
+	else if (msg->action == ASSEMBLY_TEARDOWN) {
+		msg->status = assembly_teardown(msg->u.teardown.asmid);
+	}
+
+	else if (msg->action == ASSEMBLY_LEAVE) {
+		struct node_participant *node = NULL;
+		msg->status = rm_participant(msg->u.leave.hostname, &node);
+		if (msg->status == 0) { // participant was removed, free memory
+			free(node);
+		} else {
+			// Bug or protocol error... TODO Get rid of this printd
+			printd(DBG_ERROR, "Could not remove participant %s\n",
+					msg->u.leave.hostname);
+		}
+	}
+
+	else {
+		// No idea what message this is. An idiot or hacker caused this, or rays
+		// from the sun. If an idiot, it's most likely me (or you).
+		msg->status = -EPROTO;
+	}
 }
 
 /*-------------------------------------- THREADING FUNCTIONS -----------------*/
@@ -179,70 +247,6 @@ minion_cleanup(void *arg)
 #undef EXIT_STRING
 }
 
-static void
-do_msg(struct rpc_msg *msg)
-{
-	int err;
-	// JOIN: message return status is -ENOMEM, zero or whatever add_participant
-	// returns
-	if (msg->action == ASSEMBLY_JOIN) {
-		struct node_participant *new_node = malloc(sizeof(*new_node));
-		if (!new_node) {
-			fprintf(stderr, "Out of memory\n");
-			printd(DBG_ERROR, "Out of memory\n");
-			msg->status = -ENOMEM;
-			return;
-		}
-		*new_node = msg->u.join.participant; // full structure copy
-		INIT_LIST_HEAD(&new_node->link);
-		err = add_participant(new_node);
-		if (err < 0) { // participant could not be added, free it up
-			printd(DBG_ERROR, "Host %s requesting join more than once\n",
-					new_node->hostname);
-			free(new_node);
-		} else {
-			printf("Host %s joined the assembly network\n",
-					new_node->hostname);
-		}
-		msg->status = err;
-	}
-	
-	else if (msg->action == ASSEMBLY_REQUEST) {
-		struct assembly_hint *hint = &msg->u.request.u.hint;
-		struct assembly *assm = NULL;
-		asmid_t asmid = assembly_request(hint);
-		if (!(VALID_ASSEMBLY_ID(asmid))) {
-			msg->status = -1;
-		} else {
-			msg->status = 0;
-			assm = assembly_find(asmid);
-			msg->u.request.u.assembly = *assm;
-		}
-	}
-	
-	else if (msg->action == ASSEMBLY_TEARDOWN) {
-		msg->status = assembly_teardown(msg->u.teardown.asmid);
-	}
-
-	else if (msg->action == ASSEMBLY_LEAVE) {
-		struct node_participant *node = NULL;
-		msg->status = rm_participant(msg->u.leave.hostname, &node);
-		if (msg->status == 0) { // participant was removed, free memory
-			free(node);
-		} else {
-			// Bug or protocol error... TODO Get rid of this printd
-			printd(DBG_ERROR, "Could not remove participant %s\n",
-					msg->u.leave.hostname);
-		}
-	}
-
-	else {
-		// No idea what message this is. An idiot or hacker caused this, or rays
-		// from the sun. If an idiot, it's most likely me (or you).
-		msg->status = -EPROTO;
-	}
-}
-
 // Thread assigned to each participant node in the network to process its
 // assembly RPC requests.
 static void *
@@ -276,7 +280,7 @@ minion_thread(void *arg)
 		msg = (struct rpc_msg*) state->rpc_conn.buffer;
 		if (msg->action == ASSEMBLY_JOIN) // TODO I don't like putting this here
 			strncpy(state->hostname, msg->u.join.participant.hostname, HOST_LEN);
-		do_msg(msg);
+		do_msg(msg, state->hostname);
 		err = conn_put(&state->rpc_conn.sockconn,
 				state->rpc_conn.buffer, RPC_BUFFER_SIZE);
 		if (err < 0) { // always an error
@@ -396,7 +400,7 @@ admission_thread(void *arg)
 		pthread_mutex_unlock(&minion_lock);
 	}
 	pthread_cleanup_pop(1); // invoke cleanup routine
-	pthread_exit(NULL); // not reachable
+	pthread_exit(NULL);
 }
 
 static inline void
@@ -423,7 +427,8 @@ halt_rpc_thread(struct rpc_thread *state)
 	} while (0)
 
 
-//! Sends a message and receives a single reply.
+//! Sends a message and receives a single reply. Used by minions to communicate
+//! with the main node.
 static int
 __send_msg(struct rpc_connection *conn, struct rpc_msg *msg)
 {

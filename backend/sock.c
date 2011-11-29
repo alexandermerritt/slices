@@ -13,7 +13,7 @@
 
 // Project includes
 #include <debug.h>
-#include <sock.h>
+#include <io/sock.h>
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 

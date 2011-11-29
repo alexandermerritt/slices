@@ -53,6 +53,6 @@ struct cuda_ops
 };
 
 extern const struct cuda_ops exec_ops;
-//extern const struct cuda_ops rpc_ops;
+extern const struct cuda_ops rpc_ops;
 
 #endif	/* _CUDA_OPS_H */

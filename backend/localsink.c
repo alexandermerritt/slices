@@ -179,14 +179,14 @@ setup(void)
 		return -1;
 	}
 
-	// Install a handler for SIGINT so it doesn't kill us
+	// Install a handler for our term sig so it doesn't kill us
 	struct sigaction action;
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = sigterm_handler;
 	sigemptyset(&action.sa_mask);
 	err = sigaction(SINK_TERM_SIG, &action, NULL);
 	if (err < 0) {
-		printd(DBG_ERROR, "Could not install SIGINT handler.\n");
+		printd(DBG_ERROR, "Could not install sig handler.\n");
 		return -1;
 	}
 

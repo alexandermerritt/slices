@@ -5,26 +5,29 @@
  * @author Magda Slawinska, magg@gatech.edu
  * @author Alex Merritt, merritt.alex@gatech.edu
  *
- * @brief Interposes the cuda calls and prints arguments of the call. It supports
- * the 3.2 CUDA Toolkit, specifically
+ * @brief Interposes the cuda calls and prints arguments of the call. It
+ * supports the 3.2 CUDA Toolkit, specifically
  *   CUDA Runtime API Version 3.2
  *   #define CUDART_VERSION  3020
  *
- * To prepare the file I processed the /opt/cuda/include/cuda_runtime_api_no_comments.h
- * and removed the comments. I also removed CUDARTAPI and __host__ modifiers.
- * Then I have a list of function signatures that I need to interpose.
- * You can see the script in cuda_rt_api.
+ * To prepare the file I processed the
+ * /opt/cuda/include/cuda_runtime_api_no_comments.h and removed the comments. I
+ * also removed CUDARTAPI and __host__ modifiers.  Then I have a list of
+ * function signatures that I need to interpose.  You can see the script in
+ * cuda_rt_api.
  *
- * 2011-02-09 It looks that  in my library currently is  95 calls plus 6 calls undocumented.
- * @todo Write a script that checks if the number or api are identical in cuda_runtime_api.h
+ * 2011-02-09 It looks that  in my library currently is  95 calls plus 6 calls
+ * undocumented.
+ * @todo Write a script that checks if the number or api are identical in
+ * cuda_runtime_api.h
  * and in our file.
  *
  *
- * @todo There is one thing: the prototypes or signatures of CUDA functions
- * have modifiers CUDARTAPI which is __stdcall and __host__ which is
- * __location__(host) as defined in file /opt/cuda/include/host_defines.h
- * The question is if this has any impact on the interposed calls. I guess not.
- * But I might be wrong.
+ * @todo There is one thing: the prototypes or signatures of CUDA functions have
+ * modifiers CUDARTAPI which is __stdcall and __host__ which is
+ * __location__(host) as defined in file /opt/cuda/include/host_defines.h The
+ * question is if this has any impact on the interposed calls. I guess not.  But
+ * I might be wrong.
  *
  * FIXME Make this library thread-safe.
  *
@@ -276,8 +279,9 @@ get_region(pthread_t tid)
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
-//! This appears in some values of arguments. I took this from /opt/cuda/include/cuda_runtime_api.h
-//! It looks as this comes from a default value (dv)
+//! This appears in some values of arguments. I took this from
+//! opt/cuda/include/cuda_runtime_api.h It looks as this comes from a default
+//! value (dv)
 #if !defined(__dv)
 #	if defined(__cplusplus)
 #		define __dv(v) \
@@ -1475,7 +1479,8 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
 cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
 		__dv(cudaMemcpyDeviceToHost)) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
 	void *shm_ptr;
 
 	printd(DBG_DEBUG, "symb %p\n", symbol);
@@ -2180,6 +2185,9 @@ static void printFatBinary(void *fatC) {
 }
 #endif
 
+// as the size of this cubin is not given as an argument to this function, we
+// store the size in args[1] for whomever has this packet to determine the size
+// of accompanying data (e.g. for RPC)
 void** __cudaRegisterFatBinary(void* cubin) {
 	int err, cubin_size;
 	volatile struct cuda_packet *shmpkt;
@@ -2214,7 +2222,6 @@ void** __cudaRegisterFatBinary(void* cubin) {
 		printd(DBG_ERROR, "error calling packFatBinary\n");
 		return NULL;
 	}
-
 	shmpkt->args[1].argll = cubin_size;
 	shmpkt->flags = CUDA_PKT_REQUEST; // set this last FIXME sink spins on this
 
@@ -2257,7 +2264,8 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize) {
 	int err;
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
 	void *var = NULL;
 
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
@@ -2273,6 +2281,9 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		printd(DBG_ERROR, "Error packing arguments\n");
 		assert(0); // FIXME Is there a better strategy to failing?
 	}
+	shmpkt->args[1].arr_argi[0] =
+		getSize_regFuncArgs(fatCubinHandle, hostFun, deviceFun, deviceName,
+				thread_limit, tid, bid, bDim, gDim, wSize);
 
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
@@ -2294,7 +2305,8 @@ void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global) {
 	int err;
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
 	void *var = NULL;
 
 	printd(DBG_DEBUG, "symbol=%p\n", hostVar);
@@ -2312,6 +2324,9 @@ void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		printd(DBG_ERROR, "Error packing arguments\n");
 		assert(0); // FIXME Is there a better strategy to failing?
 	}
+	shmpkt->args[1].arr_argi[0]
+		= getSize_regVar(fatCubinHandle, hostVar, deviceAddress, deviceName,
+				ext, vsize, constant, global);
 
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
