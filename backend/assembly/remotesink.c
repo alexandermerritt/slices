@@ -2,7 +2,10 @@
  * @file backend/assembly/remote.c
  * @author Alex Merritt, merritt.alex@gatech.edu
  * @date 2011-11-25
- * @brief This file enables receiving work on a remote data path.
+ * @brief This file enables receiving work on a remote data path. It is
+ * technically an "extension" to the assembly module, but exists within another
+ * file. It does not have access to, nor need access to the assembly API, but
+ * operates as its remote limb.
  *
  * FIXME MUCH of the code in this file and in assembly/rpc.c is duplicated, as
  * both implement RPC servers. Perhaps there's a clean way to share code?
