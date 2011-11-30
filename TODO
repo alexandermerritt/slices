@@ -1,19 +1,3 @@
-- 2011-10-03
-  1. clean up README - currently it is a total mess
-  2. add kidron.ini as a file option
-  - 2011-05-03, done
-  add GLIB variable in the build system; right now it is hard coded
-  
-- 2011-04-12; 2011-05-02 done
-  remove double INIPARSER from the build systems
-
-    You need to update two SConstruct files:
-    
-    @todo this must be a smarter way to do that
-    interposer/SConstruct
-    backend/SConstruct
-    
-
 IMPLEMENTATION AND FEATURES
 --------------------------------------------------------------------------------
 Legend
@@ -35,7 +19,7 @@ Assembly Runtime
 		[C] multi-process-aware
 		[C] multi-threading-aware
 		[C] self-contained library
-		[ ] verify with multiple simultaneous members joining/leaving
+		[C] verify with multiple simultaneous members joining/leaving
 		[ ] verify with one multi-threaded member making/destroying regions
 
 	[C] support multiple fat binaries
@@ -50,26 +34,26 @@ Assembly Runtime
 	- distributed assembly (Alex)
 		[C] assembly RPC thread
 		[ ] [support executing apps on nodes w/o GPUs]
-		[ ] implement separation of local/remote assembly interfaces
+		[C] implement separation of local/remote assembly interfaces
 		[ ] add use of monitoring API to assembly composition
 		[ ] duplicate register calls across nodes in assembly
 
 	- remote data paths (Alex w/ network API)
-		[ ] duplicate hidden CUDA register calls across nodes in assembly
 		[ ] what is local:remote sink process configuration?
 
 	[ ] incorporate notion of groups in assemblies, for MPI apps (Alex)
 
-	[ ] multi-threaded backend processes (Alex)
-		[ ] needed to perform scheduling, and to support multi-threaded apps
+	[L] multi-threaded backend processes (Alex)
+		(not tested with a multi-threaded app)
+		[ ] need to perform scheduling, and to support multi-threaded apps
 
 	[ ] scheduling interface (Dipanjan)
 
 Monitoring
 ==========
 	[C] Design data structure(s) for exporting Lynx data (Naila)
-	[ ] glue Lynx and local monitor with MQs (Naila)
-	[ ] push Lynx data from local->global monitor (Alex + Magda)
+	[C] glue Lynx and local monitor with MQs (Naila)
+	[C] push Lynx data from local->global monitor (Alex + Magda)
 	[ ] design API to access all of monitoring data (Naila + Alex)
 	[ ] build library code to expose this API (Alex + Naila)
 	[ ] glue global monitor and library with shmgrp (Alex + Naila)
@@ -91,4 +75,14 @@ Other details
 		assumption
 			libci.c : cudaMemcpy[To|From]Symbol
 			localsink.c : nv_exec_pkt
-	[ ] move cuda_app/ to test/
+	[C] move cuda_app/ to test/
+
+KNOWN BUGS
+==========
+	[ ] Executing multiple processes on same node (returning the same assembly
+		configurations) is not entirely safe somewhere. runtime complains
+		about not being able to send a signal to the localsink, and upon exit
+		some assemblies apparently still exist
+
+	[ ] remotesink experiences a segfault executing binomialOptions when it
+		calls __cudaUnregisterFatBinary
