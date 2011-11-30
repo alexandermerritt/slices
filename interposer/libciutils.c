@@ -16,7 +16,6 @@
 #include <assert.h>
 
 #include "method_id.h"   // for method identifiers
-#include "config.h"		 // for the KIDRON_INI
 
 #include <glib.h>		 // for ini files
 

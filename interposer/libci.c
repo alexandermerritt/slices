@@ -76,7 +76,6 @@
 
 // Project includes
 #include <assembly.h>
-#include <config.h>
 #include <cuda_hidden.h>
 #include <debug.h>
 #include <method_id.h>
