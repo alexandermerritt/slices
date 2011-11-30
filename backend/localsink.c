@@ -7,98 +7,217 @@
  */
 
 // System includes
-#include <assert.h>
+#include <errno.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <string.h>
-#include <unistd.h>
 
-// CUDA includes
-#include <cuda.h>
-#include <cuda_runtime_api.h>
+// Other project includes
+#include <shmgrp.h>
 
 // Project includes
 #include <assembly.h>
-#include <cuda_hidden.h>
 #include <debug.h>
-#include <fatcubininfo.h>
-#include <libciutils.h>
-#include <method_id.h>
-#include <packetheader.h>
-#include <shmgrp.h>
+#include <util/compiler.h>
+#include <util/list.h>
 #include <util/x86_system.h>
 
 // Directory-immediate includes
 #include "sinks.h"
 
-//#undef printd
-//#define printd(level, fmt, args...)
-
 /*-------------------------------------- EXTERNAL VARIABLES ------------------*/
 
-// POSIX environment variable list, man 7 environ
+//! POSIX environment variable list, man 7 environ
 extern char **environ;
+
+/*-------------------------------------- INTERNAL DEFINITIONS ----------------*/
+
+/**
+ * Thread state associated with a 'proxy' thread. Proxies map 1:1 with
+ * application threads to execute RPCs in their own shm regions.
+ */
+struct proxy_state
+{
+	struct list_head link; //! Link together all proxy threads into a list
+	struct shmgrp_region region; //! Memory region mapped with the app thread
+	bool exit_loop; //! Used by proxy_halt to cause a thread to break its loop
+
+	bool is_alive;
+	int exit_code;
+	pthread_t tid; //! ID of proxy thread itself
+};
+
+/**
+ * Global state associated with this instance of localsink.
+ */
+struct internals_state
+{
+	pthread_mutex_t lock; //! Lock for changes to internal state
+	pid_t pid; //! The application PID we're working for
+	assembly_key_uuid uuid; //! Assembly UUID key used for importing
+	asmid_t asmid; //! Assembly the app was given, which we've imported
+	struct list_head proxy_list; //! List of all proxy threads
+};
 
 /*-------------------------------------- INTERNAL STATE ----------------------*/
 
-// FIXME FIXME We are assuming SINGLE-THREADED CUDA applications as a first
-// step, thus one region and one address.
-static struct shmgrp_region region;
-static void *shm;
-static pid_t pid; // of app we're working with
+static struct internals_state *internals = NULL;
 
-static bool process_rpc = false; //! Barrier and stop flag for main processing loop
-static bool loop_exited = false; //! Indication that the main loop has exited
+/*-------------------------------------- INTERNAL THREADING ------------------*/
 
-static asmid_t asmid;
-static assembly_key_uuid uuid; // key of assembly metadata we import
+static inline void
+proxy_add(struct list_head *list, struct proxy_state *proxy)
+{
+	list_add(&proxy->link, list);
+}
 
-/*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
+static inline void
+proxy_rm(struct proxy_state *proxy)
+{
+	list_del(&proxy->link);
+}
 
-// We assume a new region request maps 1:1 to a new thread (using the CUDA API)
-// having spawned in the CUDA application.
-// TODO Spawn a thread for each new shm region, and cancel it on remove.
-static void region_request(shm_event e, pid_t memb_pid, shmgrp_region_id id)
+/**
+ * Proxy thread "destructor".
+ */
+static void
+proxy_cleanup(void *arg)
+{
+	struct proxy_state *state = (struct proxy_state*)arg;
+	state->is_alive = false;
+	printd(DBG_DEBUG, "exited with code %d\n", state->exit_code);
+	// TODO Anything else?
+}
+
+/**
+ * Proxy thread entry point.
+ */
+static void *
+proxy_thread(void *arg)
+{
+	int err, old_thread_state /* not used */;
+	struct proxy_state *state = (struct proxy_state*)arg;
+	struct cuda_packet *shmpkt = state->region.addr;
+	int vgpu_id = 0; //! vgpu this thread maps to
+
+	pthread_cleanup_push(proxy_cleanup, state);
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &old_thread_state);
+	state->is_alive = true;
+
+	while (!state->exit_loop) {
+
+		// Check packet flag. If not ready, check loop flag. Spin.
+		rmb();
+		if (!(shmpkt->flags & CUDA_PKT_REQUEST)) {
+			rmb(); continue;
+		}
+
+		// Update our vgpu association if the application thread does so.
+		//if (unlikely(shmpkt->method_id == CUDA_SET_DEVICE))
+		if (shmpkt->method_id == CUDA_SET_DEVICE)
+			vgpu_id = shmpkt->args[0].argll;
+
+		// Execute the RPC.
+		err = assembly_rpc(internals->asmid, vgpu_id, shmpkt);
+		if (err < 0) {
+			printd(DBG_ERROR, "assembly_rpc returned %d\n", err);
+			// what else to do? this is supposed to be an error of the assembly
+			// module, not an error of the call specifically
+			assert(0);
+		}
+
+		// Don't forget! Indicate packet is executed and on return path.
+		shmpkt->flags = CUDA_PKT_RESPONSE;
+		wmb();
+	}
+
+	pthread_cleanup_pop(1); // invoke cleanup routine
+	pthread_exit(NULL);
+}
+
+static int
+proxy_spawn(pid_t app_pid, shmgrp_region_id id)
 {
 	int err;
+	struct proxy_state *proxy;
+
+	// we'll assume the caller is responsible for ensuring threads do not share
+	// the same memory regions
+
+	proxy = malloc(sizeof(*proxy));
+	if (!proxy)
+		return -ENOMEM;
+	INIT_LIST_HEAD(&proxy->link);
+	proxy->is_alive = false;
+	proxy->exit_code = 0;
+	proxy->exit_loop = false;
+	err = shmgrp_member_region(ASSEMBLY_SHMGRP_KEY, app_pid, id, &proxy->region);
+	if (err < 0) return -1;
+	err = pthread_create(&proxy->tid, NULL, proxy_thread, proxy);
+	if (err < 0) return -1;
+	// we'll join the thread later
+
+	pthread_mutex_lock(&internals->lock);
+	proxy_add(&internals->proxy_list, proxy);
+	pthread_mutex_unlock(&internals->lock);
+
+	return 0;
+}
+
+static void
+proxy_halt(shmgrp_region_id id)
+{
+	int err;
+	struct proxy_state *proxy = NULL;
+	pthread_mutex_lock(&internals->lock);
+	// find the proxy responsible for the given region
+	list_for_each_entry(proxy, &internals->proxy_list, link)
+		if (proxy->region.id == id)
+			break;
+	if (!proxy || proxy->region.id != id) {
+		printd(DBG_WARNING, "proxy not found for region %d\n", id);
+		pthread_mutex_unlock(&internals->lock);
+		return;
+	}
+	// terminator it
+	proxy->exit_loop = true;
+	err = pthread_cancel(proxy->tid);
+	if (err < 0) {
+		printd(DBG_WARNING, "pthread_cancel: %s\n", strerror(errno));
+	}
+	err = pthread_join(proxy->tid, NULL);
+	if (err < 0) {
+		printd(DBG_WARNING, "pthread_join: %s\n", strerror(errno));
+	}
+	proxy_rm(proxy); // remove it from the list
+	free(proxy);
+	pthread_mutex_unlock(&internals->lock);
+}
+
+/*-------------------------------------- INTERNAL MGMT FUNCTIONS -------------*/
+
+// The interposer allocates a region for each thread it detects within the
+// application. Thus we assume the creation of a memory region also means a
+// thread has been created in the application.
+static void
+region_request(shm_event e, pid_t memb_pid, shmgrp_region_id id)
+{
+	int err;
+	printd(DBG_DEBUG, "PID %d %sing region %d\n", memb_pid,
+			(e == SHM_CREATE_REGION ? "creat" : "destroy"), id);
 	switch (e) {
 		case SHM_CREATE_REGION:
-		{
-			err = shmgrp_member_region(ASSEMBLY_SHMGRP_KEY, memb_pid, id, &region);
+			err = proxy_spawn(memb_pid, id);
 			if (err < 0) {
-				printd(DBG_ERROR, "Could not access region %d details"
-						" for process %d\n", id, memb_pid);
-				break;
+				printd(DBG_ERROR, "failed to spawn proxy thread\n");
 			}
-			pid = memb_pid;
-			shm = region.addr;
-			printd(DBG_DEBUG, "Process %d created a shm region:"
-					" id=%d @%p bytes=%lu\n",
-					memb_pid, id, region.addr, region.size);
-			fflush(stdout);
-			process_rpc = true; // Set this last, after shm has been set
-		}
-		break;
+			break;
 		case SHM_REMOVE_REGION:
-		{
-			process_rpc = false;
-			err = shmgrp_member_region(ASSEMBLY_SHMGRP_KEY, memb_pid, id, &region);
-			if (err < 0) {
-				printd(DBG_ERROR, "Could not access region %d details"
-						" for process %d\n", id, memb_pid);
-				break;
-			}
-			printd(DBG_DEBUG, "Process %d destroyed an shm region:"
-					" id=%d @%p bytes=%lu\n",
-					memb_pid, id, region.addr, region.size);
-			fflush(stdout);
-			// wait for the loop to see our change to process_rpc before
-			// continuing, to avoid it reading the shm after it has been
-			// unmapped
-			while (!loop_exited)
-				;
-		}
-		break;
+			proxy_halt(id);
+			break;
+		default:
+			break;
 	}
 }
 
@@ -116,6 +235,13 @@ static int
 setup(void)
 {
 	int err;
+	assembly_key_uuid uuid;
+	pid_t pid;
+	asmid_t asmid;
+	
+	//
+	// Extract environment variables we're configured with.
+	//
 
 	BUG(!environ);
 
@@ -138,6 +264,10 @@ setup(void)
 	}
 	pid = atoi(pid_env);
 
+	//
+	// Configure assembly state.
+	//
+
 	// Tell the assembly module we only import & map assemblies.
 	err = assembly_runtime_init(NODE_TYPE_MAPPER, NULL);
 	if (err < 0) {
@@ -157,6 +287,25 @@ setup(void)
 		printd(DBG_ERROR, "Could not map assembly %lu\n", asmid);
 		return -1;
 	}
+
+	//
+	// Initialize threading state (internals).
+	//
+
+	internals = calloc(1, sizeof(*internals));
+	if (!internals) {
+		fprintf(stderr, "Out of memory\n");
+		return -ENOMEM;
+	}
+	pthread_mutex_init(&internals->lock, NULL);
+	internals->pid = pid;
+	memcpy(internals->uuid, uuid, sizeof(uuid));
+	internals->asmid = asmid;
+	INIT_LIST_HEAD(&internals->proxy_list);
+
+	//
+	// Configure shmgrp state.
+	//
 
 	// Initialize shmgrp state
 	err = shmgrp_init();
@@ -178,6 +327,10 @@ setup(void)
 		printd(DBG_ERROR, "Could not establish member %d\n", pid);
 		return -1;
 	}
+
+	//
+	// Initialize remaining state.
+	//
 
 	// Install a handler for our term sig so it doesn't kill us
 	struct sigaction action;
@@ -208,85 +361,57 @@ static void
 teardown(void)
 {
 	int err;
-	// Make associated calls in the reverse order they appear in within setup()
-	err = shmgrp_destroy_member(ASSEMBLY_SHMGRP_KEY, pid);
-	if (err < 0)
-		printd(DBG_ERROR, "Could not destroy member %d\n", pid);
+	// FIXME Halt all proxy threads
+	err = shmgrp_destroy_member(ASSEMBLY_SHMGRP_KEY, internals->pid);
+	if (err < 0) {
+		printd(DBG_WARNING, "could not remove member PID %d\n", internals->pid);
+	}
 	err = __shmgrp_dump_group(ASSEMBLY_SHMGRP_KEY);
+	if (err < 0) {
+		printd(DBG_WARNING, "__shmgrp_dump_group failed\n");
+	}
 	err = assembly_runtime_shutdown();
+	if (err < 0) {
+		printd(DBG_WARNING, "__shmgrp_dump_group failed\n");
+	}
 	err = shmgrp_tini();
+	if (err < 0) {
+		printd(DBG_WARNING, "__shmgrp_dump_group failed\n");
+	}
+	if (!list_empty(&internals->proxy_list)) {
+		printd(DBG_WARNING, "proxy threads still exist\n");
+	}
+	if (internals)
+		free(internals);
+	internals = NULL;
 	_exit(0);
 }
 
 /*-------------------------------------- PUBLIC FUNCTIONS --------------------*/
 
 /**
- * Entry point for the local sink process. It is forked/exec'd from runtime when
- * a new application process registers.
+ * Entry point for the local sink process. It is forked/exec'd from the runtime
+ * when a new application process registers.
  *
  * This file shall NOT call any functions that request/destroy assemblies, nor
- * those that modify shmgrp state (or any library state for that matter) EXCEPT
- * to establish/destroy members. From the shmgrp perspective, it is a leader, of
- * the same group the runtime is, but will receive no notifications of joining
- * members (via that double-underscore function call, instead of actually
- * opening a new group altogether).
- *
- * We expect argc to be zero, which tells us this was exec'd and not run from
- * the command line (it's normally > 0).
+ * those that modify shmgrp state EXCEPT to establish/destroy members. From the
+ * shmgrp perspective, it is a leader, of the same group the runtime is, but
+ * will receive no notifications of joining members (via that double-underscore
+ * function call, instead of actually opening a new group altogether).
  */
 int main(int argc, char *argv[])
 {
 	int err;
-	struct cuda_packet *cpkt_shm = NULL;
 
-	// Check to see we weren't executed directly on the command line. It's a
-	// crude method.
+	// Check to see we weren't executed directly on the command line.
 	if (argc != 1 || strncmp(argv[0], SINK_EXEC_NAME, strlen(SINK_EXEC_NAME))) {
 		fprintf(stderr, "Don't execute localsink yourself.\n");
 		return -1;
 	}
 
-	BUG(!environ);
-
 	err = setup();
 	if (err < 0)
 		_exit(-1);
-
-	// FIXME Instead of processing CUDA RPC here, we should just call sigsuspend
-	// and spawn threads in the shm_callback for each new region, instead.
-
-	// The shm_callback will modify this variable. If a region is registered, it
-	// will enable it, and vice versa. We assume single-threaded cuda
-	// applications, performing one single mkreg and rmreg.
-	while (!process_rpc)
-		;
-
-	// Process CUDA RPC until the CUDA application unregisters its memory
-	// region.
-	cpkt_shm = (struct cuda_packet *)shm;
-	while (process_rpc) {
-
-		// Check packet flag. If not ready, check loop flag. Spin.
-		rmb();
-		if (!(cpkt_shm->flags & CUDA_PKT_REQUEST)) {
-			rmb();
-			continue;
-		}
-
-		// Tell assembly to execute the packet for us
-		err = assembly_rpc(asmid, 0, cpkt_shm); // FIXME don't hardcode vgpu 0
-		if (err < 0) {
-			printd(DBG_ERROR, "assembly_rpc returned error\n");
-			// what else to do? this is supposed to be an error of the assembly
-			// module, not an error of the call specifically
-			assert(0);
-		}
-
-		// Don't forget! Indicate packet is executed and on return path.
-		cpkt_shm->flags = CUDA_PKT_RESPONSE;
-		wmb();
-	}
-	loop_exited = true;
 
 	wait_for_termination();
 
