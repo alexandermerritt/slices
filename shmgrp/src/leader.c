@@ -1367,10 +1367,6 @@ int __shmgrp_dump_group(const char *key)
 	int exit_errno;
 	struct group *group = NULL;
 
-	// You'll notice much of the code is duplicated with shmgrp_open. That's
-	// fine. The difference is that we do not invoke stat, mkdir, or
-	// pthread_create. Otherwise that would actually define "opening" a group :)
-
 	if (!verify_userkey(key)) {
 		exit_errno = -EINVAL;
 		goto fail;
@@ -1378,7 +1374,6 @@ int __shmgrp_dump_group(const char *key)
 
 	pthread_mutex_lock(&(groups->lock));
 
-	// Don't add duplicate groups.
 	group = groups_get_group(groups, key);
 	if (!group) {
 		pthread_mutex_unlock(&(groups->lock));
