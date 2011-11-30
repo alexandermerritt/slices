@@ -4,6 +4,8 @@
 # This file is meant to clean system resources and files from an unclean
 # termination of the assembly runtime and associated sink processes.
 
+ASSEMBLY_SHMGRP_KEY=cudarpc
+
 set -e
 set -u
 
@@ -44,8 +46,8 @@ do
 done
 
 # Remove registration and shm files.
-rm -rf -v /tmp/shmgrp/
-rm -f -v /dev/shm/shmgrp-*
+rm -rf -v /tmp/shmgrp/${ASSEMBLY_SHMGRP_KEY}/
+rm -f -v /dev/shm/shmgrp-${ASSEMBLY_SHMGRP_KEY}-*
 rm -f -v /dev/shm/assm-export-*
 
 echo ""
