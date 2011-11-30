@@ -72,16 +72,18 @@ struct assembly
 	int num_gpus;
 	struct vgpu_mapping mappings[MAX_VGPUS];
 	int driverVersion, runtimeVersion;
-	// TODO array of static gpu properties
-	// TODO link to dynamic load data?
-	// TODO location of node containing application
-	struct fatcubins *cubins;
-	//! Whether this assembly was mapped.
+	struct fatcubins *cubins; // CUDA CUBIN state maintained on local node
+	//! Whether this assembly was mapped. This value is only updated in the
+	//! process which calls assembly_map (thus it will not be updated across
+	//! address spaces).
 	bool mapped;
 };
 
 #define PARTICIPANT_MAX_GPUS	4
 #define PARTICIPANT_MAX_NICS	4
+
+#define for_each_assembly(assm,list) \
+	list_for_each_entry(assm,list,link)
 
 /**
  * State describing a node that has registered to participate in the assembly
@@ -104,5 +106,8 @@ struct node_participant
 	struct cudaDeviceProp dev_prop[PARTICIPANT_MAX_GPUS];
 	int driverVersion, runtimeVersion;
 };
+
+#define for_each_node(node,list) \
+	list_for_each_entry(node,list,link)
 
 #endif	/* _TYPES_H */

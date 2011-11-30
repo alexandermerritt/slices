@@ -286,85 +286,29 @@ set_thread_association(struct assembly *assm, pthread_t tid, int vgpu_id)
 	return vgpu;
 }
 
+// forward declaration within assemble.c
+struct assembly* __do_compose_assembly(const struct assembly_hint*, const char*,
+		const struct list_head*, const struct list_head*);
+
 /**
  * Figure out the composition of a new assembly given the hints, monitoring
  * state and currently existing assemblies. hostname is used to verify the host
  * has joined the assembly network (i.e. is in the participants list) and is
  * used to identify a new assembly's source.
  *
- * TODO Define different composers based on certain flags in the hint
- * structure---policies or whatnot---that require a different search algorithm.
- * Put these composers in another file, instead of this one. These composers
- * will require access to the participant and assembly lists, as well as the
- * definitions of a hint, vgpu_mapping, assemblies, etc.
+ * This function assumes the caller holds any required locks.
  */
-static struct assembly *
-__compose_assembly(
-		const struct assembly_hint *hint,	//! Information we use to compose
-		const char *hostname)				//! Who is asking for an assembly
+static inline struct assembly *
+__compose_assembly(const struct assembly_hint *hint, const char *hostname)
 {
-	struct node_participant *node;
-	struct assembly *assm = NULL;
-	int vgpu_id;
-	struct vgpu_mapping *vgpu;
-	int num_gpus;
+	struct assembly *assm = 
+		__do_compose_assembly(hint, hostname,
+				&internals->n.main.participants, &internals->assembly_list);
+	if (!assm)
+		return NULL;
 
-	assm = calloc(1, sizeof(*assm));
-	if (!assm) {
-		fprintf(stderr, "out of memory\n");
-		goto fail;
-	}
 	INIT_LIST_HEAD(&assm->link);
 	assm->id = NEXT_ASMID;
-
-#if 0
-	if (hint->num_gpus == 0) {
-		num_gpus = 1;
-	} else if (hint->num_gpus > MAX_VGPUS) {
-		num_gpus = MAX_VGPUS;
-	} else {
-		num_gpus = hint->num_gpus;
-	}
-#else
-	num_gpus = 1; // XXX Disregard hint
-#endif
-	assm->num_gpus = num_gpus;
-
-	// Find physical GPUs and set each mapping
-	vgpu_id = 0; // vgpu id in the assembly
-	// iterate over participant list
-	list_for_each_entry(node, &internals->n.main.participants, link) {
-		if (strncmp(hostname, node->hostname, HOST_LEN) == 0)
-			continue;
-		// XXX assume hint has one gpu
-		printd(DBG_INFO, "Assigning assm %lu vgpu %d gpu %d on %s\n",
-				assm->id, 0, 0, node->hostname);
-		vgpu = &assm->mappings[vgpu_id];
-		vgpu->fixation = VGPU_REMOTE;
-		vgpu->vgpu_id = 0;
-		vgpu->pgpu_id = 0;
-		// FIXME Need to verify which NICs we're using...
-		strncpy(vgpu->hostname, node->hostname, HOST_LEN);
-		strncpy(vgpu->ip, node->ip[1], HOST_LEN); // ib0
-		memcpy(&vgpu->cudaDevProp, &node->dev_prop[vgpu_id],
-				sizeof(struct cudaDeviceProp));
-		vgpu_id++;
-	}
-	// no assembly assigned
-	// this check is just to verify i didn't screw up the above loop
-	if (vgpu_id == 0) {
-		printd(DBG_ERROR, "No vgpus assigned\n");
-		free(assm);
-		return NULL;
-	}
-
-	// FIXME Verify cuda/runtime versions on all nodes the assembly was mapped
-	// to are equal. For now, just use the values from the first node in the
-	// list.
-	node = list_first_entry(&internals->n.main.participants,
-			struct node_participant, link);
-	assm->runtimeVersion = node->runtimeVersion;
-	assm->driverVersion = node->driverVersion;
 
 	assm->cubins = malloc(sizeof(struct fatcubins));
 	if (!assm->cubins) {
@@ -376,7 +320,6 @@ __compose_assembly(
 	assm->mapped = false;
 
 	return assm;
-
 fail:
 	if (assm)
 		free(assm);
@@ -699,41 +642,75 @@ __get_participant(const char *hostname)
 // NVIDIA Runtime and Driver state needed to handle the application's kernels
 // and symbols.
 static int
-duplicate_call(
-		struct assembly *assm,
-		struct cuda_packet *pkt,
-		struct sockconn* conn)
+duplicate_call(	struct assembly *assm,
+				struct cuda_packet *pkt,
+				struct sockconn* conn)
 {
-#if 0
-	memcpy(vgpus, assm->mappings, assm->num_gpus);
+	int vgpu_id;
 
-	// inner functions are not C-compliant; GCC extensions allow this
-	int vgpu_comparator(void *vgpu_i, void *vgpu_j)
-	{
-		struct vgpu_mapping *a = *((struct vgpu_mapping*)vgpu_i),
-							*b = *((struct vgpu_mapping*)vgpu_j);
+	// Make an array of pointers to the vgpus, sort by hostname, remove
+	// duplicate entries, then call the function on each one
+
+	struct vgpu_mapping *vgpu_set[MAX_VGPUS];
+	for (vgpu_id = 0; vgpu_id < assm->num_gpus; vgpu_id++)
+		vgpu_set[vgpu_id] = &(assm->mappings[vgpu_id]);
+
+	// (inner functions are not C-compliant; GCC extensions allow this)
+	int vgpu_comparator(const void *vgpu_i, const void *vgpu_j) {
+		const struct vgpu_mapping *a = vgpu_i, *b = vgpu_j;
 		return strncmp(a->hostname, b->hostname, HOST_LEN);
 	}
+	qsort(vgpu_set, assm->num_gpus, sizeof(*vgpu_set), vgpu_comparator);
 
-	qsort(vgpus, assm->num_gpus, sizeof(struct vgpu_mapping *), compare);
-#endif
+#define SWAP_PTRS(a,b)		\
+	do {					\
+		void *tmp = (a);	\
+		(a) = (b);			\
+		(b) = tmp;			\
+	} while(0)
+#define STR_EQUAL(s1,s2,len) (strncmp((s1),(s2),(len)) == 0)
+#define VGPU_SAME_HOST(v1,v2) STR_EQUAL((v1)->hostname,(v2)->hostname,HOST_LEN)
+	int uniq = 0, search = 1;
+	while (search < assm->num_gpus) {
+		if VGPU_SAME_HOST(vgpu_set[uniq], vgpu_set[search]) {
+			search++;
+			continue;
+		}
+		uniq++;
+		SWAP_PTRS(vgpu_set[uniq], vgpu_set[search]);
+		search++;
+	}
+	// indeces zero - 'uniq' are unique vgpu mappings
+	printd(DBG_INFO, "%d unique hosts in assembly\n", (uniq + 1));
+	for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++) {
+		printd(DBG_DEBUG, "\tunique host: %s\n",
+				assm->mappings[vgpu_id].hostname);
+	}
+
 	switch (pkt->method_id) {
 		case __CUDA_REGISTER_FAT_BINARY:
-			assm->mappings[0].ops.registerFatBinary(pkt, assm->cubins, conn);
+			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
+				assm->mappings[vgpu_id].ops.registerFatBinary(pkt,
+						assm->cubins, conn);
 			break;
 		case __CUDA_REGISTER_FUNCTION:
-			assm->mappings[0].ops.registerFunction(pkt, assm->cubins, conn);
+			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
+				assm->mappings[vgpu_id].ops.registerFunction(pkt,
+						assm->cubins, conn);
 			break;
 		case __CUDA_REGISTER_VARIABLE:
-			assm->mappings[0].ops.registerVar(pkt, assm->cubins, conn);
+			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
+				assm->mappings[vgpu_id].ops.registerVar(pkt,
+						assm->cubins, conn);
 			break;
 		case __CUDA_UNREGISTER_FAT_BINARY:
-			assm->mappings[0].ops.unregisterFatBinary(pkt, NULL, conn);
+			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
+				assm->mappings[vgpu_id].ops.unregisterFatBinary(pkt,
+						NULL, conn);
 			break;
 		default:
 			break;
 	}
-
 	return 0;
 }
 
@@ -1163,6 +1140,7 @@ asmid_t assembly_request(const struct assembly_hint *hint)
 		gethostname(hostname, HOST_LEN);
 		assm = __compose_assembly(hint, hostname);
 		if (assm == NULL) {
+			pthread_mutex_unlock(&internals->lock);
 			goto fail;
 		}
 	}
@@ -1176,6 +1154,7 @@ asmid_t assembly_request(const struct assembly_hint *hint)
 		err = rpc_send_request(&internals->n.minion.rpc_conn, hint, new_assm);
 		if (err < 0) { // could not acquire assembly
 			free(new_assm);
+			pthread_mutex_unlock(&internals->lock);
 			goto fail;
 		}
 		assm = new_assm;
@@ -1214,6 +1193,7 @@ int assembly_teardown(asmid_t id)
 		}
 	}
 	list_del(&assm->link);
+	free(assm->cubins);
 	free(assm);
 	pthread_mutex_unlock(&internals->lock);
 	return 0;
