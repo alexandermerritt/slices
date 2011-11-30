@@ -27,8 +27,9 @@ def get_platform_characteristic_str():
     nodename = commands.getoutput('uname -n') # doesn't work on keeneland
     return nodename
 
-GLOBAL_CCFLAGS='-ggdb -Wall -Wextra -Werror -Wno-unused-parameter'
-#GLOBAL_CCFLAGS='-O3 -Wall -Wextra -Werror -Wno-unused-parameter'
+CCFLAGS_WARN='-Wall -Wextra -Werror -Wno-unused-parameter -Wno-unused-function '
+GLOBAL_CCFLAGS='-ggdb ' + CCFLAGS_WARN
+#GLOBAL_CCFLAGS='-O3 ' + CCFLAGS_WARN
 
 ########################################################333
 # here we define the environments for particular nodes
@@ -103,7 +104,7 @@ def build_backend(env):
         @param env: The environment that will be used to build a backend 
     """
     # TODO Move sock.c somewhere else.
-    srclist = ['assembly/assembly.c', 'assembly/rpc.c', 'assembly/export.c', 'sock.c', '../common/cuda/execute.c', '../common/cuda/rpc.c']
+    srclist = ['assembly/assembly.c', 'assembly/assemble.c', 'assembly/rpc.c', 'assembly/export.c', 'sock.c', '../common/cuda/execute.c', '../common/cuda/rpc.c']
     srclist.append('../interposer/libciutils.c') # FIXME THE BACKEND SHOULD NOT BE COUPLED WITH INTERPOSER CODE
     env.Program('runtime', ['runtime.c', srclist])
     env.Program('localsink', ['localsink.c', srclist])
