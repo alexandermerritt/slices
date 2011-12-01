@@ -1245,6 +1245,7 @@ int assembly_map(asmid_t id)
 
 	for (vgpu_id = 0; vgpu_id < assm->num_gpus; vgpu_id++) {
 		vgpu = &assm->mappings[vgpu_id];
+
 		if (vgpu->fixation == VGPU_REMOTE) {
 			vgpu->rpc_conn = calloc(1, sizeof(*(vgpu->rpc_conn)));
 			if (!vgpu->rpc_conn) {
@@ -1258,14 +1259,33 @@ int assembly_map(asmid_t id)
 				goto fail;
 			}
 			vgpu->ops = rpc_ops;
-		} else if (vgpu->fixation == VGPU_LOCAL) {
+			// Send our (localsink) PID over, so the remote end can correctly
+			// maintain CUBIN state. We can use the localsink PID instead of the
+			// application PID so long as each application processes and
+			// localsink processes exist 1:1
+			pid_t app_pid = getpid();
+			err = conn_put(vgpu->rpc_conn, &app_pid, sizeof(pid_t));
+			if (err < 0) {
+				conn_close(vgpu->rpc_conn);
+				free(vgpu->rpc_conn);
+				exit_errno = -EIO;
+				goto fail;
+			}
+		}
+
+		else if (vgpu->fixation == VGPU_LOCAL) {
 			vgpu->ops = exec_ops;
 			vgpu->rpc_conn = NULL;
-		} else {
+		}
+		
+		else {
 			BUG(1);
 		}
-	}
+
+	} // for each vgpu mapping
+
 	assm->mapped = true;
+
 	return 0;
 fail:
 	return exit_errno;
