@@ -194,6 +194,21 @@ fail:
 	return exit_errno;
 }
 
+int conn_peername(struct sockconn *conn, char *hostname)
+{
+	int err;
+	struct sockaddr_in *addr;
+	struct sockaddr_storage peer;
+	socklen_t len = sizeof(peer);
+	err = getpeername(conn->socket, (struct sockaddr*)&peer, &len);
+	if (err < 0)
+		return -(errno);
+	BUG(peer.ss_family != AF_INET); // we only support IPv4
+	addr = (struct sockaddr_in*)&peer;
+	inet_ntop(AF_INET, &(addr->sin_addr), hostname, INET_ADDRSTRLEN);
+	return 0;
+}
+
 int conn_put(struct sockconn *conn, void *data, int len)
 {
 	char *data_ptr = (char *)data; // place holder in data

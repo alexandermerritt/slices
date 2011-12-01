@@ -38,5 +38,8 @@ int conn_close(struct sockconn *conn);
 int conn_put(struct sockconn *conn, void *data, int len);
 // returns < 0 on error, = 0 if remote socket closed, > 0 if okay
 int conn_get(struct sockconn *conn, void *data, int len);
+// writes out hostname (length >= INET_ADDRSTRLEN)
+// of peer connecting to us via 'conn'
+int conn_peername(struct sockconn *conn, char *hostname);
 
 #endif
