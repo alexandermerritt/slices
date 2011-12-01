@@ -8,9 +8,8 @@
  *
  * TODO Define different composers based on certain flags in the hint
  * structure---policies or whatnot---that require a different search algorithm.
- * Put these composers in another file, instead of this one. These composers
- * will require access to the participant and assembly lists, as well as the
- * definitions of a hint, vgpu_mapping, assemblies, etc.
+ * These composers will require access to the participant and assembly lists, as
+ * well as the definitions of a hint, vgpu_mapping, assemblies, etc.
  */
 
 // System includes
@@ -52,7 +51,7 @@ struct global
 struct gpu
 {
 	int id; //! CUDA device ID
-	const struct node_participant *node; //! Points within global.plist
+	const struct node_participant *node; //! Points within global.nlist
 };
 
 /*-------------------------------------- FUNCTIONS ---------------------------*/
@@ -62,7 +61,7 @@ struct gpu
 // Find non-mapped assembly
 
 static inline bool
-vgpu_same_host(const struct vgpu_mapping *v1, const struct vgpu_mapping *v2)
+vgpus_same_host(const struct vgpu_mapping *v1, const struct vgpu_mapping *v2)
 {
 	return (strncmp(v1->hostname, v2->hostname, HOST_LEN) == 0);
 }
