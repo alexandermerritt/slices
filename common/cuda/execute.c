@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <string.h>
 
 // CUDA includes
 #include <cuda_runtime_api.h>
@@ -27,6 +28,10 @@
 #include <method_id.h>
 #include <packetheader.h>
 #include <util/compiler.h>
+
+/* preprocess out debug statements */
+//#undef printd
+//#define printd(level, fmt, args...)
 
 /* NOTES
  *
@@ -115,7 +120,8 @@ static OPS_FN_PROTO(__CudaRegisterFatBinary)
 	pkt->ret_ex_val.handle = handle;
 	cubins_add_cubin(cubin_list, cuda_cubin, handle);
 
-	printd(DBG_DEBUG, "cudaRegFB handle=%p\n", pkt->ret_ex_val.handle);
+	printd(DBG_DEBUG, "local cudaRegFB(%p) returned %p\n",
+			cuda_cubin, pkt->ret_ex_val.handle);
 	return 0;
 
 fail:

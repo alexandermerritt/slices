@@ -69,6 +69,7 @@
 		va_start(extra, argname);						\
 		va_arg(extra, void*);	/* skip first arg */	\
 		(conn) = va_arg(extra, struct sockconn*);		\
+		BUG(!(conn));										\
 		va_end(extra);									\
 	} while(0)
 

@@ -26,6 +26,7 @@
 #include <fatcubininfo.h>
 #include <io/sock.h>
 #include <packetheader.h>
+#include <util/compiler.h>
 
 // Directory-immediate includes
 #include "remote.h"
@@ -40,27 +41,6 @@ struct payload
 {
 	void *buffer;
 	size_t size;
-};
-
-/**
- * State associated with each thread. One thread is the admission thread, the
- * remainder are minions that service CUDA RPC requests from remote nodes,
- * implementing a remote vgpu within an assembly.
- */
-struct rpc_thread
-{
-	// state unique to only minion threads
-	struct list_head link;
-	char hostname[HOST_LEN]; //! remote host connected
-	pid_t pid; //! localsink process attached to us; used to lookup cubin state
-	struct fatcubins *cubins; //! points to state in remote_cubin
-	struct payload payload;	//! packet and data; like the interposer shm region
-
-	// state common to the admin and minion threads
-	bool is_alive;
-	pthread_t tid;
-	int exit_code;
-	struct sockconn conn;
 };
 
 /**
@@ -94,6 +74,32 @@ struct remote_cubin
 	char hostname[HOST_LEN]; //! Node hosting the CUDA application
 	pid_t pid; //! CUDA application PID
 	int ref_count; //! Number of minion threads using this state
+
+	// XXX HACK I should instead properly maintain fatcubins.num_cubins
+	// This counter is incremented with new registerFB calls, and decremented
+	// with unregisterFB calls. Once it reaches zero, a minion thread stops.
+	int reg_count;
+};
+
+/**
+ * State associated with each thread. One thread is the admission thread, the
+ * remainder are minions that service CUDA RPC requests from remote nodes,
+ * implementing a remote vgpu within an assembly.
+ */
+struct rpc_thread
+{
+	// state unique to only minion threads
+	struct list_head link;
+	char hostname[HOST_LEN]; //! remote host connected
+	pid_t pid; //! localsink process attached to us; used to lookup cubin state
+	struct remote_cubin *rcubin; //! (shared) cubin state with other minions
+	struct payload payload;	//! packet and data; like the interposer shm region
+
+	// state common to the admin and minion threads
+	bool is_alive;
+	pthread_t tid;
+	int exit_code;
+	struct sockconn conn;
 };
 
 /*-------------------------------------- INTERNAL STATE ----------------------*/
@@ -145,6 +151,7 @@ __rcubin_alloc_insert(struct list_head *rcubins, pid_t pid, const char *hostname
 	strncpy(rcubin->hostname, hostname, HOST_LEN);
 	rcubin->pid = pid;
 	rcubin->ref_count = 1;
+	rcubin->reg_count = 0;
 	INIT_LIST_HEAD(&rcubin->link);
 	__rcubin_add(rcubins, rcubin);
 	return rcubin;
@@ -155,15 +162,16 @@ __rcubin_alloc_insert(struct list_head *rcubins, pid_t pid, const char *hostname
 static struct remote_cubin *
 rcubin_lookup(struct list_head *rcubins, pid_t pid, const char *hostname)
 {
+	bool found = false;
 	struct remote_cubin *rcubin = NULL;
-	// locate rcubin
-	list_for_each_entry(rcubin, rcubins, link)
-		if (__rcubin_match(rcubin, pid, hostname))
+	list_for_each_entry(rcubin, rcubins, link) {
+		if (__rcubin_match(rcubin, pid, hostname)) {
+			found = true;
 			break;
-	// was not found; make new one and insert
-	if (!rcubin || !__rcubin_match(rcubin, pid, hostname))
+		}
+	}
+	if (!found)
 		return __rcubin_alloc_insert(rcubins, pid, hostname);
-	// was found, increase reference
 	rcubin->ref_count++;
 	return rcubin;
 }
@@ -173,15 +181,16 @@ rcubin_lookup(struct list_head *rcubins, pid_t pid, const char *hostname)
 static int
 rcubin_depart(struct list_head *rcubins, pid_t pid, const char *hostname)
 {
+	bool found = false;
 	struct remote_cubin *rcubin = NULL;
-	// locate rcubin
-	list_for_each_entry(rcubin, rcubins, link)
-		if (__rcubin_match(rcubin, pid, hostname))
+	list_for_each_entry(rcubin, rcubins, link) {
+		if (__rcubin_match(rcubin, pid, hostname)) {
+			found = true;
 			break;
-	// abort if not found
-	if (!rcubin || !__rcubin_match(rcubin, pid, hostname))
+		}
+	}
+	if (!found)
 		return -EINVAL;
-	// decrement count; if last user, remove it entirely
 	rcubin->ref_count--;
 	if (rcubin->ref_count == 0) {
 		// FIXME Call cubins_dealloc
@@ -272,7 +281,7 @@ minion_cleanup(void *arg)
 }
 
 // forward declaration
-static int do_cuda_rpc(struct sockconn*, struct payload*, struct fatcubins*);
+static int do_cuda_rpc(struct sockconn*, struct payload*, struct remote_cubin*);
 
 static void *
 minion_thread(void *arg)
@@ -280,7 +289,6 @@ minion_thread(void *arg)
 	int err, old_thread_state /* not used */;
 	struct rpc_thread *state = (struct rpc_thread*) arg;
 	struct sockconn *conn = &state->conn;
-	struct remote_cubin *rcubin = NULL;
 
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &old_thread_state);
 	pthread_cleanup_push(minion_cleanup, state);
@@ -307,16 +315,17 @@ minion_thread(void *arg)
 
 	// Get CUBIN state associated with new minion
 	pthread_mutex_lock(&rcubin_lock);
-	rcubin = rcubin_lookup(&rcubins, state->pid, state->hostname);
+	state->rcubin = rcubin_lookup(&rcubins, state->pid, state->hostname);
 	pthread_mutex_unlock(&rcubin_lock);
-	BUG(!rcubin);
-	state->cubins = &rcubin->cubins;
-	BUG(!state->cubins);
+	if (!state->rcubin) {
+		state->exit_code = -ENOMEM;
+		pthread_exit(NULL);
+	}
 
 	printd(DBG_INFO, "outbound vgpu mapped to us from PID %d on %s\n",
 			state->pid, state->hostname);
 
-	state->payload.size = (128 << 20); // FIXME Don't hard code this
+	state->payload.size = (64 << 20); // FIXME Don't hard code this
 	state->payload.buffer = malloc(state->payload.size);
 	if (!state->payload.buffer) {
 		state->exit_code = -ENOMEM;
@@ -324,8 +333,12 @@ minion_thread(void *arg)
 	}
 
 	while (1) {
-		err = do_cuda_rpc(conn, &state->payload, state->cubins);
-		if (err < 0) {
+		err = do_cuda_rpc(conn, &state->payload, state->rcubin);
+		if (unlikely(err < 0)) {
+			if (unlikely(err == -ECANCELED)) {
+				break; // client app finished w/o error, we stop processing
+			}
+			// everything else is a real error
 			state->exit_code = err;
 			break;
 		}
@@ -582,9 +595,9 @@ static int
 do_cuda_rpc(
 		struct sockconn *conn,		//! network connection to use
 		struct payload *payload,	//! contiguous mem reg storing pkt + data
-		struct fatcubins *_cubins)	//! CUBIN state necessary for symbol lookup
+		struct remote_cubin *rcubin)	//! CUBIN state necessary for symbol lookup
 {
-	int err;
+	int err, retval = 0;
 	struct cuda_packet *pkt = payload->buffer; //! pkt placed at top of region
 
 	BUG(!pkt);
@@ -606,7 +619,7 @@ do_cuda_rpc(
 		if (err < 0) return -ENETDOWN;
 	}
 
-	err = demux(pkt, _cubins);
+	err = demux(pkt, &(rcubin->cubins));
 	if (err < 0) return -1;
 
 	// Always return the packet. Some RPCs don't need anything else.
@@ -617,7 +630,19 @@ do_cuda_rpc(
 		err = conn_put(conn, (pkt + 1), data_size);
 		if (err < 0) return -ENETDOWN;
 	}
-	return 0;
+
+	// Update CUBIN registration counts. No need to lock as the assembly module
+	// ensures only one hidden call is sent to each node an assembly maps to
+	// (thus only one minion thread will update these).
+	if (unlikely(pkt->method_id == __CUDA_REGISTER_FAT_BINARY)) {
+		rcubin->reg_count++;
+	} else if (unlikely(pkt->method_id == __CUDA_UNREGISTER_FAT_BINARY)) {
+		rcubin->reg_count--;
+		if (rcubin->reg_count <= 0)
+			retval = -ECANCELED; // inform caller the CUDA call stream ended
+	}
+
+	return retval;
 }
 
 /*-------------------------------------- INTERNAL PROCESS FUNCTIONS ----------*/

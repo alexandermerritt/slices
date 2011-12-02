@@ -88,8 +88,8 @@
 #include "libciutils.h"
 
 /* preprocess out debug statements */
-#undef printd
-#define printd(level, fmt, args...)
+//#undef printd
+//#define printd(level, fmt, args...)
 
 /*-------------------------------------- EXTERNS -----------------------------*/
 
@@ -110,10 +110,13 @@ static cudaError_t cuda_err = cudaSuccess;
 
 static struct shm_regions *cuda_regions;
 
+//! Reference count for register and unregister fatbinary invocations.
+static unsigned int num_registered_cubins = 0;
+
 /*-------------------------------------- SHMGRP DEFINITIONS ------------------*/
 
 //! Amount of memory to allocate for each CUDA thread, in bytes.
-#define THREAD_SHM_SIZE					(128 << 20)
+#define THREAD_SHM_SIZE					(64 << 20)
 
 /**
  * Region of memory we've mapped in with the runtime. Each region is assigned to
@@ -210,7 +213,7 @@ static void detach_assembly_runtime(void)
 			__shm_rm_region(region);
 			err = shmgrp_rmreg(ASSEMBLY_SHMGRP_KEY, region->shmgrp_region.id);
 			if (err < 0) {
-				printd(DBG_ERROR, "Error destroying region %lu\n",
+				printd(DBG_ERROR, "Error destroying region %d\n",
 						region->shmgrp_region.id);
 			}
 			free(region);
@@ -2193,11 +2196,16 @@ void** __cudaRegisterFatBinary(void* cubin) {
 	void *cubin_shm; // pointer to serialized copy of argument
 	cache_num_entries_t entries_in_cubin;
 
-	err = attach_assembly_runtime();
-	if (err < 0) {
-		fprintf(stderr, "Error attaching to assembly runtime\n");
-		assert(0);
+	num_registered_cubins++;
+
+	if (num_registered_cubins == 1) { // attach only on first register
+		err = attach_assembly_runtime();
+		if (err < 0) {
+			fprintf(stderr, "Error attaching to assembly runtime\n");
+			assert(0);
+		}
 	}
+
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	memset((void*)shmpkt, 0, sizeof(struct cuda_packet));
@@ -2235,26 +2243,24 @@ void** __cudaRegisterFatBinary(void* cubin) {
 void __cudaUnregisterFatBinary(void** fatCubinHandle) {
 	struct cuda_packet *shmpkt;
 
-	static bool unregistered = false;
-	if (unregistered) {
-		fprintf(stderr, "Warning: %s called more than once\n", __func__);
-		return;
-	}
-	unregistered = true;
+	num_registered_cubins--;
 
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-
 	memset(shmpkt, 0, sizeof(struct cuda_packet));
 	shmpkt->method_id = __CUDA_UNREGISTER_FAT_BINARY;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argdp = fatCubinHandle;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
+	printd(DBG_INFO, "handle=%p\n", fatCubinHandle);
+
 	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
-	detach_assembly_runtime();
+	if (num_registered_cubins == 0) { // only detach on last unregister
+		detach_assembly_runtime();
+	}
 
 	return;
 }

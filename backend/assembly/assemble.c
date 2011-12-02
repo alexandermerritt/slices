@@ -83,11 +83,15 @@ node_is_remote(const struct global *g, const struct node_participant *n)
 static bool
 find_first_remote_gpu(const struct global *global, struct gpu *gpu)
 {
+	bool node_found = false;
 	const struct node_participant *node = NULL;
-	for_each_node(node, global->nlist)
-		if (node_is_remote(global, node))
+	for_each_node(node, global->nlist) {
+		if (node_is_remote(global, node)) {
+			node_found = true;
 			break;
-	if (!node_is_remote(global, node))
+		}
+	}
+	if (!node_found)
 		return false;
 	gpu->id = 0; // first gpu in 'node'
 	gpu->node = node;
@@ -101,10 +105,15 @@ find_first_remote_gpu(const struct global *global, struct gpu *gpu)
 static void
 find_first_local_gpu(const struct global *global, struct gpu *gpu)
 {
+	bool node_found = false;
 	const struct node_participant *node = NULL;
-	for_each_node(node, global->nlist)
-		if (!node_is_remote(global, node))
+	for_each_node(node, global->nlist) {
+		if (!node_is_remote(global, node)) {
+			node_found = true;
 			break;
+		}
+	}
+	BUG(!node_found);
 	gpu->id = 0;
 	gpu->node = node;
 }
@@ -155,6 +164,17 @@ __do_compose_assembly(
 	if (!assm)
 		goto fail;
 
+	/* We must be careful iterating over nlist and alist using the macros in
+	 * list.h. The heads of these lists themselves do not reside within an
+	 * instance of the object the list is intended for, but are contained within
+	 * some other global structure of another type. Thus when we iterate over
+	 * the list, we must make sure that if the ENTIRE list is iterated (e.g.
+	 * we're searching for a particular element and end up traversing it
+	 * entirely), we do NOT dereference the iterator pointer, as it will be cast
+	 * to an object within the structure containing the head of the list. We
+	 * must instead maintain a boolean indicating if an element was found or
+	 * not.
+	 */
 	global.hint = hint;
 	global.hostname = hostname;
 	global.nlist = node_list;
@@ -163,9 +183,16 @@ __do_compose_assembly(
 	// Determine assembly size
 	assm->num_gpus = 1;
 
-	// Locate GPUs to use
-	find_first_local_gpu(&global, &gpu);
-	//find_first_remote_gpu(&global, &gpu);
+	// Locate GPUs to use. Look for a remote node, but return the local node if
+	// none was found.
+	if (!find_first_remote_gpu(&global, &gpu)) {
+		find_first_local_gpu(&global, &gpu);
+	}
+
+	// NOTE: If no GPU can be found remotely, this function should always
+	// default to returning local GPUs in their place.
+
+	BUG(!gpu.node);
 
 	// Install mappings
 	set_vgpu_mapping(&global, &gpu, &assm->mappings[0]);

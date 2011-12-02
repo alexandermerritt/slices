@@ -118,6 +118,11 @@ proxy_thread(void *arg)
 		if (shmpkt->method_id == CUDA_SET_DEVICE)
 			vgpu_id = shmpkt->args[0].argll;
 
+		// Just as a note: instead of invoking the assembly to process the RPC,
+		// we may directly execute the functions in exec_ops instead, for
+		// testing or other purposes. We'd just additionally need to have a
+		// fatcubin instance stored here.
+
 		// Execute the RPC.
 		err = assembly_rpc(internals->asmid, vgpu_id, shmpkt);
 		if (err < 0) {
@@ -169,13 +174,17 @@ static void
 proxy_halt(shmgrp_region_id id)
 {
 	int err;
+	bool proxy_found = false;
 	struct proxy_state *proxy = NULL;
 	pthread_mutex_lock(&internals->lock);
 	// find the proxy responsible for the given region
-	list_for_each_entry(proxy, &internals->proxy_list, link)
-		if (proxy->region.id == id)
+	list_for_each_entry(proxy, &internals->proxy_list, link) {
+		if (proxy->region.id == id) {
+			proxy_found = true;
 			break;
-	if (!proxy || proxy->region.id != id) {
+		}
+	}
+	if (!proxy_found) {
 		printd(DBG_WARNING, "proxy not found for region %d\n", id);
 		pthread_mutex_unlock(&internals->lock);
 		return;

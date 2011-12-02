@@ -13,7 +13,7 @@ Assembly Runtime
 	[L] implement framework
 		[C] starting runtime does self-discovery
 		[C] node adds self to participants
-		[L] start assembly composition
+		[C] start assembly composition
 	- shared memory library
 		[C] "libregistration" - now obsolete
 		[C] multi-process-aware
@@ -36,7 +36,7 @@ Assembly Runtime
 		[ ] [support executing apps on nodes w/o GPUs]
 		[C] implement separation of local/remote assembly interfaces
 		[ ] add use of monitoring API to assembly composition
-		[ ] duplicate register calls across nodes in assembly
+		[C] duplicate register calls across nodes in assembly
 
 	- remote data paths (Alex w/ network API)
 		[ ] what is local:remote sink process configuration?
@@ -54,7 +54,7 @@ Monitoring
 	[C] Design data structure(s) for exporting Lynx data (Naila)
 	[C] glue Lynx and local monitor with MQs (Naila)
 	[C] push Lynx data from local->global monitor (Alex + Magda)
-	[ ] design API to access all of monitoring data (Naila + Alex)
+	[C] design API to access all of monitoring data (Naila + Alex)
 	[ ] build library code to expose this API (Alex + Naila)
 	[ ] glue global monitor and library with shmgrp (Alex + Naila)
 	[ ] Assembly can add a Lynx instrumentor pattern to implement during the
@@ -83,6 +83,12 @@ KNOWN BUGS
 		configurations) is not entirely safe somewhere. runtime complains
 		about not being able to send a signal to the localsink, and upon exit
 		some assemblies apparently still exist
+			update: localsink assumes one app at a time, make a list instead
 
-	[ ] remotesink experiences a segfault executing binomialOptions when it
+	[C] remotesink experiences a segfault executing binomialOptions when it
 		calls __cudaUnregisterFatBinary
+			fix: remote thread kept invoking do_cuda_rpc on the previous packet
+			(unregister) even when the remote application terminated; now
+			maintain a reference count on remote end
+
+	[ ] segv in runtime when Ctrl+c'ing it after a node exits uncleanly (SIGKILL)

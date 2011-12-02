@@ -133,6 +133,8 @@ self_participant(struct node_participant *p)
 	cudaError_t cuda_err;
 	int idx = 0; // used for arrays in node_participant
 
+	memset(addr_buffer, 0, INET_ADDRSTRLEN);
+
 	// Get our hostname.
 	err = gethostname(p->hostname, HOST_LEN);
 	if (err < 0) {
@@ -206,12 +208,17 @@ fail:
 static struct assembly *
 __find_assembly(asmid_t id)
 {
+	bool found = false;
 	struct assembly *assm;
-	list_for_each_entry(assm, &internals->assembly_list, link)
-		if (assm->id == id)
+	list_for_each_entry(assm, &internals->assembly_list, link) {
+		if (assm->id == id) {
+			found = true;
 			break;
-	if (!assm || assm->id != id)
+		}
+	}
+	if (!found) {
 		assm = NULL;
+	}
 	return assm;
 }
 
@@ -631,9 +638,7 @@ __get_participant(const char *hostname)
 	struct node_participant *iter = NULL;
 	list_for_each_entry(iter, &internals->n.main.participants, link)
 		if (strncmp(hostname, iter->hostname, HOST_LEN) == 0)
-			break;
-	if (iter && strncmp(hostname, iter->hostname, HOST_LEN) == 0)
-		return iter;
+			return iter;
 	return NULL;
 }
 
@@ -680,7 +685,8 @@ duplicate_call(	struct assembly *assm,
 		SWAP_PTRS(vgpu_set[uniq], vgpu_set[search]);
 		search++;
 	}
-	// indeces zero - 'uniq' are unique vgpu mappings
+	// indeces zero - 'uniq' (inclusive) are disjoint mappings to nodes within
+	// the assembly
 	printd(DBG_INFO, "%d unique hosts in assembly\n", (uniq + 1));
 	for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++) {
 		printd(DBG_DEBUG, "\tunique host: %s\n",
