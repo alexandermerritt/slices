@@ -103,8 +103,8 @@ def build_backend(env):
     """
         @param env: The environment that will be used to build a backend 
     """
-    # TODO Move sock.c somewhere else.
-    srclist = ['assembly/assembly.c', 'assembly/assemble.c', 'assembly/rpc.c', 'assembly/export.c', 'sock.c', '../common/cuda/execute.c', '../common/cuda/rpc.c']
+    srclist = ['assembly/assembly.c', 'assembly/assemble.c', 'assembly/rpc.c',
+			'assembly/export.c', '../common/io/sock.c', '../common/cuda/execute.c', '../common/cuda/rpc.c']
     srclist.append('../interposer/libciutils.c') # FIXME THE BACKEND SHOULD NOT BE COUPLED WITH INTERPOSER CODE
     env.Program('runtime', ['runtime.c', srclist])
     env.Program('localsink', ['localsink.c', srclist])
