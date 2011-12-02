@@ -161,6 +161,9 @@ cubins_init(struct fatcubins *cubins)
 	cubins->num_cubins = 0;
 }
 
+// FIXME Add cubins_dealloc to remove all cubin descriptors and registered
+// functions, variables, textures, etc
+
 /**
  * Add a CUDA cubin descriptor to the set. This function should be called in
  * tandem with __cudaRegisterFatBinary.

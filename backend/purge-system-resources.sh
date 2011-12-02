@@ -35,6 +35,8 @@ do
 	sleep 1 # Give the process time to cleanup.
 done
 
+# TODO Verify these processes no longer exist. If they do, send SIGKILL
+
 # Kill all sink processes.
 # SIGTERM is the signal these processes explicitly listen for.
 SINK_PIDS=`ps aux | grep sink | grep -v grep | awk '{print $2}' | tr "\n" " "`
@@ -44,6 +46,8 @@ do
 	kill -s SIGTERM $SINK_PID
 	sleep 1 # Give the process time to cleanup.
 done
+
+# TODO Verify these processes no longer exist. If they do, send SIGKILL
 
 # Remove registration and shm files.
 rm -rf -v /tmp/shmgrp/${ASSEMBLY_SHMGRP_KEY}/
