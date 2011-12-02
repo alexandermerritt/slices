@@ -312,28 +312,9 @@ TEST PASSED!
    
 5. KNOWN ISSUES
 
-* 2011-09-15 - g_vars_remove - produces segmentation fault. It can be observed when
-  running MonteCarlo and binomialOptions
-   
-  -- with execution with gdb
-   (gdb) 
-DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
-2544                    g_vars_remove(regHostVarsTab, fatCubinHandle);
-(gdb) 
-
-Program received signal SIGSEGV, Segmentation fault.
-0x0000000001e8c220 in ?? ()
-   
-   -- execution without gdb
-   
-   >>>>>>>>>> Implemented >>>>>>>>>>: r__cudaUnregisterFatBinary (id = 38)
-DEBUG(5) __nvback_cudaUnregisterFatBinary_rpc:505: CUDA_ERROR=30 before RPC on method 38
-DEBUG(5) l_do_cuda_rpc:144: MethodID: 38, reqbuf (nil), reqbuf_size 0, rspbuf (nil), rspbuf_size 0
-DEBUG(5) conn_sendCudaPktHdr:46: Header sent: pkt_num 1, extra buffer size: 0.
-DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
-Segmentation fault
+* 2011-12-02 - observed that kidron.ini in not read by the libci.c for
+  some reason and I need to set the hostname manually in the kidron.ini file.
  
-
 * Function g_vars_find my hang if you provide non-existing address as 
   a symbol; since it first assumes it is a pointer, then it is a string 
 
@@ -416,33 +397,58 @@ LD_PRELOAD=/nics/d/home/smagg/proj/kidron-utils-remote-cuda-exec-2/interposer/li
  - ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/matrixMul
  - ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/BlackScholes
  
- - it might require setting the environment variable 
-   (observed the segmentation fault after execution the program
-   it is related with g_vars_remove
-   DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
-2544                    g_vars_remove(regHostVarsTab, fatCubinHandle);
-   
-   
-   
-   >>>>>>>>>> Implemented >>>>>>>>>>: r__cudaUnregisterFatBinary (id = 38)
-DEBUG(5) __nvback_cudaUnregisterFatBinary_rpc:505: CUDA_ERROR=30 before RPC on method 38
-DEBUG(5) l_do_cuda_rpc:144: MethodID: 38, reqbuf (nil), reqbuf_size 0, rspbuf (nil), rspbuf_size 0
-DEBUG(5) conn_sendCudaPktHdr:46: Header sent: pkt_num 1, extra buffer size: 0.
-DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
-Segmentation fault
-   )
  
-   [smagg@kid071 2011-09-14-kidron-utils-rce]$ export LD_LIBRARY_PATH=/nics/d/home/smagg/opt/glib-2.28.7/lib:$LD_LIBRARY_PATH
-    ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/MonteCarlo
-    
- - ~/NVIDIA_GPU_Computing_SDK/C/bin/linux/release/binomialOptions  
-   (observed the segmentation fault after execution the program 
-   DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
-   Segmentation fault
-   ) - this might be the reason of  updating to a newer version of glib 2.28.7
-   with some cleaning after computations are done.
  
  8. HISTORY 
+* 2011-12-02
+  - removed the bug in segfault with cudaUnregisterFatBinary; the problem
+    was that when creating 
+    
+    regHostVarsTab = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
+				(GDestroyNotify)g_vars_remove_val)
+				
+    I used g_vars_remove functions instead of correct g_vars_remove_val
+    
+    regHostVarsTab = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
+				(GDestroyNotify)g_vars_remove)
+
+* 2011-09-15 - r__cudaUnregisterFatBinary segfault (fixed on 2011-12-02).
+ 
+	Problem:
+
+	  g_vars_remove - produces segmentation fault. It can be observed when
+  		running MonteCarlo and binomialOptions
+   
+  	-- with execution with gdb
+   	(gdb) 
+		DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
+		2544                    g_vars_remove(regHostVarsTab, fatCubinHandle);
+	(gdb) 
+
+	Program received signal SIGSEGV, Segmentation fault.
+	0x0000000001e8c220 in ?? ()
+   
+   -- execution without gdb
+   
+   >>>>>>>>>> Implemented >>>>>>>>>>: r__cudaUnregisterFatBinary (id = 38)
+	DEBUG(5) __nvback_cudaUnregisterFatBinary_rpc:505: CUDA_ERROR=30 before RPC on method 38
+	DEBUG(5) l_do_cuda_rpc:144: MethodID: 38, reqbuf (nil), reqbuf_size 0, rspbuf (nil), rspbuf_size 0
+	DEBUG(5) conn_sendCudaPktHdr:46: Header sent: pkt_num 1, extra buffer size: 0.
+	DEBUG(5) r__cudaUnregisterFatBinary:2542: __OK__ Return from rpc with ok value.
+	Segmentation fault
+
+	
+    Fixed: (2011-12-02)
+    
+    regHostVarsTab = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
+				(GDestroyNotify)g_vars_remove_val)
+				
+    I used g_vars_remove functions instead of correct g_vars_remove_val
+    
+    regHostVarsTab = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
+				(GDestroyNotify)g_vars_remove)
+    )
+
 
 * 2011-10-03 
   - got rid of the cunit dependency

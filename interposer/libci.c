@@ -2699,7 +2699,7 @@ void r__cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 	if( NULL == regHostVarsTab ){
 		// create a hash table since it doesn't exist
 		regHostVarsTab = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
-				(GDestroyNotify)g_vars_remove);
+				(GDestroyNotify)g_vars_remove_val);
 	}
 
 	// first check if the key exists
