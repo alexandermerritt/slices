@@ -457,7 +457,7 @@ group_get_member(struct group *group, pid_t pid)
 	group_for_each_member(group, member)
 		if (member->pid == pid)
 			return member;
-	return member;
+	return NULL;
 }
 
 static inline void

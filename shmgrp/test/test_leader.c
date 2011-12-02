@@ -62,8 +62,9 @@ void cudarpc_callback(group_event e, pid_t pid)
 		if (err < 0) {
 			fprintf_locked(stderr, "grp join: pid %d requested,"
 					" but can't establish: %s\n", pid, strerror(-(err)));
+		} else {
+			printf_locked("grp join: member pid %d successful\n", pid);
 		}
-		printf_locked("grp join: member pid %d successful\n", pid);
 		// implement application-level setup here
 	}
 	else if (e == MEMBERSHIP_LEAVE) {
