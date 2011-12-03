@@ -92,3 +92,11 @@ KNOWN BUGS
 			maintain a reference count on remote end
 
 	[ ] segv in runtime when Ctrl+c'ing it after a node exits uncleanly (SIGKILL)
+
+POTENTIAL BUGS
+==============
+
+	[ ] Executing the same application process on different nodes, mapping 1+
+	vgpus to the same remote node. CUDA state registration functions may be
+	initializing similar state (function, variable, cubin names, etc). If that's
+	true, we'll need to make the remote end (remotesink.c) multi-process...
