@@ -10,7 +10,7 @@ CC=gcc
 CCFLAGS=-fPIC -ggdb -Wall -Werror -Wextra -Wno-unused-parameter -Iinclude/
 LDFLAGS=-lrt -shared -Wl,-soname,$(SONAME)
 
-all:	lib/$(SONAME)
+all:	lib/$(SONAME) test
 
 .PHONY: all
 
@@ -27,8 +27,14 @@ src/leader.o:	src/leader.c
 src/member.o:	src/member.c
 	$(CC) $(CCFLAGS) -c -o $@ $<
 
+test:
+	make -C test/
+
+.PHONY:	test
+
 clean:
 	rm -rf lib/ src/*.o
+	make -C test/ clean
 
 .PHONY: clean
 
