@@ -76,6 +76,16 @@ Other details
 			libci.c : cudaMemcpy[To|From]Symbol
 			localsink.c : nv_exec_pkt
 	[C] move cuda_app/ to test/
+	[ ] enable the interposer to void using assemblies, and simply instrument
+		what an application is doing
+			- e.g. what calls are made and what are their arguments?
+		This would be useful to determine various characteristics of the
+		application:
+			- how much memory does it allocate?
+			- how frequently does it move data and how large are the chunks?
+			- how frequently does it call into the API?
+			- etc
+
 
 KNOWN BUGS
 ==========
