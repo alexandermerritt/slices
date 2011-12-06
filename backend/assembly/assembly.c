@@ -747,6 +747,9 @@ demux(
 		case CUDA_MALLOC:
 			mapping->ops.malloc(pkt, NULL, mapping->rpc_conn);
 			break;
+		case CUDA_MALLOC_PITCH:
+			mapping->ops.mallocPitch(pkt, NULL, mapping->rpc_conn);
+			break;
 		case CUDA_MEMCPY_D2D:
 			mapping->ops.memcpyD2D(pkt, NULL, mapping->rpc_conn);
 			break;
@@ -767,6 +770,9 @@ demux(
 			break;
 		case CUDA_THREAD_SYNCHRONIZE:
 			mapping->ops.threadSynchronize(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_FUNC_GET_ATTR:
+			mapping->ops.funcGetAttributes(pkt, NULL, mapping->rpc_conn);
 			break;
 
 		// Functions which take a cuda_packet* and fatcubins*.

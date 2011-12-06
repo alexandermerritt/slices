@@ -457,6 +457,9 @@ demux(struct cuda_packet *pkt, struct fatcubins *cubins)
 		case CUDA_MALLOC:
 			exec_ops.malloc(pkt);
 			break;
+		case CUDA_MALLOC_PITCH:
+			exec_ops.malloc(pkt);
+			break;
 		case CUDA_MEMCPY_D2D:
 			exec_ops.memcpyD2D(pkt);
 			break;
@@ -480,6 +483,9 @@ demux(struct cuda_packet *pkt, struct fatcubins *cubins)
 			break;
 		case __CUDA_UNREGISTER_FAT_BINARY:
 			exec_ops.unregisterFatBinary(pkt);
+			break;
+		case CUDA_FUNC_GET_ATTR:
+			exec_ops.funcGetAttributes(pkt);
 			break;
 
 			// Functions which take a cuda_packet* and fatcubins*
@@ -590,6 +596,10 @@ cudarpc_has_payload(
 			*direction = FROM_HOST;
 			size->from_host = pkt->args[1].arr_argi[0];
 			break;
+		case CUDA_FUNC_GET_ATTR:
+			*direction = (FROM_HOST | TO_HOST);
+			size->from_host = pkt->args[2].arr_argi[0]; // func name
+			size->to_host = sizeof(struct cudaFuncAttributes);
 		default: // everything else has no data, or is not a supported call
 			has_payload = false;
 			break;

@@ -15,9 +15,13 @@ extern void** __cudaRegisterFatBinary(void*);
 
 extern void __cudaUnregisterFatBinary(void**);
 
-extern void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
-		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
-		uint3* bid, dim3* bDim, dim3* gDim, int* wSize);
+extern void __cudaRegisterFunction(
+		void** fatCubinHandle,		//! Pointer to (heap?) memory
+		const char* hostFun,		//! Symbol (function) pointer
+		char* deviceFun,			//! String
+		const char* deviceName,		//! String
+		int thread_limit, uint3* tid, uint3* bid,
+		dim3* bDim, dim3* gDim, int* wSize);
 
 extern void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,

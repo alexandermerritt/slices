@@ -44,12 +44,14 @@ struct cuda_ops
 	OPS_FN_PROTO_PTR(threadExit);
 	OPS_FN_PROTO_PTR(threadSynchronize);
 	OPS_FN_PROTO_PTR(malloc);
+	OPS_FN_PROTO_PTR(mallocPitch);
 	OPS_FN_PROTO_PTR(free);
 	OPS_FN_PROTO_PTR(memcpyH2D);
 	OPS_FN_PROTO_PTR(memcpyD2H);
 	OPS_FN_PROTO_PTR(memcpyD2D);
 	OPS_FN_PROTO_PTR(memcpyToSymbolH2D);
 	OPS_FN_PROTO_PTR(memcpyFromSymbolD2H);
+	OPS_FN_PROTO_PTR(funcGetAttributes);
 };
 
 extern const struct cuda_ops exec_ops;

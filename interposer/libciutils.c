@@ -1469,13 +1469,16 @@ static int l_packFatBinary(char * pFatPack, __cudaFatCudaBinary * const pSrcFatC
 
 	memcpy(pFatPack, (unsigned long*)&pSrcFatC->magic, sizeof(pSrcFatC->magic));
 	pFatPack += sizeof(pSrcFatC->magic);
-	memcpy(pFatPack, (unsigned long*)&pSrcFatC->version, sizeof(pSrcFatC->version));
+	memcpy(pFatPack, (unsigned long*)&pSrcFatC->version,
+			sizeof(pSrcFatC->version));
 	pFatPack += sizeof(pSrcFatC->version);
-	memcpy(pFatPack, (unsigned long*)&pSrcFatC->gpuInfoVersion, sizeof(pSrcFatC->gpuInfoVersion));
+	memcpy(pFatPack, (unsigned long*)&pSrcFatC->gpuInfoVersion,
+			sizeof(pSrcFatC->gpuInfoVersion));
 	pFatPack += sizeof(pSrcFatC->gpuInfoVersion);
 	memcpy(pFatPack, (unsigned int*)&pSrcFatC->flags, sizeof(pSrcFatC->flags));
 	pFatPack += sizeof(pSrcFatC->flags);
-	memcpy(pFatPack, (unsigned int*)&pSrcFatC->characteristic, sizeof(pSrcFatC->characteristic));
+	memcpy(pFatPack, (unsigned int*)&pSrcFatC->characteristic,
+			sizeof(pSrcFatC->characteristic));
 	pFatPack += sizeof(pSrcFatC->characteristic);
 	// now strings
 	offset = l_packStr(pFatPack, pSrcFatC->key);
@@ -1936,11 +1939,6 @@ int packRegFuncArgs(void *dst, void** fatCubinHandle, const char* hostFun,
 	p[0] = fatCubinHandle;
 	pPack += sizeof(void*);
 
-
-	offset = l_packStr(pPack, hostFun);
-	if( ERROR == offset ) return -1; else pPack += offset;
-
-	// pack the value of the pointer
 	const char ** c = (const char**) pPack;
 	c[0] = hostFun;
 	pPack += sizeof(char*);
@@ -1995,11 +1993,9 @@ int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
 	// an error - right now it doesn't have an effect
 	// you should change the implementation of l_packStr/l_unpackStr
 	// to differentiate the NULL and the ERROR in the offset
-	pRegFuncArgs->hostFun  = l_unpackStr(pPacket, &offset);
-	if( ERROR == offset ) return ERROR; else pPacket += offset;
 
 	char** c = (char **) pPacket;
-	pRegFuncArgs->hostFEaddr = c[0];
+	pRegFuncArgs->hostFun = c[0];
 	pPacket += sizeof(char*);
 
 	pRegFuncArgs->deviceFun = l_unpackStr(pPacket, &offset);
@@ -2307,7 +2303,6 @@ char * methodIdToString(const int method_id){
 	case CUDA_GET_DEVICE: fname = "cudaGetDevice"; break;
 	case CUDA_SET_DEVICE: fname = "cudaSetDevice"; break;
 	case CUDA_CONFIGURE_CALL: fname = "cudaConfigureCall"; break;
-	case FE_BE_PIN_PAGES: fname = "feBePinPages"; break;
 	case CUDA_THREAD_SYNCHRONIZE: fname = "cudaThreadSynchronize"; break;
 	case CUDA_THREAD_EXIT: fname = "cudaThreadExit"; break;
 	case CUDA_MEMSET: fname = "cudaMemset"; break;

@@ -263,15 +263,14 @@ static OPS_FN_PROTO(CudaLaunch)
 	struct fatcubins *cubin_list = NULL;
 	GET_CUBIN_VALIST(cubin_list, pkt);
 
-	// FIXME We assume entry is just a memory pointer, not a string.
-	// Printing the entry as a string will confuse your terminal
+	// 'entry' is some hostFun symbol pointer
 	const char *entry = (const char *)pkt->args[0].argull;
 
 	// Locate the func structure; we assume func names are unique across cubins.
 	bool found = false;
 	cubins_for_each_cubin(cubin_list, fatcubin) {
 		cubin_for_each_function(fatcubin, func) {
-			if (func->hostFEaddr == entry) found = true;
+			if (func->hostFun == entry) found = true;
 			if (found) break;
 		}
 		if (found) break;
@@ -283,7 +282,8 @@ static OPS_FN_PROTO(CudaLaunch)
 	}
 
 	pkt->ret_ex_val.err = cudaLaunch(func->hostFun);
-	printd(DBG_DEBUG, "launch(%p->%p)\n", entry, func->hostFun);
+	printd(DBG_DEBUG, "launch(%p)\n", entry);
+	BUG(pkt->ret_ex_val.err != cudaSuccess);
 	return 0;
 
 fail:
@@ -315,6 +315,25 @@ static OPS_FN_PROTO(CudaMalloc)
 
 	printd(DBG_DEBUG, "cudaMalloc devPtr=%p size=%lu ret:%u\n",
 			devPtr, size, pkt->ret_ex_val.err);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMallocPitch)
+{
+	// We are to write the value of devPtr to args[0].argull, and the value of
+	// pitch to args[1].arr_argi[0].
+	void *devPtr;
+	size_t pitch;
+	size_t width = pkt->args[2].arr_argi[0];
+	size_t height = pkt->args[2].arr_argi[1];
+
+	pkt->ret_ex_val.err = cudaMallocPitch(&devPtr, &pitch, width, height);
+	pkt->args[0].argull = (unsigned long long)devPtr;
+	pkt->args[1].arr_argi[0] = pitch;
+
+	printd(DBG_DEBUG, "cudaMallocPitch devPtr=%p pitch=%lu"
+			" width=%lu height=%lu ret:%u\n",
+			devPtr, pitch, width, height, pkt->ret_ex_val.err);
 	return 0;
 }
 
@@ -448,12 +467,23 @@ fail:
 	return exit_errno;
 }
 
+static OPS_FN_PROTO(CudaFuncGetAttributes)
+{
+   void *attr = (void*)((uintptr_t)pkt + pkt->args[0].argull); // output arg
+   char *func = (char*)((uintptr_t)pkt + pkt->args[1].argull); // func name
+
+   pkt->ret_ex_val.err = cudaFuncGetAttributes(attr, func);
+   printd(DBG_DEBUG, "funcGetAttr func='%s'\n", func);
+   return 0;
+}
+
 const struct cuda_ops exec_ops =
 {
 	// Functions which take only a cuda_packet*
 	.configureCall = CudaConfigureCall,
 	.free = CudaFree,
 	.malloc = CudaMalloc,
+	.mallocPitch = CudaMallocPitch,
 	.memcpyD2D = CudaMemcpyD2D,
 	.memcpyD2H = CudaMemcpyD2H,
 	.memcpyH2D = CudaMemcpyH2D,
@@ -462,6 +492,7 @@ const struct cuda_ops exec_ops =
 	.threadExit = CudaThreadExit,
 	.threadSynchronize = CudaThreadSynchronize,
 	.unregisterFatBinary = __CudaUnregisterFatBinary,
+	.funcGetAttributes = CudaFuncGetAttributes,
 
 	// Functions which take a cuda_packet* and fatcubins*
 	.launch = CudaLaunch,

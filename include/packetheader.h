@@ -36,7 +36,7 @@ enum cuda_packet_flags
 	CUDA_PKT_REQUEST = 0x1,		/* This packet is flowing from app to assembly. */
 	CUDA_PKT_RESPONSE  = 0x2,	/* Assembly -> app; RPC already executed somewhere. */
 	//CUDA_PKT_MORE_DATA = 0x4, /* Not used. */
-	CUDA_PKT_ERROR    = 0x8		/* Used to indicate if the RPC produced an error. */
+	//CUDA_PKT_ERROR    = 0x8		/* Used to indicate if the RPC produced an error. */
 	//CUDA_PKT_PTR_DATA = 0x10, /* Not used. */
 	//CUDA_PKT_ADDR_MAPPED = 0x20, /* Not used. */
 	//CUDA_PKT_MEM_SHARED = 0x40, /* Not used. */
@@ -44,17 +44,15 @@ enum cuda_packet_flags
 // TODO Create macros to access and modify the value of 'flags' in a cuda packet
 // instead of having code manually do raw bit ops everywhere.
 
-// The cudaRegisterFunction() has 10 arguments. Instead of passing them in multiple
-// packet rounds, it is serialized onto as many pages and can be accessed by
-// using this struct
+// The cudaRegisterFunction() has 10 arguments. Instead of passing them in
+// multiple packet rounds, it is serialized onto as many pages and can be
+// accessed by using this struct
+//
+// Refer to cuda_hidden.h for the meanings of these variables.
 typedef struct {
 	struct list_head link;
 	void** fatCubinHandle;
 	char* hostFun;
-	// the hostFEaddr is used to keep the local pointer to the hostFun
-	// this is retrieved when launch is called; this is only the pointer
-	// not the string
-	char* hostFEaddr;  // original Key in BE to retrieve when launch is called
     char* deviceFun;
 	char* deviceName;
 	int thread_limit;

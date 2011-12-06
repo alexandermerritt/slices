@@ -903,24 +903,46 @@ cudaError_t cudaFuncSetCacheConfig(const char *func,
 
 	return (pFunc(func, cacheConfig));
 }
+#endif
 
-cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr,
-		const char *func) {
-	typedef cudaError_t (* pFuncType)(struct cudaFuncAttributes *attr,
-			const char *func);
-	static pFuncType pFunc = NULL;
+cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *func) {
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	void *func_shm = NULL; // Pointer to func str within shm
+	void *attr_shm = NULL; // Pointer to attr within shm
+	unsigned int func_len;
 
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaFuncGetAttributes");
+	printd(DBG_DEBUG, "func='%s'\n", func);
 
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
+	if (!attr || !func) {
+		return cudaErrorInvalidDeviceFunction;
 	}
 
-	l_printFuncSig(__FUNCTION__);
+	func_len = strlen(func) + 1;
 
-	return (pFunc(attr, func));
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_FUNC_GET_ATTR;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(struct cuda_packet); // offset
+	shmpkt->args[1].argull = (shmpkt->args[0].argull + sizeof(*attr)); // offset
+	shmpkt->args[2].arr_argi[0] = func_len;
+	func_shm = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
+	memcpy(func_shm, func, func_len);
+
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	// Copy out the structure into the user argument
+	attr_shm = (struct cudaFuncAttributes*)
+		((uintptr_t)shmpkt + shmpkt->args[0].argull);
+	memcpy(attr, attr_shm, sizeof(*attr));
+
+	return shmpkt->ret_ex_val.err;
 }
+
+#if 0
 cudaError_t cudaSetDoubleForDevice(double *d) {
 	typedef cudaError_t (* pFuncType)(double *d);
 	static pFuncType pFunc = NULL;
@@ -979,6 +1001,38 @@ cudaError_t cudaMalloc(void **devPtr, size_t size) {
 	return shmpkt->ret_ex_val.err;
 }
 
+cudaError_t cudaMallocPitch(
+		void **devPtr, size_t *pitch, size_t width, size_t height) {
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	shmpkt->method_id = CUDA_MALLOC_PITCH;
+	shmpkt->thr_id = pthread_self();
+	// We expect the sink to write the value of devPtr to args[0].argull
+	// We expect the sink to write the value of pitch to args[1].arr_argi[0]
+	shmpkt->args[2].arr_argi[0] = width;
+	shmpkt->args[2].arr_argi[1] = height;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	if ((width * height) >= THREAD_SHM_SIZE) {
+		fprintf(stderr, "%s: error: memory region too large: %lu\n",
+				__func__, (width * height));
+		assert(0);
+	}
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*devPtr = (void*)shmpkt->args[0].argull;
+	*pitch = shmpkt->args[1].arr_argi[0];
+	printd(DBG_DEBUG, "devPtr=%p pitch=%lu\n", *devPtr, *pitch);
+
+	return shmpkt->ret_ex_val.err;
+}
+
+
+
 #if 0
 cudaError_t cudaMallocHost(void **ptr, size_t size) {
 	typedef cudaError_t (* pFuncType)(void **ptr, size_t size);
@@ -994,23 +1048,6 @@ cudaError_t cudaMallocHost(void **ptr, size_t size) {
 	l_printFuncSig(__FUNCTION__);
 
 	return (pFunc(ptr, size));
-}
-
-cudaError_t cudaMallocPitch(void **devPtr, size_t *pitch, size_t width,
-		size_t height) {
-	typedef cudaError_t (* pFuncType)(void **devPtr, size_t *pitch,
-			size_t width, size_t height);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMallocPitch");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(devPtr, pitch, width, height));
 }
 
 cudaError_t cudaMallocArray(struct cudaArray **array,
@@ -2295,6 +2332,9 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
+
+	printd(DBG_DEBUG, "handle=%p hostFun=%p deviceFun=%s deviceName=%s\n",
+			fatCubinHandle, hostFun, deviceFun, deviceName);
 
 	return;
 }

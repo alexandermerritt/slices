@@ -305,6 +305,25 @@ fail:
 }
 
 // This function has no payload.
+static OPS_FN_PROTO(CudaMallocPitch)
+{
+	int err, exit_errno;
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+
+// This function has no payload.
 static OPS_FN_PROTO(CudaFree)
 {
 	int err, exit_errno;
@@ -428,6 +447,33 @@ fail:
 	return exit_errno;
 }
 
+// This function has two payloads. The first payload is the second argument
+// pushed to the server; the second payload is the first argument, pulled from
+// the server.
+static OPS_FN_PROTO(CudaFuncGetAttributes)
+{
+	int err, exit_errno;
+	void *attr = (void*)((uintptr_t)pkt + pkt->args[0].argull);
+	char *func = (char*)((uintptr_t)pkt + pkt->args[1].argull);
+	size_t func_len = pkt->args[2].arr_argi[0];
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_put(conn, func, func_len);
+	CONN_FAIL_ON_ERR(err);
+
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, attr, sizeof(struct cudaFuncAttributes));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
 
 const struct cuda_ops rpc_ops =
 {
@@ -435,6 +481,7 @@ const struct cuda_ops rpc_ops =
 	.configureCall = CudaConfigureCall,
 	.free = CudaFree,
 	.malloc = CudaMalloc,
+	.mallocPitch = CudaMallocPitch,
 	.memcpyD2D = CudaMemcpyD2D,
 	.memcpyD2H = CudaMemcpyD2H,
 	.memcpyH2D = CudaMemcpyH2D,
@@ -443,6 +490,7 @@ const struct cuda_ops rpc_ops =
 	.threadExit = CudaThreadExit,
 	.threadSynchronize = CudaThreadSynchronize,
 	.unregisterFatBinary = __CudaUnregisterFatBinary,
+	.funcGetAttributes = CudaFuncGetAttributes,
 
 	// Functions which take a cuda_packet*, NULL then a sockconn*
 	.launch = CudaLaunch,
