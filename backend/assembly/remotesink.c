@@ -512,7 +512,22 @@ fail:
 	return -1;
 }
 
-typedef enum {TO_HOST = 1, FROM_HOST} data_direction;
+/**
+ * Bitmap used to describe if data follows a packet in either direction. Both
+ * may be set, indicating an RPC has data accompanying a packet following both
+ * the initial request and the subsequent response.
+ */
+typedef enum
+{
+   TO_HOST     = 0x1,
+   FROM_HOST   = 0x2
+} data_direction;
+
+typedef struct
+{
+   size_t to_host;
+   size_t from_host;
+} payload_size;
 
 /**
  * Determine if an RPC has payload data associated with it (pointer arguments).
@@ -527,9 +542,10 @@ static bool
 cudarpc_has_payload(
 		const struct cuda_packet *pkt,	//! the RPC to inspect
 		data_direction *direction,		//! which way it's flowing
-		size_t *size)					//! how much data
+		payload_size *size)             //! how much data
 {
 	bool has_payload = true;
+	memset(size, 0, sizeof(*size));
 
 	/* XXX XXX XXX The code in this function GREATLY depends on how the
 	 * functions in the interposer are coded, as we look at specific arguments
@@ -539,40 +555,40 @@ cudarpc_has_payload(
 	 */
 	switch (pkt->method_id) {
 		case CUDA_GET_DEVICE_PROPERTIES:
-			*size = sizeof(struct cudaDeviceProp);
 			*direction = TO_HOST;
+			size->to_host = sizeof(struct cudaDeviceProp);
 			break;
 		case CUDA_SETUP_ARGUMENT:
-			*size = pkt->args[1].arr_argi[0];
 			*direction = FROM_HOST;
+			size->from_host = pkt->args[1].arr_argi[0];
 			break;
 		case CUDA_MEMCPY_H2D:
-			*size = pkt->args[2].arr_argi[0];
 			*direction = FROM_HOST;
+			size->from_host = pkt->args[2].arr_argi[0];
 			break;
 		case CUDA_MEMCPY_D2H:
-			*size = pkt->args[2].arr_argi[0];
 			*direction = TO_HOST;
+			size->to_host = pkt->args[2].arr_argi[0];
 			break;
 		case CUDA_MEMCPY_TO_SYMBOL_H2D:
-			*size = pkt->args[2].arr_argi[0];
 			*direction = FROM_HOST;
+			size->from_host = pkt->args[2].arr_argi[0];
 			break;
 		case CUDA_MEMCPY_FROM_SYMBOL_D2H:
-			*size = pkt->args[2].arr_argi[0];
 			*direction = TO_HOST;
+			size->to_host = pkt->args[2].arr_argi[0];
 			break;
 		case  __CUDA_REGISTER_FAT_BINARY:
-			*size = pkt->args[1].argll;
 			*direction = FROM_HOST;
+			size->from_host = pkt->args[1].argll;
 			break;
 		case __CUDA_REGISTER_FUNCTION:
-			*size = pkt->args[1].arr_argi[0];
 			*direction = FROM_HOST;
+			size->from_host = pkt->args[1].arr_argi[0];
 			break;
 		case __CUDA_REGISTER_VARIABLE:
-			*size = pkt->args[1].arr_argi[0];
 			*direction = FROM_HOST;
+			size->from_host = pkt->args[1].arr_argi[0];
 			break;
 		default: // everything else has no data, or is not a supported call
 			has_payload = false;
@@ -604,7 +620,7 @@ do_cuda_rpc(
 
 	bool has_payload; //! any data an RPC requires is stored after the pkt
 	data_direction direction;
-	size_t data_size;
+	payload_size data_size;
 
 	// Transactions always start with the packet itself. This allows both ends
 	// to determine the remainder of the protocol from the method_id directly.
@@ -613,9 +629,9 @@ do_cuda_rpc(
 
 	has_payload = cudarpc_has_payload(pkt, &direction, &data_size);
 
-	if (has_payload && direction == FROM_HOST) {
+	if (has_payload && (direction & FROM_HOST)) {
 		// TODO realloc buffer if size greater
-		err = conn_get(conn, (pkt + 1), data_size);
+		err = conn_get(conn, (pkt + 1), data_size.from_host);
 		if (err < 0) return -ENETDOWN;
 	}
 
@@ -626,8 +642,8 @@ do_cuda_rpc(
 	err = conn_put(conn, pkt, sizeof(*pkt));
 	if (err < 0) return -ENETDOWN;
 
-	if (has_payload && direction == TO_HOST) {
-		err = conn_put(conn, (pkt + 1), data_size);
+	if (has_payload && (direction & TO_HOST)) {
+		err = conn_put(conn, (pkt + 1), data_size.to_host);
 		if (err < 0) return -ENETDOWN;
 	}
 
