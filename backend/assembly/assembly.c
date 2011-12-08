@@ -696,23 +696,27 @@ duplicate_call(	struct assembly *assm,
 	switch (pkt->method_id) {
 		case __CUDA_REGISTER_FAT_BINARY:
 			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
-				assm->mappings[vgpu_id].ops.registerFatBinary(pkt,
-						assm->cubins, conn);
+				assm->mappings[vgpu_id].ops.registerFatBinary(
+						pkt, assm->cubins, conn);
 			break;
 		case __CUDA_REGISTER_FUNCTION:
 			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
-				assm->mappings[vgpu_id].ops.registerFunction(pkt,
-						assm->cubins, conn);
+				assm->mappings[vgpu_id].ops.registerFunction(
+						pkt, assm->cubins, conn);
 			break;
 		case __CUDA_REGISTER_VARIABLE:
 			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
-				assm->mappings[vgpu_id].ops.registerVar(pkt,
-						assm->cubins, conn);
+				assm->mappings[vgpu_id].ops.registerVar(
+						pkt, assm->cubins, conn);
 			break;
 		case __CUDA_UNREGISTER_FAT_BINARY:
 			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
-				assm->mappings[vgpu_id].ops.unregisterFatBinary(pkt,
-						NULL, conn);
+				assm->mappings[vgpu_id].ops.registerTexture(pkt, NULL, conn);
+			break;
+		case __CUDA_REGISTER_TEXTURE:
+			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
+				assm->mappings[vgpu_id].ops.registerTexture(
+						pkt, assm->cubins, conn);
 			break;
 		default:
 			break;
@@ -744,8 +748,14 @@ demux(
 		case CUDA_FREE:
 			mapping->ops.free(pkt, NULL, mapping->rpc_conn);
 			break;
+		case CUDA_FREE_ARRAY:
+			mapping->ops.freeArray(pkt, NULL, mapping->rpc_conn);
+			break;
 		case CUDA_MALLOC:
 			mapping->ops.malloc(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_MALLOC_ARRAY:
+			mapping->ops.mallocArray(pkt, NULL, mapping->rpc_conn);
 			break;
 		case CUDA_MALLOC_PITCH:
 			mapping->ops.mallocPitch(pkt, NULL, mapping->rpc_conn);
@@ -758,6 +768,12 @@ demux(
 			break;
 		case CUDA_MEMCPY_H2D:
 			mapping->ops.memcpyH2D(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_MEMCPY_TO_ARRAY_H2D:
+			mapping->ops.memcpyToArrayH2D(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_MEMCPY_TO_ARRAY_D2D:
+			mapping->ops.memcpyToArrayD2D(pkt, NULL, mapping->rpc_conn);
 			break;
 		case CUDA_SET_DEVICE:
 			mapping->ops.setDevice(pkt, NULL, mapping->rpc_conn);
@@ -774,6 +790,45 @@ demux(
 		case CUDA_FUNC_GET_ATTR:
 			mapping->ops.funcGetAttributes(pkt, NULL, mapping->rpc_conn);
 			break;
+		case CUDA_BIND_TEXTURE:
+			mapping->ops.bindTexture(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_GET_TEXTURE_REFERENCE:
+			mapping->ops.getTextureReference(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_FREE_HOST:
+			mapping->ops.freeHost(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_HOST_ALLOC:
+			mapping->ops.hostAlloc(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_MEMCPY_ASYNC_H2D:
+			mapping->ops.memcpyAsyncH2D(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_MEMCPY_ASYNC_D2H:
+			mapping->ops.memcpyAsyncD2H(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_MEMCPY_ASYNC_D2D:
+			mapping->ops.memcpyAsyncD2D(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_MEM_GET_INFO:
+			mapping->ops.memGetInfo(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_MEMSET:
+			mapping->ops.memset(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_SET_DEVICE_FLAGS:
+			mapping->ops.setDeviceFlags(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_SET_VALID_DEVICES:
+			mapping->ops.setValidDevices(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_STREAM_CREATE:
+			mapping->ops.streamCreate(pkt, NULL, mapping->rpc_conn);
+			break;
+		case CUDA_STREAM_SYNCHRONIZE:
+			mapping->ops.streamSynchronize(pkt, NULL, mapping->rpc_conn);
+			break;
 
 		// Functions which take a cuda_packet* and fatcubins*.
 		// A third argument may or may not point to allocated network state,
@@ -789,6 +844,12 @@ demux(
 		case CUDA_MEMCPY_TO_SYMBOL_H2D:
 			mapping->ops.memcpyToSymbolH2D(pkt, assm->cubins, mapping->rpc_conn);
 			break;
+		case CUDA_MEMCPY_TO_SYMBOL_ASYNC_H2D:
+			mapping->ops.memcpyToSymbolAsyncH2D(pkt, assm->cubins, mapping->rpc_conn);
+			break;
+		case CUDA_BIND_TEXTURE_TO_ARRAY:
+			mapping->ops.bindTextureToArray(pkt, assm->cubins, mapping->rpc_conn);
+			break;
 
 		// Functions which require duplication across node instances of the
 		// NVIDIA Runtime and kernel module this assembly is mapped to.
@@ -796,6 +857,7 @@ demux(
 		case __CUDA_REGISTER_FUNCTION:
 		case __CUDA_REGISTER_VARIABLE:
 		case __CUDA_UNREGISTER_FAT_BINARY:
+		case __CUDA_REGISTER_TEXTURE:
 			err = duplicate_call(assm, pkt, mapping->rpc_conn);
 			if (err < 0) goto fail;
 			break;

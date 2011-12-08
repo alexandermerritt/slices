@@ -27,6 +27,10 @@ extern void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global);
 
+extern void __cudaRegisterTexture(void** fatCubinHandle, const struct
+		textureReference* texref, const void** deviceAddress, const char
+		*deviceName, int dim, int norm, int ext);
+
 // TODO register texture
 
 #endif

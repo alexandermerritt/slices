@@ -51,6 +51,10 @@
  * address spaces). See cudaGetDeviceCount as a simple example.
  */
 
+// Note for reading the code in this file.
+// 		It might be of use to enable 'syntax folding' in Vim
+// 			:set foldmethod=syntax
+
 // if this file is .c, if you do not define _GNU_SOURCE then it complains
 // that RTLD_NEXT is undeclared
 // if this file is  .cpp, then you get warning "_GNU_SOURCE" redefined
@@ -91,14 +95,7 @@
 //#undef printd
 //#define printd(level, fmt, args...)
 
-/*-------------------------------------- EXTERNS -----------------------------*/
-
-#if 0
-// from kidron_common_f.c
-extern int ini_getLocal(const ini_t* pIni);
-extern int ini_getIni(ini_t* pIni);
-extern int ini_freeIni(ini_t* pIni);
-#endif
+#define USERMSG_PREFIX "=== INTERPOSER ==="
 
 /*-------------------------------------- INTERNAL STATE ----------------------*/
 
@@ -116,6 +113,8 @@ static unsigned int num_registered_cubins = 0;
 /*-------------------------------------- SHMGRP DEFINITIONS ------------------*/
 
 //! Amount of memory to allocate for each CUDA thread, in bytes.
+//! XXX FIXME Put in checks to make sure the usercode isn't trying to copy more
+//! than we allocate.
 #define THREAD_SHM_SIZE					(64 << 20)
 
 /**
@@ -295,16 +294,98 @@ get_region(pthread_t tid)
 
 /*-------------------------------------- INTERPOSING API ---------------------*/
 
-/* Updates needed in the future:
- *
- * TODO Each function need to choose which shm region it must use. This will
- * depend on the thread ID making the call.
- *
- * TODO Support placing multiple calls into a shm region. This will require
- * using some sort of queueing data structure within it.
- */
+// TODO We could support a circular queue within each shm region in the future.
 
-cudaError_t cudaGetDeviceCount(int *count) {
+//
+// Thread Management API
+//
+
+cudaError_t cudaThreadExit(void)
+{
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_THREAD_EXIT;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	printd(DBG_DEBUG, "called\n");
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaThreadSynchronize(void)
+{
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_THREAD_SYNCHRONIZE;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	printd(DBG_DEBUG, "called\n");
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
+}
+
+//
+// Error Handling API
+//
+
+const char* cudaGetErrorString(cudaError_t error)
+{
+	// Doesn't need to be forwarded anywhere. Call the function in the NVIDIA
+	// runtime (FIXME an assumption we maybe shouldn't make?)
+	const char *dl_err_str;
+	typedef const char * (*func)(cudaError_t err);
+	func f = (func)dlsym(RTLD_NEXT, "cudaGetErrorString");
+	dl_err_str = dlerror();
+	if (dl_err_str) {
+		fprintf(stderr, "Error: No NVIDIA runtime exists: %s\n", dl_err_str);
+		return NULL;
+	}
+	return f(error);
+}
+
+cudaError_t cudaGetLastError(void)
+{
+	return cuda_err; // ??
+}
+
+//
+// Device Managment API
+//
+
+cudaError_t cudaGetDevice(int *device)
+{
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+
+	printd(DBG_DEBUG, "thread=%lu\n", pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_GET_DEVICE;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(*shmpkt);
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*device = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaGetDeviceCount(int *count)
+{
 	int err;
 	volatile struct cuda_packet *shmpkt;
 
@@ -333,10 +414,10 @@ cudaError_t cudaGetDeviceCount(int *count) {
 	 * additional copying before returning.
 	 */
 
-	memset((void*)shmpkt, 0, sizeof(struct cuda_packet));
+	memset((void*)shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_GET_DEVICE_COUNT;
 	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(struct cuda_packet); // offset
+	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
 	shmpkt->flags = CUDA_PKT_REQUEST; // set this last FIXME sink spins on this
 
 	wmb(); // flush writes from caches
@@ -348,16 +429,17 @@ cudaError_t cudaGetDeviceCount(int *count) {
 	return shmpkt->ret_ex_val.err;
 }
 
-cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
+cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
+{
 	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	struct cudaDeviceProp *prop_shm = NULL;
 
 	printd(DBG_DEBUG, "dev=%d\n", device);
 
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_GET_DEVICE_PROPERTIES;
 	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(struct cuda_packet); // offset
+	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
 	shmpkt->args[1].argll = device;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
@@ -371,12 +453,13 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device) {
 	return shmpkt->ret_ex_val.err;
 }
 
-cudaError_t cudaSetDevice(int device) {
+cudaError_t cudaSetDevice(int device)
+{
 	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
 	printd(DBG_DEBUG, "device=%d\n", device);
 
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_SET_DEVICE;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argll = device;
@@ -389,24 +472,106 @@ cudaError_t cudaSetDevice(int device) {
 	return shmpkt->ret_ex_val.err;
 }
 
-cudaError_t cudaGetDevice(int *device) {
+cudaError_t cudaSetDeviceFlags(unsigned int flags)
+{
 	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
-	printd(DBG_DEBUG, "thread=%lu\n", pthread_self());
+	printd(DBG_DEBUG, "flags=0x%x\n", flags);
 
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
-	shmpkt->method_id = CUDA_GET_DEVICE;
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_SET_DEVICE_FLAGS;
 	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(struct cuda_packet);
+	shmpkt->args[0].argull = flags;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
-	*device = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
 	return shmpkt->ret_ex_val.err;
 }
+
+cudaError_t cudaSetValidDevices(int *device_arr, int len)
+{
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	void *shmptr = shmpkt;
+
+	printd(DBG_DEBUG, "called\n");
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_SET_VALID_DEVICES;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(*shmpkt);
+	shmpkt->args[1].argll = len;
+	shmptr += shmpkt->args[0].argull;
+	memcpy(shmptr, device_arr, (len * sizeof(*device_arr)));
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
+}
+
+//
+// Stream Management API
+//
+
+// XXX NOTE XXX
+//
+// In v3.2 cudaStream_t is defined: typedef struct CUstream_st* cudaStream_t.
+// So this is a pointer to a pointer allocated by the caller, and is meant as an
+// output parameter. The compiler and debugger cannot tell me what this
+// structure looks like, nor what its size is, so we'll have to maintain a cache
+// of cudaStream_t in the sink processes, and return our own means of
+// identification for them to the caller instead.  I'm guessing that the Runtime
+// API allocates some kind of memory or something to this pointer internally,
+// and uses this pointer as a key to look it up. We'll have to do the same.
+//
+// cuda v3.2 cudaStream_t: pointer to opaque struct
+// cuda v2.3 cudaStream_t: integer
+
+cudaError_t cudaStreamCreate(cudaStream_t *pStream)
+{
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_STREAM_CREATE;
+	shmpkt->thr_id = pthread_self();
+	// We'll expect the value of *pStream to exist in args[0]
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*pStream = shmpkt->args[0].stream;
+	printd(DBG_DEBUG, "stream=%p\n", *pStream);
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaStreamSynchronize(cudaStream_t stream)
+{
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_STREAM_SYNCHRONIZE;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].stream = stream;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	printd(DBG_DEBUG, "stream=%p\n", stream);
+	return shmpkt->ret_ex_val.err;
+}
+
+//
+// Execution Control API
+//
 
 cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
@@ -417,16 +582,12 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 			blockDim.x, blockDim.y, blockDim.z,
 			sharedMem, stream);
 
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_CONFIGURE_CALL;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].arg_dim = gridDim; // = on structs works :)
 	shmpkt->args[1].arg_dim = blockDim;
 	shmpkt->args[2].arr_argi[0] = sharedMem;
-	// NOTE: cudaStream_t is some shitty typedef'd pointer to an undefined
-	// struct somewhere, so I can't memcpy it to the shared memory region
-	// 		cuda v2.3 cudaStream_t: integer
-	// 		cuda v3.2 cudaStream_t: pointer
 	shmpkt->args[3].argull = (uint64_t)stream;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
@@ -438,474 +599,8 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 	return shmpkt->ret_ex_val.err;
 }
 
-cudaError_t cudaLaunch(const char *entry) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
-
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
-	shmpkt->method_id = CUDA_LAUNCH;
-	shmpkt->thr_id = pthread_self();
-	// FIXME We assume entry is just a memory pointer, not a string.
-	shmpkt->args[0].argull = (unsigned long long)entry;
-	printd(DBG_DEBUG, "entry=%p\n", (void*)shmpkt->args[0].argull);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
-
-	return shmpkt->ret_ex_val.err;
-}
-
-cudaError_t cudaDriverGetVersion(int *driverVersion) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
-
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
-	shmpkt->method_id = CUDA_DRIVER_GET_VERSION;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(struct cuda_packet);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-
-	wmb();
-
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
-
-	*driverVersion = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
-	return shmpkt->ret_ex_val.err;
-}
-
-cudaError_t cudaRuntimeGetVersion(int *runtimeVersion) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
-
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
-	shmpkt->method_id = CUDA_RUNTIME_GET_VERSION;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(struct cuda_packet);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
-
-	*runtimeVersion = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
-	return shmpkt->ret_ex_val.err;
-}
-
-cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	void *shm_ptr;
-
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
-	shmpkt->method_id = CUDA_SETUP_ARGUMENT;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(struct cuda_packet);
-	shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
-	memcpy(shm_ptr, arg, size);
-	shmpkt->args[1].arr_argi[0] = size;
-	shmpkt->args[1].arr_argi[1] = offset;
-	shmpkt->flags = CUDA_PKT_REQUEST;
-
-	printd(DBG_DEBUG, "arg=%p size=%lu offset=%lu\n",
-			arg, size, offset);
-
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
-
-	return shmpkt->ret_ex_val.err;
-}
-
-
-
-#if 0
-cudaError_t cudaChooseDevice(int *device, const struct cudaDeviceProp *prop) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)be_reg.shm[0];
-
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
-	shmpkt->method_id = CUDA_CHOOSE_DEVICE;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argp = (void *)device;
-	shmpkt->args[1].argp = prop;
-	shmpkt->flags = CUDA_PKT_REQUEST;
-
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		;
-
-	return shmpkt->ret_ex_val.err;
-}
-#endif
-
-cudaError_t cudaThreadExit(void) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
-
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
-	shmpkt->method_id = CUDA_THREAD_EXIT;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->flags = CUDA_PKT_REQUEST;
-
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
-
-	return shmpkt->ret_ex_val.err;
-}
-
-cudaError_t cudaThreadSynchronize(void) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
-
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
-	shmpkt->method_id = CUDA_THREAD_SYNCHRONIZE;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->flags = CUDA_PKT_REQUEST;
-
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
-
-	return shmpkt->ret_ex_val.err;
-}
-
-#if 0
-cudaError_t cudaThreadSetLimit(enum cudaLimit limit, size_t value) {
-	typedef cudaError_t (* pFuncType)(enum cudaLimit limit, size_t value);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaThreadSetLimit");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(limit, value));
-}
-
-cudaError_t cudaThreadGetLimit(size_t *pValue, enum cudaLimit limit) {
-	typedef cudaError_t (* pFuncType)(size_t *pValue, enum cudaLimit limit);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaThreadGetLimit");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(pValue, limit));
-}
-
-cudaError_t cudaThreadGetCacheConfig(enum cudaFuncCache *pCacheConfig) {
-	typedef cudaError_t (* pFuncType)(enum cudaFuncCache *pCacheConfig);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaThreadGetCacheConfig");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(pCacheConfig));
-}
-cudaError_t cudaThreadSetCacheConfig(enum cudaFuncCache cacheConfig) {
-	typedef cudaError_t (* pFuncType)(enum cudaFuncCache cacheConfig);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaThreadSetCacheConfig");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(cacheConfig));
-}
-#endif
-
-cudaError_t cudaGetLastError(void) {
-	return cuda_err; // ??
-}
-
-
-#if 0
-cudaError_t cudaPeekAtLastError(void) {
-	typedef cudaError_t (* pFuncType)(void);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaPeekAtLastError");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc());
-}
-#endif
-
-const char* cudaGetErrorString(cudaError_t error) {
-	// Doesn't need to be forwarded anywhere. Call the function in the NVIDIA
-	// runtime (FIXME an assumption we maybe shouldn't make?)
-	const char *dl_err_str;
-	typedef const char * (*func)(cudaError_t err);
-	func f = (func)dlsym(RTLD_NEXT, "cudaGetErrorString");
-	dl_err_str = dlerror();
-	if (dl_err_str) {
-		fprintf(stderr, "Error: No NVIDIA runtime exists: %s\n", dl_err_str);
-		return NULL;
-	}
-	return f(error);
-}
-
-#if 0
-cudaError_t cudaSetValidDevices(int *device_arr, int len) {
-	typedef cudaError_t (* pFuncType)(int *device_arr, int len);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaSetValidDevices");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(device_arr, len));
-}
-cudaError_t cudaSetDeviceFlags(unsigned int flags) {
-	typedef cudaError_t (* pFuncType)(unsigned int flags);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaSetDeviceFlags");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(flags));
-}
-
-cudaError_t cudaStreamCreate(cudaStream_t *pStream) {
-	typedef cudaError_t (* pFuncType)(cudaStream_t *pStream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaStreamCreate");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(pStream));
-}
-cudaError_t cudaStreamDestroy(cudaStream_t stream) {
-	typedef cudaError_t (* pFuncType)(cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaStreamDestroy");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(stream));
-}
-cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event,
-		unsigned int flags) {
-	typedef cudaError_t (* pFuncType)(cudaStream_t stream, cudaEvent_t event,
-			unsigned int flags);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaStreamWaitEvent");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(stream, event, flags));
-}
-cudaError_t cudaStreamSynchronize(cudaStream_t stream) {
-	typedef cudaError_t (* pFuncType)(cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaStreamSynchronize");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(stream));
-}
-cudaError_t cudaStreamQuery(cudaStream_t stream) {
-	typedef cudaError_t (* pFuncType)(cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaStreamQuery");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(stream));
-}
-
-cudaError_t cudaEventCreate(cudaEvent_t *event) {
-	typedef cudaError_t (* pFuncType)(cudaEvent_t *event);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaEventCreate");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(event));
-}
-cudaError_t cudaEventCreateWithFlags(cudaEvent_t *event,
-		unsigned int flags) {
-	typedef cudaError_t (* pFuncType)(cudaEvent_t *event, unsigned int flags);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaEventCreateWithFlags");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(event, flags));
-}
-cudaError_t cudaEventRecord(cudaEvent_t event, cudaStream_t stream
-		__dv(0)) {
-	typedef cudaError_t (* pFuncType)(cudaEvent_t event, cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaEventRecord");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(event, stream));
-}
-cudaError_t cudaEventQuery(cudaEvent_t event) {
-	typedef cudaError_t (* pFuncType)(cudaEvent_t event);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaEventQuery");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(event));
-}
-cudaError_t cudaEventSynchronize(cudaEvent_t event) {
-	typedef cudaError_t (* pFuncType)(cudaEvent_t event);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaEventSynchronize");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(event));
-}
-cudaError_t cudaEventDestroy(cudaEvent_t event) {
-	typedef cudaError_t (* pFuncType)(cudaEvent_t event);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaEventDestroy");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(event));
-}
-cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start,
-		cudaEvent_t end) {
-	typedef cudaError_t (* pFuncType)(float *ms, cudaEvent_t start,
-			cudaEvent_t end);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaEventElapsedTime");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(ms, start, end));
-}
-cudaError_t cudaFuncSetCacheConfig(const char *func,
-		enum cudaFuncCache cacheConfig) {
-	typedef cudaError_t (* pFuncType)(const char *func,
-			enum cudaFuncCache cacheConfig);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaFuncSetCacheConfig");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(func, cacheConfig));
-}
-#endif
-
-cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *func) {
+cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *func)
+{
 	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	void *func_shm = NULL; // Pointer to func str within shm
 	void *attr_shm = NULL; // Pointer to attr within shm
@@ -919,10 +614,10 @@ cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *f
 
 	func_len = strlen(func) + 1;
 
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_FUNC_GET_ATTR;
 	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(struct cuda_packet); // offset
+	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
 	shmpkt->args[1].argull = (shmpkt->args[0].argull + sizeof(*attr)); // offset
 	shmpkt->args[2].arr_argi[0] = func_len;
 	func_shm = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
@@ -942,70 +637,196 @@ cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *f
 	return shmpkt->ret_ex_val.err;
 }
 
-#if 0
-cudaError_t cudaSetDoubleForDevice(double *d) {
-	typedef cudaError_t (* pFuncType)(double *d);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaSetDoubleForDevice");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(d));
-}
-cudaError_t cudaSetDoubleForHost(double *d) {
-	l_printFuncSig(__FUNCTION__);
-
-	typedef cudaError_t (* pFuncType)(double *d);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaSetDoubleForHost");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	return (pFunc(d));
-}
-#endif
-
-cudaError_t cudaMalloc(void **devPtr, size_t size) {
+cudaError_t cudaLaunch(const char *entry)
+{
 	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_LAUNCH;
+	shmpkt->thr_id = pthread_self();
+	// FIXME We assume entry is just a memory pointer, not a string.
+	shmpkt->args[0].argull = (uintptr_t)entry;
+	printd(DBG_DEBUG, "entry=%p\n", (void*)shmpkt->args[0].argull);
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset)
+{
+	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	void *shm_ptr;
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_SETUP_ARGUMENT;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(*shmpkt);
+	shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
+	memcpy(shm_ptr, arg, size);
+	shmpkt->args[1].arr_argi[0] = size;
+	shmpkt->args[1].arr_argi[1] = offset;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	printd(DBG_DEBUG, "arg=%p size=%lu offset=%lu\n",
+			arg, size, offset);
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
+}
+
+//
+// Memory Management API
+//
+
+cudaError_t cudaFree(void * devPtr)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_FREE;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argp = devPtr;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	printd(DBG_DEBUG, "devPtr=%p\n", devPtr);
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaFreeArray(struct cudaArray * array)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_FREE_ARRAY;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].cudaArray = array;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	printd(DBG_DEBUG, "array=%p\n", array);
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaFreeHost(void * ptr)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_FREE_HOST;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argp = ptr;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	printd(DBG_DEBUG, "ptr=%p\n", ptr);
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_HOST_ALLOC;
+	shmpkt->thr_id = pthread_self();
+	// We'll expect the value of *pHost to reside in args[0].argull
+	shmpkt->args[1].arr_argi[0] = size;
+	shmpkt->args[2].argull = flags;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*pHost = (void*)shmpkt->args[0].argull;
+	printd(DBG_DEBUG, "host=%p size=%lu flags=0x%x\n", *pHost, size, flags);
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaMalloc(void **devPtr, size_t size)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_MALLOC;
 	shmpkt->thr_id = pthread_self();
 	// We expect the sink to write the value of devPtr to args[0].argull
 	shmpkt->args[1].arr_argi[0] = size;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
-	if (size >= THREAD_SHM_SIZE) {
-		fprintf(stderr, "%s: error: memory region too large: %lu\n",
-				__func__, size);
-		assert(0);
-	}
-
 	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
 	*devPtr = (void*)shmpkt->args[0].argull;
-	printd(DBG_DEBUG, "devPtr=%p\n", *devPtr);
+	printd(DBG_DEBUG, "devPtr=%p size=%lu\n", *devPtr, size);
 
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaMallocArray(
+		struct cudaArray **array, // stores a device address
+		const struct cudaChannelFormatDesc *desc,
+		size_t width, size_t height __dv(0), unsigned int flags __dv(0))
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+	void *shmptr = (void*)shmpkt;
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_MALLOC_ARRAY;
+	shmpkt->thr_id = pthread_self();
+	// We expect the value of *array to be in args[0].cudaArray in the return
+	// packet
+	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
+	shmptr += sizeof(*shmpkt);
+	memcpy(shmptr, desc, sizeof(*desc));
+	shmpkt->args[1].arr_argi[0] = width;
+	shmpkt->args[1].arr_argi[1] = height;
+	shmpkt->args[2].argull = flags;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*array = shmpkt->args[0].cudaArray;
+	printd(DBG_DEBUG, "array=%p, desc=%p width=%lu height=%lu flags=0x%x\n",
+			*array, desc, width, height, flags);
 	return shmpkt->ret_ex_val.err;
 }
 
 cudaError_t cudaMallocPitch(
 		void **devPtr, size_t *pitch, size_t width, size_t height) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
 
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_MALLOC_PITCH;
 	shmpkt->thr_id = pthread_self();
 	// We expect the sink to write the value of devPtr to args[0].argull
@@ -1031,244 +852,17 @@ cudaError_t cudaMallocPitch(
 	return shmpkt->ret_ex_val.err;
 }
 
-
-
-#if 0
-cudaError_t cudaMallocHost(void **ptr, size_t size) {
-	typedef cudaError_t (* pFuncType)(void **ptr, size_t size);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMallocHost");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(ptr, size));
-}
-
-cudaError_t cudaMallocArray(struct cudaArray **array,
-		const struct cudaChannelFormatDesc *desc, size_t width, size_t height
-				__dv(0), unsigned int flags __dv(0)) {
-	typedef cudaError_t (* pFuncType)(struct cudaArray **,
-			const struct cudaChannelFormatDesc *, size_t, size_t, unsigned int);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMallocArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(array, desc, width, height, flags));
-}
-#endif
-
-cudaError_t cudaFree(void * devPtr) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
-
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
-	shmpkt->method_id = CUDA_FREE;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argp = devPtr;
-	shmpkt->flags = CUDA_PKT_REQUEST;
-
-	printd(DBG_DEBUG, "devPtr=%p\n", devPtr);
-
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
-
-	return shmpkt->ret_ex_val.err;
-}
-
-
-#if 0
-cudaError_t cudaFreeHost(void * ptr) {
-	typedef cudaError_t (* pFuncType)(void *);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaFreeHost");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(ptr));
-}
-
-cudaError_t cudaFreeArray(struct cudaArray * array) {
-	typedef cudaError_t (* pFuncType)(struct cudaArray * array);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaFreeArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(array));
-}
-
-cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags) {
-	typedef cudaError_t (* pFuncType)(void **, size_t, unsigned int);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaHostAlloc");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(pHost, size, flags));
-}
-
-cudaError_t cudaHostGetDevicePointer(void **pDevice, void *pHost,
-		unsigned int flags) {
-	typedef cudaError_t (* pFuncType)(void **pDevice, void *pHost,
-			unsigned int flags);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaHostGetDevicePointer");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(pDevice, pHost, flags));
-}
-
-cudaError_t cudaHostGetFlags(unsigned int *pFlags, void *pHost) {
-	typedef cudaError_t (* pFuncType)(unsigned int*, void*);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaHostGetFlags");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(pFlags, pHost));
-}
-
-cudaError_t cudaMalloc3D(struct cudaPitchedPtr* pitchedDevPtr,
-		struct cudaExtent extent) {
-	typedef cudaError_t
-	(* pFuncType)(struct cudaPitchedPtr*, struct cudaExtent);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMalloc3D");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(pitchedDevPtr, extent));
-}
-
-cudaError_t cudaMalloc3DArray(struct cudaArray** array,
-		const struct cudaChannelFormatDesc* desc, struct cudaExtent extent,
-		unsigned int flags) {
-	typedef cudaError_t (* pFuncType)(struct cudaArray** array,
-			const struct cudaChannelFormatDesc* desc, struct cudaExtent extent,
-			unsigned int flags);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMalloc3DArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(array, desc, extent, flags));
-}
-
-cudaError_t cudaMemcpy3D(const struct cudaMemcpy3DParms *p) {
-	typedef cudaError_t (* pFuncType)(const struct cudaMemcpy3DParms *p);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpy3D");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(p));
-}
-
-cudaError_t cudaMemcpy3DAsync(const struct cudaMemcpy3DParms *p,
-		cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(const struct cudaMemcpy3DParms *p,
-			cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpy3DAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(p, stream));
-}
-
-cudaError_t cudaMemGetInfo(size_t *free, size_t *total) {
-	typedef cudaError_t (* pFuncType)(size_t *free, size_t *total);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemGetInfo");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(free, total));
-}
-#endif
-
-cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
-		enum cudaMemcpyKind kind) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+cudaError_t cudaMemcpy(void *dst, const void *src,
+		size_t count, enum cudaMemcpyKind kind)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
 	void *shm_ptr;
 
 	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d\n",
 			dst, src, count, kind);
 
-	if (count >= THREAD_SHM_SIZE) {
-		fprintf(stderr, "%s: error: memory region too large: %lu\n",
-				__func__, count);
-		assert(0);
-	}
-
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->thr_id = pthread_self();
 	switch (kind) {
 		case cudaMemcpyHostToHost:
@@ -1281,8 +875,8 @@ cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 		{
 			// Need to push data DOWN to the gpu
 			shmpkt->method_id = CUDA_MEMCPY_H2D;
-			shmpkt->args[0].argull = (unsigned long long)dst; // gpu ptr
-			shmpkt->args[1].argull = sizeof(struct cuda_packet);
+			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
+			shmpkt->args[1].argull = sizeof(*shmpkt);
 			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
 			memcpy(shm_ptr, src, count);
 		}
@@ -1291,16 +885,16 @@ cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 		{
 			// Need to pull data UP from the gpu
 			shmpkt->method_id = CUDA_MEMCPY_D2H;
-			shmpkt->args[0].argull = sizeof(struct cuda_packet);
+			shmpkt->args[0].argull = sizeof(*shmpkt);
 			// We will expect to read 'count' bytes at this ^ offset into dst
-			shmpkt->args[1].argull = (unsigned long long)src; // gpu ptr
+			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_D2D;
-			shmpkt->args[0].argull = (unsigned long long)dst; // gpu ptr
-			shmpkt->args[1].argull = (unsigned long long)src; // gpu ptr
+			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
+			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
 		}
 		break;
 		default:
@@ -1325,204 +919,87 @@ cudaError_t cudaMemcpy(void *dst, const void *src, size_t count,
 	return shmpkt->ret_ex_val.err;
 }
 
-#if 0
-cudaError_t cudaMemcpyToArray(struct cudaArray *dst, size_t wOffset,
-		size_t hOffset, const void *src, size_t count, enum cudaMemcpyKind kind) {
-	typedef cudaError_t (* pFuncType)(struct cudaArray *dst, size_t wOffset,
-			size_t hOffset, const void *src, size_t count,
-			enum cudaMemcpyKind kind);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpyToArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, wOffset, hOffset, src, count, kind));
-}
-
-cudaError_t cudaMemcpyFromArray(void *dst, const struct cudaArray *src,
-		size_t wOffset, size_t hOffset, size_t count, enum cudaMemcpyKind kind) {
-	typedef cudaError_t (* pFuncType)(void *dst, const struct cudaArray *src,
-			size_t wOffset, size_t hOffset, size_t count,
-			enum cudaMemcpyKind kind);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpyFromArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, src, wOffset, hOffset, count, kind));
-}
-
-cudaError_t cudaMemcpyArrayToArray(struct cudaArray *dst,
-		size_t wOffsetDst, size_t hOffsetDst, const struct cudaArray *src,
-		size_t wOffsetSrc, size_t hOffsetSrc, size_t count,
-		enum cudaMemcpyKind kind __dv(cudaMemcpyDeviceToDevice)) {
-	typedef cudaError_t (* pFuncType)(struct cudaArray *dst, size_t wOffsetDst,
-			size_t hOffsetDst, const struct cudaArray *src, size_t wOffsetSrc,
-			size_t hOffsetSrc, size_t count, enum cudaMemcpyKind kind);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpyArrayToArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, wOffsetDst, hOffsetDst, src, wOffsetSrc, hOffsetSrc,
-			count, kind));
-
-}
-
-cudaError_t cudaMemcpy2D(void *dst, size_t dpitch, const void *src,
-		size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind) {
-	typedef cudaError_t (* pFuncType)(void *dst, size_t dpitch,
-			const void *src, size_t spitch, size_t width, size_t height,
-			enum cudaMemcpyKind kind);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpy2D");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, dpitch, src, spitch, width, height, kind));
-}
-
-cudaError_t cudaMemcpy2DToArray(struct cudaArray *dst, size_t wOffset,
-		size_t hOffset, const void *src, size_t spitch, size_t width,
-		size_t height, enum cudaMemcpyKind kind) {
-
-	typedef cudaError_t (* pFuncType)(struct cudaArray *dst, size_t wOffset,
-			size_t hOffset, const void *src, size_t spitch, size_t width,
-			size_t height, enum cudaMemcpyKind kind);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpy2DToArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, wOffset, hOffset, src, spitch, width, height, kind));
-}
-
-cudaError_t cudaMemcpy2DFromArray(void *dst, size_t dpitch,
-		const struct cudaArray *src, size_t wOffset, size_t hOffset,
-		size_t width, size_t height, enum cudaMemcpyKind kind) {
-	typedef cudaError_t (* pFuncType)(void *dst, size_t dpitch,
-			const struct cudaArray *src, size_t wOffset, size_t hOffset,
-			size_t width, size_t height, enum cudaMemcpyKind kind);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpy2DFromArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, dpitch, src, wOffset, hOffset, width, height, kind));
-}
-
-cudaError_t cudaMemcpy2DArrayToArray(struct cudaArray *dst,
-		size_t wOffsetDst, size_t hOffsetDst, const struct cudaArray *src,
-		size_t wOffsetSrc, size_t hOffsetSrc, size_t width, size_t height,
-		enum cudaMemcpyKind kind __dv(cudaMemcpyDeviceToDevice)) {
-	typedef cudaError_t (* pFuncType)(struct cudaArray *dst, size_t wOffsetDst,
-			size_t hOffsetDst, const struct cudaArray *src, size_t wOffsetSrc,
-			size_t hOffsetSrc, size_t width, size_t height,
-			enum cudaMemcpyKind kind);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpy2DArrayToArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, wOffsetDst, hOffsetDst, src, wOffsetSrc, hOffsetSrc,
-			width, height, kind));
-}
-#endif
-
-cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src,
-		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
-		__dv(cudaMemcpyHostToDevice)) {
-	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
+cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
+		enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
 	void *shm_ptr;
 
-	printd(DBG_DEBUG, "symb %p\n", symbol);
+	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d stream=%p\n",
+			dst, src, count, kind, stream);
 
-	if (count >= THREAD_SHM_SIZE) {
-		fprintf(stderr, "%s: error: memory region too large: %lu\n",
-				__func__, count);
-		assert(0);
-	}
-
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argcp = (char*)symbol;
 	switch (kind) {
+		case cudaMemcpyHostToHost:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_ASYNC_H2H; // why would you call this?
+			memcpy(dst, src, count); // right?!
+		}
+		break;
 		case cudaMemcpyHostToDevice:
 		{
-			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_H2D;
-			// FIXME We assume symbols are ptr values, not strings.
-			// CUDA API states it may be either.
-			shmpkt->args[1].argull = sizeof(struct cuda_packet);
+			// Need to push data DOWN to the gpu
+			shmpkt->method_id = CUDA_MEMCPY_ASYNC_H2D;
+			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
+			shmpkt->args[1].argull = sizeof(*shmpkt);
 			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
 			memcpy(shm_ptr, src, count);
 		}
 		break;
+		case cudaMemcpyDeviceToHost:
+		{
+			// Need to pull data UP from the gpu
+			shmpkt->method_id = CUDA_MEMCPY_ASYNC_D2H;
+			shmpkt->args[0].argull = sizeof(*shmpkt);
+			// We will expect to read 'count' bytes at this ^ offset into dst
+			// XXX Since this is an async function, the data won't necessarily
+			// be there just yet. For now, we force all async calls to be
+			// synchronous until a solution is found.
+			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
+		}
+		break;
 		case cudaMemcpyDeviceToDevice:
 		{
-			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_D2D;
-			// FIXME We assume symbols are ptr values, not strings.
-			// CUDA API states it may be either.
-			shmpkt->args[1].argull = (unsigned long long)src;
+			shmpkt->method_id = CUDA_MEMCPY_D2D;
+			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
+			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
 		}
 		break;
 		default:
 			return cudaErrorInvalidMemcpyDirection;
 	}
 	shmpkt->args[2].arr_argi[0] = count;
-	shmpkt->args[2].arr_argi[1] = offset;
-	shmpkt->args[3].argll = kind;
+	shmpkt->args[3].stream = stream;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
+	// copy data to user-space region
+	// XXX We'll only do this now, since these calls are all forced to be
+	// synchronous. Once they're actually async, this copy may not be performed
+	// at this time.
+	if (shmpkt->method_id == CUDA_MEMCPY_D2H) {
+		shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
+		memcpy(dst, shm_ptr, count);
+	}
+
 	return shmpkt->ret_ex_val.err;
 }
 
 cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
-		size_t count, size_t offset __dv(0), enum cudaMemcpyKind kind
-		__dv(cudaMemcpyDeviceToHost)) {
+		size_t count, size_t offset __dv(0),
+		enum cudaMemcpyKind kind __dv(cudaMemcpyDeviceToHost))
+{
 	struct cuda_packet *shmpkt =
 		(struct cuda_packet *)get_region(pthread_self());
 	void *shm_ptr;
 
 	printd(DBG_DEBUG, "symb %p\n", symbol);
+	fprintf(stderr, USERMSG_PREFIX " assuming symbol is memory address\n");
 
 	if (count >= THREAD_SHM_SIZE) {
 		fprintf(stderr, "%s: error: memory region too large: %lu\n",
@@ -1530,23 +1007,26 @@ cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 		assert(0);
 	}
 
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->thr_id = pthread_self();
 	switch (kind) {
 		case cudaMemcpyDeviceToHost:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_FROM_SYMBOL_D2H;
-			shmpkt->args[0].argull = sizeof(struct cuda_packet);
+			shmpkt->args[0].argull = sizeof(*shmpkt);
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_FROM_SYMBOL_D2D;
-			shmpkt->args[0].argull = (unsigned long long)dst;
+			shmpkt->args[0].argull = (uintptr_t)dst;
 		}
 		break;
 		default:
+		{
+			fprintf(stderr, USERMSG_PREFIX " memcpy direction %d not implemented\n", kind);
 			return cudaErrorInvalidMemcpyDirection;
+		}
 	}
 	shmpkt->args[1].argcp = (char*)symbol;
 	shmpkt->args[2].arr_argi[0] = count;
@@ -1566,668 +1046,364 @@ cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 	return shmpkt->ret_ex_val.err;
 }
 
-#if 0
-// -----------------------------------
-cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
-		enum cudaMemcpyKind kind, cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(void *dst, const void *src, size_t count,
-			enum cudaMemcpyKind kind, cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpyAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, src, count, kind, stream));
-}
-
-cudaError_t cudaMemcpyToArrayAsync(struct cudaArray *dst,
-		size_t wOffset, size_t hOffset, const void *src, size_t count,
-		enum cudaMemcpyKind kind, cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(struct cudaArray *dst, size_t wOffset,
-			size_t hOffset, const void *src, size_t count,
-			enum cudaMemcpyKind kind, cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpyToArrayAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, wOffset, hOffset, src, count, kind, stream));
-}
-
-cudaError_t cudaMemcpyFromArrayAsync(void *dst,
-		const struct cudaArray *src, size_t wOffset, size_t hOffset,
-		size_t count, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(void *dst, const struct cudaArray *src,
-			size_t wOffset, size_t hOffset, size_t count,
-			enum cudaMemcpyKind kind, cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpyFromArrayAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, src, wOffset, hOffset, count, kind, stream));
-}
-
-cudaError_t cudaMemcpy2DAsync(void *dst, size_t dpitch, const void *src,
-		size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind,
-		cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(void *dst, size_t dpitch,
-			const void *src, size_t spitch, size_t width, size_t height,
-			enum cudaMemcpyKind kind, cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpy2DAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, dpitch, src, spitch, width, height, kind, stream));
-}
-
-cudaError_t cudaMemcpy2DToArrayAsync(struct cudaArray *dst,
-		size_t wOffset, size_t hOffset, const void *src, size_t spitch,
-		size_t width, size_t height, enum cudaMemcpyKind kind,
-		cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(struct cudaArray *dst, size_t wOffset,
-			size_t hOffset, const void *src, size_t spitch, size_t width,
-			size_t height, enum cudaMemcpyKind kind, cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpy2DToArrayAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, wOffset, hOffset, src, spitch, width, height, kind,
-			stream));
-}
-
-cudaError_t cudaMemcpy2DFromArrayAsync(void *dst, size_t dpitch,
-		const struct cudaArray *src, size_t wOffset, size_t hOffset,
-		size_t width, size_t height, enum cudaMemcpyKind kind,
-		cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(void *dst, size_t dpitch,
-			const struct cudaArray *src, size_t wOffset, size_t hOffset,
-			size_t width, size_t height, enum cudaMemcpyKind kind,
-			cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpy2DFromArrayAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, dpitch, src, wOffset, hOffset, width, height, kind,
-			stream));
-}
-
-cudaError_t cudaMemcpyToSymbolAsync(const char *symbol, const void *src,
-		size_t count, size_t offset, enum cudaMemcpyKind kind,
-		cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(const char *symbol, const void *src,
-			size_t count, size_t offset, enum cudaMemcpyKind kind,
-			cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpyToSymbolAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(symbol, src, count, offset, kind, stream));
-}
-
-cudaError_t cudaMemcpyFromSymbolAsync(void *dst, const char *symbol,
-		size_t count, size_t offset, enum cudaMemcpyKind kind,
-		cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(void *dst, const char *symbol,
-			size_t count, size_t offset, enum cudaMemcpyKind kind,
-			cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemcpyFromSymbolAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(dst, symbol, count, offset, kind, stream));
-}
-
-// -------------------------------------
-cudaError_t cudaMemset(void *devPtr, int value, size_t count) {
-	typedef cudaError_t (* pFuncType)(void *devPtr, int value, size_t count);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemset");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(devPtr, value, count));
-}
-
-cudaError_t cudaMemset2D(void *devPtr, size_t pitch, int value,
-		size_t width, size_t height) {
-	typedef cudaError_t (* pFuncType)(void *devPtr, size_t pitch, int value,
-			size_t width, size_t height);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemset2D");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(devPtr, pitch, value, width, height));
-}
-cudaError_t cudaMemset3D(struct cudaPitchedPtr pitchedDevPtr, int value,
-		struct cudaExtent extent) {
-	typedef cudaError_t (* pFuncType)(struct cudaPitchedPtr pitchedDevPtr,
-			int value, struct cudaExtent extent);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemset3D");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(pitchedDevPtr, value, extent));
-}
-cudaError_t cudaMemsetAsync(void *devPtr, int value, size_t count,
-		cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(void *devPtr, int value, size_t count,
-			cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemsetAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(devPtr, value, count, stream));
-}
-cudaError_t cudaMemset2DAsync(void *devPtr, size_t pitch, int value,
-		size_t width, size_t height, cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(void *devPtr, size_t pitch, int value,
-			size_t width, size_t height, cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemset2DAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(devPtr, pitch, value, width, height, stream));
-}
-cudaError_t cudaMemset3DAsync(struct cudaPitchedPtr pitchedDevPtr,
-		int value, struct cudaExtent extent, cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(struct cudaPitchedPtr pitchedDevPtr,
-			int value, struct cudaExtent extent, cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaMemset3DAsync");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(pitchedDevPtr, value, extent, stream));
-}
-
-cudaError_t cudaGetSymbolAddress(void **devPtr, const char *symbol) {
-	typedef cudaError_t (* pFuncType)(void **devPtr, const char *symbol);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetSymbolAddress");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(devPtr, symbol));
-}
-
-cudaError_t cudaGetSymbolSize(size_t *size, const char *symbol) {
-	typedef cudaError_t (* pFuncType)(size_t *size, const char *symbol);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetSymbolSize");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(size, symbol));
-}
-
-// -----------------------
-cudaError_t cudaGraphicsUnregisterResource(
-		cudaGraphicsResource_t resource) {
-	typedef cudaError_t (* pFuncType)(cudaGraphicsResource_t resource);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGraphicsUnregisterResource");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(resource));
-}
-cudaError_t cudaGraphicsResourceSetMapFlags(
-		cudaGraphicsResource_t resource, unsigned int flags) {
-	typedef cudaError_t (* pFuncType)(cudaGraphicsResource_t resource,
-			unsigned int flags);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGraphicsResourceSetMapFlags");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(resource, flags));
-}
-cudaError_t cudaGraphicsMapResources(int count,
-		cudaGraphicsResource_t *resources, cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(int count,
-			cudaGraphicsResource_t *resources, cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGraphicsMapResources");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(count, resources, stream));
-}
-cudaError_t cudaGraphicsUnmapResources(int count,
-		cudaGraphicsResource_t *resources, cudaStream_t stream __dv(0)) {
-	typedef cudaError_t (* pFuncType)(int count,
-			cudaGraphicsResource_t *resources, cudaStream_t stream);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGraphicsUnmapResources");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(count, resources, stream));
-}
-cudaError_t cudaGraphicsResourceGetMappedPointer(void **devPtr,
-		size_t *size, cudaGraphicsResource_t resource) {
-	typedef cudaError_t (* pFuncType)(void **devPtr, size_t *size,
-			cudaGraphicsResource_t resource);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT,
-				"cudaGraphicsResourceGetMappedPointer");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(devPtr, size, resource));
-}
-cudaError_t cudaGraphicsSubResourceGetMappedArray(
-		struct cudaArray **array, cudaGraphicsResource_t resource,
-		unsigned int arrayIndex, unsigned int mipLevel) {
-	typedef cudaError_t (* pFuncType)(struct cudaArray **array,
-			cudaGraphicsResource_t resource, unsigned int arrayIndex,
-			unsigned int mipLevel);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT,
-				"cudaGraphicsSubResourceGetMappedArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(array, resource, arrayIndex, mipLevel));
-}
-
-// --------------------------
-cudaError_t cudaGetChannelDesc(struct cudaChannelFormatDesc *desc,
-		const struct cudaArray *array) {
-	typedef cudaError_t (* pFuncType)(struct cudaChannelFormatDesc *desc,
-			const struct cudaArray *array);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetChannelDesc");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(desc, array));
-
-}
-/**
- * This call returns something different than cudaError_t so we must use
- * different something else than cudaErrorDL
- * @todo better handle DL error
- * @return empty cudaChannelFormatDesc if there is a problem with DL, as well
- * (maybe other NULL might means something else)
- */
-struct cudaChannelFormatDesc cudaCreateChannelDesc(int x, int y, int z,
-		int w, enum cudaChannelFormatKind f) {
-	typedef struct cudaChannelFormatDesc (* pFuncType)(int x, int y, int z,
-			int w, enum cudaChannelFormatKind f);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaCreateChannelDesc");
-
-		if (l_handleDlError() != 0) {
-			struct cudaChannelFormatDesc desc;
-			return desc;
+cudaError_t cudaMemcpyToArray(
+		struct cudaArray *dst,
+		size_t wOffset, size_t hOffset,
+		const void *src, size_t count,
+		enum cudaMemcpyKind kind)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+	void *shm_ptr;
+
+	printd(DBG_DEBUG, "dst=%p wOffset=%lu, hOffset=%lu, src=%p, count=%lu\n",
+			dst, wOffset, hOffset, src, count);
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].cudaArray = dst; // gpu ptr
+	shmpkt->args[1].arr_argi[0] = wOffset;
+	shmpkt->args[1].arr_argi[1] = hOffset;
+	switch (kind) {
+		case cudaMemcpyHostToHost:
+		case cudaMemcpyDeviceToHost:
+		{
+			BUG(0); // wtf is copying d->h or h->h when dst is a device address?
 		}
-
+		break;
+		case cudaMemcpyHostToDevice:
+		{
+			// Need to push data DOWN to the gpu
+			shmpkt->method_id = CUDA_MEMCPY_TO_ARRAY_H2D;
+			shmpkt->args[2].argull = sizeof(*shmpkt);
+			shm_ptr = (void*)((uintptr_t)shmpkt + sizeof(*shmpkt));
+			memcpy(shm_ptr, src, count);
+		}
+		break;
+		case cudaMemcpyDeviceToDevice:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_TO_ARRAY_D2D;
+			shmpkt->args[2].argp = (void*)src; // gpu ptr?
+		}
+		break;
+		default:
+			return cudaErrorInvalidMemcpyDirection;
 	}
+	shmpkt->args[3].arr_argi[0] = count;
+	shmpkt->flags = CUDA_PKT_REQUEST;
 
-	l_printFuncSig(__FUNCTION__);
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
 
-	return (pFunc(x, y, z, w, f));
-
+	return shmpkt->ret_ex_val.err;
 }
 
-// --------------------------
+
+cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count,
+		size_t offset __dv(0),
+		enum cudaMemcpyKind kind __dv(cudaMemcpyHostToDevice))
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+	void *shm_ptr;
+
+	printd(DBG_DEBUG, "symb %p\n", symbol);
+	fprintf(stderr, USERMSG_PREFIX " assuming symbol is memory address\n");
+
+	if (count >= THREAD_SHM_SIZE) {
+		fprintf(stderr, "%s: error: memory region too large: %lu\n",
+				__func__, count);
+		assert(0);
+	}
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argcp = (char*)symbol;
+	switch (kind) {
+		case cudaMemcpyHostToDevice:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_H2D;
+			// FIXME We assume symbols are ptr values, not strings.
+			// CUDA API states it may be either.
+			shmpkt->args[1].argull = sizeof(*shmpkt);
+			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
+			memcpy(shm_ptr, src, count);
+		}
+		break;
+		case cudaMemcpyDeviceToDevice:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_D2D;
+			// FIXME We assume symbols are ptr values, not strings.
+			// CUDA API states it may be either.
+			shmpkt->args[1].argull = (uintptr_t)src;
+		}
+		break;
+		default:
+		{
+			fprintf(stderr, USERMSG_PREFIX " memcpy direction %d not implemented\n", kind);
+			return cudaErrorInvalidMemcpyDirection;
+		}
+	}
+	shmpkt->args[2].arr_argi[0] = count;
+	shmpkt->args[2].arr_argi[1] = offset;
+	shmpkt->args[3].argll = kind;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaMemcpyToSymbolAsync(
+		const char *symbol, const void *src, size_t count,
+		size_t offset, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+	void *shm_ptr;
+
+	printd(DBG_DEBUG, "symb %p\n", symbol);
+	fprintf(stderr, USERMSG_PREFIX " assuming symbol is memory address\n");
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argcp = (char*)symbol;
+	switch (kind) {
+		case cudaMemcpyHostToDevice:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_ASYNC_H2D;
+			// FIXME We assume symbols are ptr values, not strings.
+			// CUDA API states it may be either.
+			shmpkt->args[1].argull = sizeof(*shmpkt);
+			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
+			memcpy(shm_ptr, src, count);
+		}
+		break;
+		case cudaMemcpyDeviceToDevice:
+		{
+			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_ASYNC_D2D;
+			// FIXME We assume symbols are ptr values, not strings.
+			// CUDA API states it may be either.
+			shmpkt->args[1].argull = (uintptr_t)src;
+		}
+		break;
+		default:
+		{
+			fprintf(stderr, USERMSG_PREFIX
+					" memcpy direction %d not implemented\n", kind);
+			return cudaErrorInvalidMemcpyDirection;
+		}
+	}
+	shmpkt->args[2].arr_argi[0] = count;
+	shmpkt->args[2].arr_argi[1] = offset;
+	shmpkt->args[3].stream = stream;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaMemGetInfo(size_t *free, size_t *total)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_MEM_GET_INFO;
+	shmpkt->thr_id = pthread_self();
+	// We expect to read the values for free and total in
+	// 		args[0].arr_argi[0], and
+	// 		args[0].arr_argi[1]
+	// respectively.
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*free = shmpkt->args[0].arr_argi[0];
+	*total = shmpkt->args[0].arr_argi[1];
+	printd(DBG_DEBUG, "free=%lu total=%lu\n", *free, *total);
+
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaMemset(void *devPtr, int value, size_t count)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_MEMSET;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = (uintptr_t)devPtr;
+	shmpkt->args[1].argll = value;
+	shmpkt->args[2].arr_argi[0] = count;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	printd(DBG_DEBUG, "devPtr=%p value=%d count=%lu\n", devPtr, value, count);
+
+	return shmpkt->ret_ex_val.err;
+}
+
+//
+// Texture Management API
+//
+
 cudaError_t cudaBindTexture(size_t *offset,
 		const struct textureReference *texref, const void *devPtr,
-		const struct cudaChannelFormatDesc *desc, size_t size __dv(UINT_MAX)) {
-	typedef cudaError_t (* pFuncType)(size_t *offset,
-			const struct textureReference *texref, const void *devPtr,
-			const struct cudaChannelFormatDesc *desc, size_t size);
-	static pFuncType pFunc = NULL;
+		const struct cudaChannelFormatDesc *desc, size_t size __dv(UINT_MAX))
+{
+	// XXX Need to copy texref to the packet, and make sure execute.c updates
+	// the sink-cached copy of it before invoking the NV function
+#if 0
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
 
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaBindTexture");
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_BIND_TEXTURE;
+	shmpkt->thr_id = pthread_self();
+	// We'll expect the value of *offset to be stored in args[0].arr_argi[0] in
+	// the return packet.
+	shmpkt->args[0].argp = *texref; // whole struct copy
+	shmpkt->args[1].argp = (void*)devPtr;
+	shmpkt->args[2].fdesc = *desc; // whole struct copy
+	shmpkt->args[3].arr_argi[0] = size;
+	shmpkt->flags = CUDA_PKT_REQUEST;
 
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
 
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(offset, texref, devPtr, desc, size));
-
-}
-cudaError_t cudaBindTexture2D(size_t *offset,
-		const struct textureReference *texref, const void *devPtr,
-		const struct cudaChannelFormatDesc *desc, size_t width, size_t height,
-		size_t pitch) {
-	typedef cudaError_t (* pFuncType)(size_t *offset,
-			const struct textureReference *texref, const void *devPtr,
-			const struct cudaChannelFormatDesc *desc, size_t width,
-			size_t height, size_t pitch);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaBindTexture2D");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(offset, texref, devPtr, desc, width, height, pitch));
-}
-cudaError_t cudaBindTextureToArray(
-		const struct textureReference *texref, const struct cudaArray *array,
-		const struct cudaChannelFormatDesc *desc) {
-	typedef cudaError_t (* pFuncType)(const struct textureReference *texref,
-			const struct cudaArray *array,
-			const struct cudaChannelFormatDesc *desc);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaBindTextureToArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(texref, array, desc));
-
-}
-cudaError_t cudaUnbindTexture(const struct textureReference *texref) {
-	typedef cudaError_t (* pFuncType)(const struct textureReference *texref);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaUnbindTexture");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(texref));
-
-}
-cudaError_t cudaGetTextureAlignmentOffset(size_t *offset,
-		const struct textureReference *texref) {
-	typedef cudaError_t (* pFuncType)(size_t *offset,
-			const struct textureReference *texref);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetTextureAlignmentOffset");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(offset, texref));
-}
-cudaError_t cudaGetTextureReference(
-		const struct textureReference **texref, const char *symbol) {
-	typedef cudaError_t (* pFuncType)(const struct textureReference **texref,
-			const char *symbol);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetTextureReference");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(texref, symbol));
-
-}
-
-// --------------------------
-cudaError_t cudaBindSurfaceToArray(
-		const struct surfaceReference *surfref, const struct cudaArray *array,
-		const struct cudaChannelFormatDesc *desc) {
-	typedef cudaError_t (* pFuncType)(const struct surfaceReference *surfref,
-			const struct cudaArray *array,
-			const struct cudaChannelFormatDesc *desc);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaBindSurfaceToArray");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(surfref, array, desc));
-
-}
-cudaError_t cudaGetSurfaceReference(
-		const struct surfaceReference **surfref, const char *symbol) {
-	typedef cudaError_t (* pFuncType)(const struct surfaceReference **surfref,
-			const char *symbol);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetSurfaceReference");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(surfref, symbol));
-}
-
-// --------------------------
-// --------------------------
-cudaError_t cudaGetExportTable(const void **ppExportTable,
-		const cudaUUID_t *pExportTableId) {
-	typedef cudaError_t (* pFuncType)(const void **ppExportTable,
-			const cudaUUID_t *pExportTableId);
-	static pFuncType pFunc = NULL;
-
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "cudaGetExportTable");
-
-		if (l_handleDlError() != 0)
-			return cudaErrorDL;
-	}
-
-	l_printFuncSig(__FUNCTION__);
-
-	return (pFunc(ppExportTable, pExportTableId));
-}
-
-// ----------------------------------------
-//! Unlisted CUDA calls for state registration
-// ----------------------------------------
-
-static void printFatBinary(void *fatC) {
-	if (!fatC) {
-		printd(DBG_ERROR, "NULL argument\n");
-		return;
-	}
-
-	__cudaFatCudaBinary *fatbin = (__cudaFatCudaBinary *)fatC;
-
-	printf("\tmagic=%lu\n", fatbin->magic);
-	printf("\tversion=%lu\n", fatbin->version);
-	printf("\tgpuInfoVersion=%lu\n", fatbin->gpuInfoVersion);
-
-	printf("\tkey='%s'\n", fatbin->key);
-	printf("\tident='%s'\n", fatbin->ident);
-	printf("\tusageMode='%s'\n", fatbin->usageMode);
-
-	printf("\tptx=%p\n", fatbin->ptx);
-	if (fatbin->ptx) {
-		printf("\tptx:\t\tgpuProfileName='%s'\n", fatbin->ptx->gpuProfileName);
-		printf("\tptx:\t\tptx='%s'\n", fatbin->ptx->ptx);
-	} else {
-		printf("\tptx=%p\n", fatbin->ptx);
-	}
-}
+	*offset = shmpkt->args[0].arr_argi[0];
+	printd(DBG_DEBUG, "called\n");
+	return shmpkt->ret_ex_val.err;
 #endif
+	BUG(0);
+	return -1;
+}
 
-// as the size of this cubin is not given as an argument to this function, we
-// store the size in args[1] for whomever has this packet to determine the size
-// of accompanying data (e.g. for RPC)
-void** __cudaRegisterFatBinary(void* cubin) {
+cudaError_t cudaBindTextureToArray(
+		const struct textureReference *texref, //! address of global; copy full
+		const struct cudaArray *array, //! use as pointer only
+		const struct cudaChannelFormatDesc *desc) //! non-opaque; copied in full
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_BIND_TEXTURE_TO_ARRAY;
+	shmpkt->thr_id = pthread_self();
+	// the caller will customize the values within texref before invoking this
+	// function, thus we need to copy the entire structure as well as its
+	// address, so the sink can find the texture it registered with CUDA
+	shmpkt->args[0].argp = (void*)texref; // address
+	shmpkt->args[1].texref = *texref; // data
+	shmpkt->args[2].cudaArray = (struct cudaArray*)array;
+	shmpkt->args[3].desc = *desc; // whole struct copy
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	printd(DBG_DEBUG, "called\n");
+	return shmpkt->ret_ex_val.err;
+}
+
+struct cudaChannelFormatDesc
+cudaCreateChannelDesc(int x, int y, int z, int w,
+		enum cudaChannelFormatKind format)
+{
+	// Doesn't need to be forwarded anywhere. Call the function in the NVIDIA
+	// runtime, as this function just takes multiple variables and assigns them
+	// to a struct. Why?
+	const char *dl_err_str;
+	typedef struct cudaChannelFormatDesc (*func)
+		(int,int,int,int,enum cudaChannelFormatKind);
+	func f = (func)dlsym(RTLD_NEXT, __func__);
+	dl_err_str = dlerror();
+	if (dl_err_str) {
+		fprintf(stderr, USERMSG_PREFIX
+				" error: could not find NVIDIA runtime: %s\n", dl_err_str);
+		BUG(0);
+	}
+	printd(DBG_DEBUG, "x=%d y=%d z=%d w=%d format=%u;"
+			" passing to NV runtime\n",
+			x, y, z, w, format);
+	return f(x,y,z,w,format);
+}
+
+cudaError_t cudaGetTextureReference(
+		const struct textureReference **texref,
+		const char *symbol)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+
+	printd(DBG_DEBUG, "symbol=%p\n", symbol);
+#error needs matching with symbol in sink
+	return shmpkt->ret_ex_val.err;
+}
+
+//
+// Version Management API
+//
+
+cudaError_t cudaDriverGetVersion(int *driverVersion)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_DRIVER_GET_VERSION;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(*shmpkt);
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*driverVersion = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_RUNTIME_GET_VERSION;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argull = sizeof(*shmpkt);
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	*runtimeVersion = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
+	return shmpkt->ret_ex_val.err;
+}
+
+//
+// Undocumented API
+//
+
+void** __cudaRegisterFatBinary(void* cubin)
+{
 	int err, cubin_size;
 	volatile struct cuda_packet *shmpkt;
 	void *cubin_shm; // pointer to serialized copy of argument
@@ -2245,10 +1421,10 @@ void** __cudaRegisterFatBinary(void* cubin) {
 
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
 
-	memset((void*)shmpkt, 0, sizeof(struct cuda_packet));
+	memset((void*)shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = __CUDA_REGISTER_FAT_BINARY;
 	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(struct cuda_packet); // offset
+	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
 
 	// Serialize the complex cubin structure into the shared memory region,
 	// immediately after the location of the cuda packet.
@@ -2277,13 +1453,14 @@ void** __cudaRegisterFatBinary(void* cubin) {
 	return (void**)(shmpkt->ret_ex_val.handle);
 }
 
-void __cudaUnregisterFatBinary(void** fatCubinHandle) {
+void __cudaUnregisterFatBinary(void** fatCubinHandle)
+{
 	struct cuda_packet *shmpkt;
 
 	num_registered_cubins--;
 
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = __CUDA_UNREGISTER_FAT_BINARY;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argdp = fatCubinHandle;
@@ -2304,17 +1481,18 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle) {
 
 void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
-		uint3* bid, dim3* bDim, dim3* gDim, int* wSize) {
+		uint3* bid, dim3* bDim, dim3* gDim, int* wSize)
+{
 	int err;
 	struct cuda_packet *shmpkt =
 		(struct cuda_packet *)get_region(pthread_self());
 	void *var = NULL;
 
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = __CUDA_REGISTER_FUNCTION;
 	shmpkt->thr_id = pthread_self();
 
-	shmpkt->args[0].argull = sizeof(struct cuda_packet);
+	shmpkt->args[0].argull = sizeof(*shmpkt);
 	// now pack it into the shm
 	var = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
 	err = packRegFuncArgs(var, fatCubinHandle, hostFun, deviceFun,
@@ -2348,7 +1526,8 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
  */
 void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
-		int constant, int global) {
+		int constant, int global)
+{
 	int err;
 	struct cuda_packet *shmpkt =
 		(struct cuda_packet *)get_region(pthread_self());
@@ -2356,11 +1535,11 @@ void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 
 	printd(DBG_DEBUG, "symbol=%p\n", hostVar);
 
-	memset(shmpkt, 0, sizeof(struct cuda_packet));
+	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = __CUDA_REGISTER_VARIABLE;
 	shmpkt->thr_id = pthread_self();
 
-	shmpkt->args[0].argull = sizeof(struct cuda_packet);
+	shmpkt->args[0].argull = sizeof(*shmpkt);
 	// now pack it into the shm
 	var = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
 	err = packRegVar(var, fatCubinHandle, hostVar, deviceAddress, deviceName,
@@ -2382,41 +1561,175 @@ void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 	return;
 }
 
+// first three args we treat as handles (i.e. only pass down the pointer
+// addresses)
+void __cudaRegisterTexture(
+		void** fatCubinHandle,
+		const struct textureReference* texref, //! address of global; copy addr
+		const void** deviceAddress, //! dereference to extract 8-byte dev addr
+		const char* deviceName, //! actual string
+		int dim, int norm, int ext)
+{
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+	void *shmptr = (void*)shmpkt;
+
+	printd(DBG_DEBUG, "handle=%p texref=%p *devAddr=%p devName=%s"
+			" dim=%d norm=%d ext=%d\n",
+			fatCubinHandle, texref, *deviceAddress, deviceName,
+			dim, norm, ext);
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = __CUDA_REGISTER_TEXTURE;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].argdp = fatCubinHandle; // pointer copy
+	// Subsequent calls to texture functions will provide the address of this
+	// global as a parameter; there we will copy the data in the global into the
+	// cuda_packet, copy it to the variable registered in the sink process, and
+	// invoke such functions with the variable address allocated in the sink. We
+	// still need this address, because we cannot tell the application to change
+	// which address it provides us---we have to perform lookups of the global's
+	// address in the application with what we cache in the sink process. The
+	// value of the global at the time this function is called will be all
+	// zeros, since it resides in global memory, so there's no use in copying
+	// its actual contents here.
+	shmpkt->args[1].argp = (void*)texref; // pointer copy
+	shmpkt->args[2].argp = (void*)*deviceAddress; // copy actual address
+	shmpkt->args[3].argull = sizeof(*shmpkt); // offset
+	shmptr += sizeof(*shmpkt);
+	memcpy(shmptr, deviceName, strlen(deviceName) + 1);
+	shmpkt->args[4].arr_argii[0] = dim;
+	shmpkt->args[4].arr_argii[1] = norm;
+	shmpkt->args[4].arr_argii[2] = ext;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return;
+}
+
+/*-------------------------------------- ^^ CODE TO MERGE UP ^^ --------------*/
+
 #if 0
-void __cudaRegisterTexture(void** fatCubinHandle,
-		const struct textureReference* hostVar, const void** deviceAddress,
-		const char* deviceName, int dim, int norm, int ext) {
-	typedef void** (* pFuncType)(void** fatCubinHandle,
-			const struct textureReference* hostVar, const void** deviceAddress,
-			const char* deviceName, int dim, int norm, int ext);
-	static pFuncType pFunc = NULL;
+cudaError_t cudaChooseDevice(int *device, const struct cudaDeviceProp *prop)
 
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "__cudaRegisterTexture");
+cudaError_t cudaThreadSetLimit(enum cudaLimit limit, size_t value)
 
-		if (l_handleDlError() != 0)
-			exit(-1);
-	}
+cudaError_t cudaThreadGetLimit(size_t *pValue, enum cudaLimit limit)
 
-	l_printFuncSig(__FUNCTION__);
+cudaError_t cudaThreadGetCacheConfig(enum cudaFuncCache *pCacheConfig)
 
-	(pFunc(fatCubinHandle, hostVar, deviceAddress, deviceName, dim, norm, ext));
-}
+cudaError_t cudaThreadSetCacheConfig(enum cudaFuncCache cacheConfig)
 
-void __cudaRegisterShared(void** fatCubinHandle, void** devicePtr) {
-	typedef void** (* pFuncType)(void** fatCubinHandle, void** devicePtr);
-	static pFuncType pFunc = NULL;
+cudaError_t cudaPeekAtLastError(void)
 
-	if (!pFunc) {
-		pFunc = (pFuncType) dlsym(RTLD_NEXT, "__cudaRegisterShared");
+cudaError_t cudaStreamDestroy(cudaStream_t stream)
 
-		if (l_handleDlError() != 0)
-			exit(-1);
-	}
+cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event, unsigned int flags)
 
-	l_printFuncSig(__FUNCTION__);
+cudaError_t cudaStreamQuery(cudaStream_t stream)
 
-	(pFunc(fatCubinHandle, devicePtr));
-}
+cudaError_t cudaEventCreate(cudaEvent_t *event)
+
+cudaError_t cudaEventCreateWithFlags(cudaEvent_t *event, unsigned int flags)
+
+cudaError_t cudaEventRecord(cudaEvent_t event, cudaStream_t stream __dv(0))
+
+cudaError_t cudaEventQuery(cudaEvent_t event)
+
+cudaError_t cudaEventSynchronize(cudaEvent_t event)
+
+cudaError_t cudaEventDestroy(cudaEvent_t event) 
+
+cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start, cudaEvent_t end) 
+
+cudaError_t cudaFuncSetCacheConfig(const char *func, enum cudaFuncCache cacheConfig) 
+
+cudaError_t cudaSetDoubleForDevice(double *d) 
+
+cudaError_t cudaSetDoubleForHost(double *d) 
+
+cudaError_t cudaMallocHost(void **ptr, size_t size) 
+
+cudaError_t cudaHostGetDevicePointer(void **pDevice, void *pHost, unsigned int flags)
+
+cudaError_t cudaHostGetFlags(unsigned int *pFlags, void *pHost)
+
+cudaError_t cudaMalloc3D(struct cudaPitchedPtr* pitchedDevPtr, struct cudaExtent extent)
+
+cudaError_t cudaMalloc3DArray(struct cudaArray** array, const struct cudaChannelFormatDesc* desc, struct cudaExtent extent, unsigned int flags)
+
+cudaError_t cudaMemcpy3D(const struct cudaMemcpy3DParms *p)
+
+cudaError_t cudaMemcpy3DAsync(const struct cudaMemcpy3DParms *p, cudaStream_t stream __dv(0))
+
+cudaError_t cudaMemcpyFromArray(void *dst, const struct cudaArray *src, size_t wOffset, size_t hOffset, size_t count, enum cudaMemcpyKind kind)
+
+cudaError_t cudaMemcpyArrayToArray(struct cudaArray *dst, size_t wOffsetDst, size_t hOffsetDst, const struct cudaArray *src, size_t wOffsetSrc, size_t hOffsetSrc, size_t count, enum cudaMemcpyKind kind __dv(cudaMemcpyDeviceToDevice))
+
+cudaError_t cudaMemcpy2D(void *dst, size_t dpitch, const void *src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind)
+
+cudaError_t cudaMemcpy2DToArray(struct cudaArray *dst, size_t wOffset, size_t hOffset, const void *src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind)
+
+cudaError_t cudaMemcpy2DFromArray(void *dst, size_t dpitch, const struct cudaArray *src, size_t wOffset, size_t hOffset, size_t width, size_t height, enum cudaMemcpyKind kind)
+
+cudaError_t cudaMemcpy2DArrayToArray(struct cudaArray *dst, size_t wOffsetDst, size_t hOffsetDst, const struct cudaArray *src, size_t wOffsetSrc, size_t hOffsetSrc, size_t width, size_t height, enum cudaMemcpyKind kind __dv(cudaMemcpyDeviceToDevice))
+
+cudaError_t cudaMemcpyToArrayAsync(struct cudaArray *dst, size_t wOffset, size_t hOffset, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
+
+cudaError_t cudaMemcpyFromArrayAsync(void *dst, const struct cudaArray *src, size_t wOffset, size_t hOffset, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
+
+cudaError_t cudaMemcpy2DAsync(void *dst, size_t dpitch, const void *src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
+
+cudaError_t cudaMemcpy2DToArrayAsync(struct cudaArray *dst, size_t wOffset, size_t hOffset, const void *src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
+
+cudaError_t cudaMemcpy2DFromArrayAsync(void *dst, size_t dpitch, const struct cudaArray *src, size_t wOffset, size_t hOffset, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
+
+cudaError_t cudaMemcpyFromSymbolAsync(void *dst, const char *symbol, size_t count, size_t offset, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0)) 
+
+cudaError_t cudaMemset2D(void *devPtr, size_t pitch, int value, size_t width, size_t height)
+
+cudaError_t cudaMemset3D(struct cudaPitchedPtr pitchedDevPtr, int value, struct cudaExtent extent)
+
+cudaError_t cudaMemsetAsync(void *devPtr, int value, size_t count, cudaStream_t stream __dv(0))
+
+cudaError_t cudaMemset2DAsync(void *devPtr, size_t pitch, int value, size_t width, size_t height, cudaStream_t stream __dv(0))
+
+cudaError_t cudaMemset3DAsync(struct cudaPitchedPtr pitchedDevPtr, int value, struct cudaExtent extent, cudaStream_t stream __dv(0))
+
+cudaError_t cudaGetSymbolAddress(void **devPtr, const char *symbol)
+
+cudaError_t cudaGetSymbolSize(size_t *size, const char *symbol)
+
+cudaError_t cudaGraphicsUnregisterResource(cudaGraphicsResource_t resource)
+
+cudaError_t cudaGraphicsResourceSetMapFlags(cudaGraphicsResource_t resource, unsigned int flags)
+
+cudaError_t cudaGraphicsMapResources(int count, cudaGraphicsResource_t *resources, cudaStream_t stream __dv(0))
+
+cudaError_t cudaGraphicsUnmapResources(int count, cudaGraphicsResource_t *resources, cudaStream_t stream __dv(0))
+
+cudaError_t cudaGraphicsResourceGetMappedPointer(void **devPtr, size_t *size, cudaGraphicsResource_t resource)
+
+cudaError_t cudaGraphicsSubResourceGetMappedArray( struct cudaArray **array, cudaGraphicsResource_t resource, unsigned int arrayIndex, unsigned int mipLevel)
+
+cudaError_t cudaGetChannelDesc(struct cudaChannelFormatDesc *desc, const struct cudaArray *array)
+
+cudaError_t cudaBindTexture2D(size_t *offset, const struct textureReference *texref, const void *devPtr, const struct cudaChannelFormatDesc *desc, size_t width, size_t height, size_t pitch)
+
+cudaError_t cudaBindTextureToArray( const struct textureReference *texref, const struct cudaArray *array, const struct cudaChannelFormatDesc *desc)
+
+cudaError_t cudaUnbindTexture(const struct textureReference *texref)
+
+cudaError_t cudaGetTextureAlignmentOffset(size_t *offset, const struct textureReference *texref)
+
+cudaError_t cudaBindSurfaceToArray( const struct surfaceReference *surfref, const struct cudaArray *array, const struct cudaChannelFormatDesc *desc)
+
+cudaError_t cudaGetSurfaceReference( const struct surfaceReference **surfref, const char *symbol)
+
+cudaError_t cudaGetExportTable(const void **ppExportTable, const cudaUUID_t *pExportTableId)
+
+void __cudaRegisterShared(void** fatCubinHandle, void** devicePtr)
 #endif
-

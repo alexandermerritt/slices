@@ -33,25 +33,50 @@
 
 struct cuda_ops
 {
-	OPS_FN_PROTO_PTR(registerFatBinary);
-	OPS_FN_PROTO_PTR(unregisterFatBinary);
-	OPS_FN_PROTO_PTR(registerFunction);
-	OPS_FN_PROTO_PTR(registerVar);
-	OPS_FN_PROTO_PTR(setDevice);
+	// accept cuda_packet
+	OPS_FN_PROTO_PTR(bindTexture);
 	OPS_FN_PROTO_PTR(configureCall);
+	OPS_FN_PROTO_PTR(createChannelDesc);
+	OPS_FN_PROTO_PTR(free);
+	OPS_FN_PROTO_PTR(freeArray);
+	OPS_FN_PROTO_PTR(freeHost);
+	OPS_FN_PROTO_PTR(funcGetAttributes);
+	OPS_FN_PROTO_PTR(getMemInfo);
+	OPS_FN_PROTO_PTR(getTextureReference);
+	OPS_FN_PROTO_PTR(hostAlloc);
+	OPS_FN_PROTO_PTR(malloc);
+	OPS_FN_PROTO_PTR(mallocArray);
+	OPS_FN_PROTO_PTR(mallocPitch);
+	OPS_FN_PROTO_PTR(memcpyAsyncD2D);
+	OPS_FN_PROTO_PTR(memcpyAsyncD2H);
+	OPS_FN_PROTO_PTR(memcpyAsyncH2D);
+	OPS_FN_PROTO_PTR(memcpyD2D);
+	OPS_FN_PROTO_PTR(memcpyD2H);
+	OPS_FN_PROTO_PTR(memcpyH2D);
+	OPS_FN_PROTO_PTR(memcpyToArrayD2D);
+	OPS_FN_PROTO_PTR(memcpyToArrayH2D);
+	OPS_FN_PROTO_PTR(memGetInfo);
+	OPS_FN_PROTO_PTR(memset);
+	OPS_FN_PROTO_PTR(registerTexture);
+	OPS_FN_PROTO_PTR(setDevice);
+	OPS_FN_PROTO_PTR(setDeviceFlags);
 	OPS_FN_PROTO_PTR(setupArgument);
-	OPS_FN_PROTO_PTR(launch);
+	OPS_FN_PROTO_PTR(setValidDevices);
+	OPS_FN_PROTO_PTR(streamCreate);
+	OPS_FN_PROTO_PTR(streamSynchronize);
 	OPS_FN_PROTO_PTR(threadExit);
 	OPS_FN_PROTO_PTR(threadSynchronize);
-	OPS_FN_PROTO_PTR(malloc);
-	OPS_FN_PROTO_PTR(mallocPitch);
-	OPS_FN_PROTO_PTR(free);
-	OPS_FN_PROTO_PTR(memcpyH2D);
-	OPS_FN_PROTO_PTR(memcpyD2H);
-	OPS_FN_PROTO_PTR(memcpyD2D);
-	OPS_FN_PROTO_PTR(memcpyToSymbolH2D);
+	OPS_FN_PROTO_PTR(unregisterFatBinary);
+
+	// accept cuda_packet and fatcubins
+	OPS_FN_PROTO_PTR(bindTextureToArray);
+	OPS_FN_PROTO_PTR(launch);
 	OPS_FN_PROTO_PTR(memcpyFromSymbolD2H);
-	OPS_FN_PROTO_PTR(funcGetAttributes);
+	OPS_FN_PROTO_PTR(memcpyToSymbolAsyncH2D);
+	OPS_FN_PROTO_PTR(memcpyToSymbolH2D);
+	OPS_FN_PROTO_PTR(registerFatBinary);
+	OPS_FN_PROTO_PTR(registerFunction);
+	OPS_FN_PROTO_PTR(registerVar);
 };
 
 extern const struct cuda_ops exec_ops;

@@ -64,8 +64,6 @@
  * specific argument.
  */
 
-/*-------------------------------------- HIDDEN FUNCTIONS --------------------*/
-
 // XXX XXX XXX
 // Give the cuda packet a shm pointer instead of assuming it lies WITHIN the
 // memory region itself. We can still place it in the memory region, but using a
@@ -91,6 +89,556 @@
 		(cubins) = va_arg(extra, struct fatcubins*);	\
 		va_end(extra);									\
 	} while(0)
+
+#define EXAMINE_CUDAERROR(pkt)									\
+	do {														\
+		if ((pkt)->ret_ex_val.err != cudaSuccess) {				\
+			printd(DBG_ERROR, "returned non-success: %d\n",		\
+					(pkt)->ret_ex_val.err);						\
+		}														\
+		BUG(0);													\
+	} while(0)
+
+//
+// Thread Management API
+//
+
+static OPS_FN_PROTO(CudaThreadExit)
+{
+	pkt->ret_ex_val.err = cudaThreadExit();
+	printd(DBG_DEBUG, "thread exit\n");
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaThreadSynchronize)
+{
+	pkt->ret_ex_val.err = cudaThreadSynchronize();
+	printd(DBG_DEBUG, "thread sync\n");
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+//
+// Device Management API
+//
+
+// Many of these functions are intercepted by the assembly framework.
+
+static OPS_FN_PROTO(CudaSetDevice)
+{
+	int dev = pkt->args[0].argll;
+	pkt->ret_ex_val.err = cudaSetDevice(dev);
+	printd(DBG_DEBUG, "setDev %d\n", dev);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaSetDeviceFlags)
+{
+	pkt->ret_ex_val.err =
+		cudaSetDeviceFlags((unsigned int)pkt->args[0].argull);
+	printd(DBG_DEBUG, "flags=0x%x\n", (unsigned int)pkt->args[0].argull);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaSetValidDevices)
+{
+	int *device_arr = (int*)((uintptr_t)pkt + pkt->args[0].argll);
+	int len = pkt->args[1].argll;
+	pkt->ret_ex_val.err = cudaSetValidDevices(device_arr, len);
+	printd(DBG_DEBUG, "len=%d\n", len);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+//
+// Stream Management API
+//
+
+static OPS_FN_PROTO(CudaStreamCreate)
+{
+	printd(DBG_WARNING, "streams ignored in current implementation\n");
+	// Until we do something meaningful with streams, just return a bogus value.
+	// It's an opaque type to the caller, they won't care what the value is.
+	pkt->args[0].stream = (cudaStream_t)0xdeadbeef;
+	pkt->ret_ex_val.err = cudaSuccess;
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaStreamSynchronize)
+{
+	printd(DBG_WARNING, "streams ignored in current implementation\n");
+	// ignore args[0].stream
+	pkt->ret_ex_val.err = cudaSuccess;
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+//
+// Execution Control API
+//
+
+static OPS_FN_PROTO(CudaConfigureCall)
+{
+	dim3 gridDim = pkt->args[0].arg_dim;
+	dim3 blockDim = pkt->args[1].arg_dim;
+	size_t sharedMem = pkt->args[2].arr_argi[0];
+	cudaStream_t stream = (cudaStream_t)pkt->args[3].argull;
+
+	printd(DBG_DEBUG, "grid={%u,%u,%u} block={%u,%u,%u}"
+			" shmem=%lu strm=%p\n",
+			gridDim.x, gridDim.y, gridDim.z,
+			blockDim.x, blockDim.y, blockDim.z,
+			sharedMem, stream);
+
+	pkt->ret_ex_val.err = 
+		cudaConfigureCall(gridDim, blockDim, sharedMem, stream);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaFuncGetAttributes)
+{
+   void *attr = (void*)((uintptr_t)pkt + pkt->args[0].argull); // output arg
+   char *func = (char*)((uintptr_t)pkt + pkt->args[1].argull); // func name
+
+   pkt->ret_ex_val.err = cudaFuncGetAttributes(attr, func);
+   printd(DBG_DEBUG, "funcGetAttr func='%s'\n", func);
+	EXAMINE_CUDAERROR(pkt);
+   return 0;
+}
+
+static OPS_FN_PROTO(CudaLaunch)
+{
+	int exit_errno;
+	reg_func_args_t *func;
+
+	struct cuda_fatcubin_info *fatcubin = NULL;
+	struct fatcubins *cubin_list = NULL;
+	GET_CUBIN_VALIST(cubin_list, pkt);
+
+	// 'entry' is some hostFun symbol pointer
+	const char *entry = (const char *)pkt->args[0].argull;
+
+	// Locate the func structure; we assume func names are unique across cubins.
+	bool found = false;
+	cubins_for_each_cubin(cubin_list, fatcubin) {
+		cubin_for_each_function(fatcubin, func) {
+			if (func->hostFun == entry) found = true;
+			if (found) break;
+		}
+		if (found) break;
+	}
+	if (!found) {
+		printd(DBG_ERROR, "launch cannot find entry func\n");
+		exit_errno = -ENOENT;
+		goto fail;
+	}
+
+	pkt->ret_ex_val.err = cudaLaunch(func->hostFun);
+	printd(DBG_DEBUG, "launch(%p)\n", entry);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+
+fail:
+	return exit_errno;
+}
+
+static OPS_FN_PROTO(CudaSetupArgument)
+{
+	const void *arg = (void*)((uintptr_t)pkt + pkt->args[0].argull);
+	size_t size = pkt->args[1].arr_argi[0];
+	size_t offset = pkt->args[1].arr_argi[1];
+	pkt->ret_ex_val.err = cudaSetupArgument(arg, size, offset);
+	printd(DBG_DEBUG, "setupArg arg=%p size=%lu offset=%lu ret=%u\n",
+			arg, size, offset, pkt->ret_ex_val.err);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+//
+// Memory Management API
+//
+
+static OPS_FN_PROTO(CudaFree)
+{
+	void *ptr = pkt->args[0].argp;
+	pkt->ret_ex_val.err = cudaFree(ptr);
+	printd(DBG_DEBUG, "free %p\n", ptr);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaFreeArray)
+{
+	struct cudaArray *array = pkt->args[0].cudaArray;
+	pkt->ret_ex_val.err = cudaFreeArray(array);
+	printd(DBG_DEBUG, "freeArray %p\n", array);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaFreeHost)
+{
+	void *ptr = pkt->args[0].argp;
+	pkt->ret_ex_val.err = cudaFreeHost(ptr);
+	printd(DBG_DEBUG, "freeHost %p\n", ptr);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaHostAlloc)
+{
+	void *ptr;
+	size_t size = pkt->args[1].arr_argi[0];
+	unsigned int flags = pkt->args[2].argull;
+	pkt->ret_ex_val.err = cudaHostAlloc(&ptr, size, flags);
+	pkt->args[0].argull = (uintptr_t)ptr;
+	printd(DBG_DEBUG, "hostAlloc size=%lu flags=0x%x addr=%p\n",
+			size, flags, ptr);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMalloc)
+{
+	// We are to write the value of devPtr to args[0].argull
+	void *devPtr = NULL;
+	size_t size = pkt->args[1].arr_argi[0];
+
+	pkt->ret_ex_val.err = cudaMalloc(&devPtr, size);
+	pkt->args[0].argull = (unsigned long long)devPtr;
+
+	printd(DBG_DEBUG, "cudaMalloc devPtr=%p size=%lu ret:%u\n",
+			devPtr, size, pkt->ret_ex_val.err);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMallocArray)
+{
+	struct cudaArray *array; // a handle for an array
+	const struct cudaChannelFormatDesc *desc =
+		(const struct cudaChannelFormatDesc*)
+				((uintptr_t)pkt + pkt->args[0].argull);
+	size_t width = pkt->args[1].arr_argi[0];
+	size_t height = pkt->args[1].arr_argi[1];
+	unsigned int flags = pkt->args[2].argull;
+	pkt->ret_ex_val.err = cudaMallocArray(&array, desc, width, height, flags);
+	EXAMINE_CUDAERROR(pkt);
+	pkt->args[0].cudaArray = array; // return value
+	printd(DBG_DEBUG, "array=%p width=%lu height=%lu flags=0x%x\n",
+			array, width, height, flags);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMallocPitch)
+{
+	// We are to write the value of devPtr to args[0].argull, and the value of
+	// pitch to args[1].arr_argi[0].
+	void *devPtr;
+	size_t pitch;
+	size_t width = pkt->args[2].arr_argi[0];
+	size_t height = pkt->args[2].arr_argi[1];
+
+	pkt->ret_ex_val.err = cudaMallocPitch(&devPtr, &pitch, width, height);
+	pkt->args[0].argull = (unsigned long long)devPtr;
+	pkt->args[1].arr_argi[0] = pitch;
+
+	printd(DBG_DEBUG, "cudaMallocPitch devPtr=%p pitch=%lu"
+			" width=%lu height=%lu ret:%u\n",
+			devPtr, pitch, width, height, pkt->ret_ex_val.err);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMemcpyH2D)
+{
+	void *dst = (void*)pkt->args[0].argull; // gpu ptr
+	const void *src = (const void*)((uintptr_t)pkt + pkt->args[1].argull);
+	size_t count = pkt->args[2].arr_argi[0];
+	enum cudaMemcpyKind kind = cudaMemcpyHostToDevice;
+
+	pkt->ret_ex_val.err = cudaMemcpy(dst, src, count, kind);
+	printd(DBG_DEBUG, "memcpyh2d dst=%p src=%p count=%lu kind=%u\n",
+			dst, src, count, kind);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMemcpyD2H)
+{
+	void *dst = (void*)((uintptr_t)pkt + pkt->args[0].argull);
+	void *src = (void*)pkt->args[1].argull; // gpu ptr
+	size_t count = pkt->args[2].arr_argi[0];
+	enum cudaMemcpyKind kind = cudaMemcpyDeviceToHost;
+
+	pkt->ret_ex_val.err = cudaMemcpy(dst, src, count, kind);
+	printd(DBG_DEBUG, "memcpyd2h dst=%p src=%p count=%lu kind=%u\n",
+			dst, src, count, kind);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMemcpyD2D)
+{
+	void *dst = (void*)pkt->args[0].argull;
+	void *src = (void*)pkt->args[1].argull;
+	size_t count = pkt->args[2].arr_argi[0];
+	enum cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
+
+	pkt->ret_ex_val.err = cudaMemcpy(dst, src, count, kind);
+	printd(DBG_DEBUG, "memcpyd2d dst=%p src=%p count=%lu kind=%u\n",
+			dst, src, count, kind);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMemcpyAsyncH2D)
+{
+	printd(DBG_WARNING, "async API not supported; defaulting to sync API\n");
+	// we assume the arguments are the same, ignoring the stream
+	return exec_ops.memcpyH2D(pkt);
+}
+
+static OPS_FN_PROTO(CudaMemcpyAsyncD2H)
+{
+	printd(DBG_WARNING, "async API not supported; defaulting to sync API\n");
+	// we assume the arguments are the same, ignoring the stream
+	return exec_ops.memcpyD2H(pkt);
+}
+
+static OPS_FN_PROTO(CudaMemcpyAsyncD2D)
+{
+	printd(DBG_WARNING, "async API not supported; defaulting to sync API\n");
+	// we assume the arguments are the same, ignoring the stream
+	return exec_ops.memcpyD2D(pkt);
+}
+
+static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
+{
+	int exit_errno;
+	reg_var_args_t *var;
+
+	void *dst = (void*)((uintptr_t)pkt + pkt->args[0].argull);
+	const char *symbol = pkt->args[1].argcp;
+	size_t count = pkt->args[2].arr_argi[0];
+	size_t offset = pkt->args[2].arr_argi[1];
+
+	struct cuda_fatcubin_info *fatcubin;
+	struct fatcubins *cubins = NULL;
+	GET_CUBIN_VALIST(cubins, pkt);
+
+	// Locate the var structure; symbols are unique across cubins.
+	// See quote from A. Kerr in libci.c
+	bool found = false;
+	cubins_for_each_cubin(cubins, fatcubin) {
+		cubin_for_each_variable(fatcubin, var) {
+			// FIXME we assume symbols are memory addresses here. The
+			// CUDA Runtime API says they may also be strings, if the
+			// app desires.
+			if (var->hostVar == symbol) found = true;
+			if (found) break;
+		}
+		if (found) break;
+	}
+	if (!found) {
+		printd(DBG_ERROR, "memcpyFromSymb cannot find symbol\n");
+		exit_errno = -ENOENT;
+		goto fail;
+	}
+	pkt->ret_ex_val.err =
+		cudaMemcpyFromSymbol(dst, var->dom0HostAddr, count, offset,
+				cudaMemcpyDeviceToHost);
+	printd(DBG_DEBUG, "called\n");
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+
+fail:
+	return exit_errno;
+}
+
+static OPS_FN_PROTO(CudaMemcpyToArrayH2D)
+{
+	struct cudaArray *dst = pkt->args[0].cudaArray;
+	size_t wOffset = pkt->args[1].arr_argi[0];
+	size_t hOffset = pkt->args[1].arr_argi[1];
+	const void *src = (const void*)((uintptr_t)pkt + pkt->args[2].argull);
+	size_t count = pkt->args[3].arr_argi[0];
+	printd(DBG_DEBUG, "called\n");
+	pkt->ret_ex_val.err =
+		cudaMemcpyToArray(dst, wOffset, hOffset,
+				src, count, cudaMemcpyHostToDevice);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMemcpyToArrayD2D)
+{
+	struct cudaArray *dst = pkt->args[0].cudaArray;
+	size_t wOffset = pkt->args[1].arr_argi[0];
+	size_t hOffset = pkt->args[1].arr_argi[1];
+	const void *src = pkt->args[2].argp; // gpu ptr?
+	size_t count = pkt->args[3].arr_argi[0];
+	printd(DBG_DEBUG, "called\n");
+	pkt->ret_ex_val.err =
+		cudaMemcpyToArray(dst, wOffset, hOffset,
+				src, count, cudaMemcpyDeviceToDevice);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
+{
+	int exit_errno;
+	reg_var_args_t *var;
+
+	const char *symbol = pkt->args[0].argcp;
+	const void *src = (void*)((uintptr_t)pkt + pkt->args[1].argull);
+	size_t count = pkt->args[2].arr_argi[0];
+	size_t offset = pkt->args[2].arr_argi[1];
+
+	struct cuda_fatcubin_info *fatcubin = NULL;
+	struct fatcubins *cubins = NULL;
+	GET_CUBIN_VALIST(cubins, pkt);
+
+	// Locate the var structure; symbols are unique across cubins. FIXME Here we
+	// assume symbols are memory address; they may be strings instead.
+	// See quote from A. Kerr in libci.c
+	bool found = false;
+	cubins_for_each_cubin(cubins, fatcubin) {
+		cubin_for_each_variable(fatcubin, var) {
+			if (var->hostVar == symbol) found = true;
+			if (found) break;
+		}
+		if (found) break;
+	}
+	if (!found) {
+		printd(DBG_ERROR, "memcpyFromSymb cannot find symbol\n");
+		exit_errno = -ENOENT;
+		goto fail;
+	}
+
+	pkt->ret_ex_val.err =
+		cudaMemcpyToSymbol(var->dom0HostAddr, src, count, offset,
+				cudaMemcpyHostToDevice);
+	printd(DBG_DEBUG, "memcpyFromSymb %p\n", var->hostVar);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+
+fail:
+	return exit_errno;
+}
+
+static OPS_FN_PROTO(CudaMemcpyToSymbolAsyncH2D)
+{
+	printd(DBG_WARNING, "async API not supported; defaulting to sync API\n");
+	// we assume the arguments are the same, ignoring the stream
+	return exec_ops.memcpyToSymbolH2D(pkt);
+}
+
+static OPS_FN_PROTO(CudaMemGetInfo)
+{
+	size_t *free, *total;
+	free = &(pkt->args[0].arr_argi[0]);
+	total = &(pkt->args[0].arr_argi[1]);
+	pkt->ret_ex_val.err = cudaMemGetInfo(free, total);
+	printd(DBG_DEBUG, "memGetInfo free=%lu total=%lu\n", *free, *total);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMemset)
+{
+	void *devPtr = (void*)pkt->args[0].argull;
+	int value = pkt->args[1].argll;
+	size_t count = pkt->args[2].arr_argi[0];
+	pkt->ret_ex_val.err = cudaMemset(devPtr, value, count);
+	printd(DBG_DEBUG, "cudaMemset devPtr=%p value=%d count=%lu\n",
+			devPtr, value, count);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+//
+// Texture Management API
+//
+
+static OPS_FN_PROTO(CudaBindTexture)
+{
+#if 0
+	size_t offset; // output parameter
+	struct textureReference *texref = &(pkt->args[0].texref);
+	void *devPtr = pkt->args[1].argp;
+	struct cudaChannelFormatDesc *desc = &(pkt->args[2].fdesc);
+	size_t size = pkt->args[3].arr_argi[0];
+	pkt->ret_ex_val.err = cudaBindTexture(&offset, texref, devPtr, desc, size);
+	pkt->args[0].arr_argi[0] = offset;
+	printd(DBG_DEBUG, "called\n");
+	EXAMINE_CUDAERROR(pkt);
+#endif
+	return -1;
+}
+
+static OPS_FN_PROTO(CudaBindTextureToArray)
+{
+	//! address of texture variable in application; use for lookup
+	struct textureReference *texref = pkt->args[0].argp;
+	//! new state of texture app has provided
+	struct textureReference *new_tex = &pkt->args[1].texref;
+	struct cudaArray *array = pkt->args[2].cudaArray;
+	//! data describing channel format
+	struct cudaChannelFormatDesc *desc = &pkt->args[3].desc;
+	reg_tex_args_t *tex;
+
+	printd(DBG_DEBUG, "called\n");
+
+	struct cuda_fatcubin_info *fatcubin = NULL;
+	struct fatcubins *cubins = NULL;
+	GET_CUBIN_VALIST(cubins, pkt);
+
+	// Look for the texture. Associate the application reference with the one
+	// registered in the sink address space.
+	bool found = false;
+	cubins_for_each_cubin(cubins, fatcubin) {
+		cubin_for_each_texture(fatcubin, tex) {
+			if (tex->texref == texref) found = true;
+			if (found) break;
+		}
+		if (found) break;
+	}
+	BUG(!found);
+
+	// Copy the structure to the locally maintained version, as the caller may
+	// have updated the values in its copy of the structure before invoking this
+	// routine.
+	tex->tex = *new_tex;
+
+	pkt->ret_ex_val.err =
+		cudaBindTextureToArray(&tex->tex, array, desc);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+// CudaCreateChannelDesc is intercepted by the interposer
+
+static OPS_FN_PROTO(CudaGetTextureReference)
+{
+	//const struct textureReference *texref = NULL; // runtime modifies this
+	//char *symbol = (char *)(pkt->args[0].argull);
+	//pkt->ret_ex_val.err = cudaGetTextureReference(&texref, symbol);
+	//pkt->args[0].argull = (uintptr_t)*texref;
+	//EXAMINE_CUDAERROR(pkt);
+	BUG(0);
+	return 0;
+}
+
+//
+// Undocumented API
+//
 
 static OPS_FN_PROTO(__CudaRegisterFatBinary)
 {
@@ -135,6 +683,7 @@ static OPS_FN_PROTO(__CudaUnregisterFatBinary)
 	// FIXME Deallocate the fat binary data structures.
 	pkt->ret_ex_val.err = cudaSuccess;
 	printd(DBG_DEBUG, "unregister FB handle=%p\n", handle);
+	EXAMINE_CUDAERROR(pkt);
 	return 0;
 }
 
@@ -211,290 +760,97 @@ static OPS_FN_PROTO(__CudaRegisterVar)
 	cubins_add_variable(cubin_list, uargs->fatCubinHandle, &uargs->link);
 	pkt->ret_ex_val.err = cudaSuccess;
 	printd(DBG_DEBUG, "_regVar: %p\n", uargs->hostVar);
+	EXAMINE_CUDAERROR(pkt);
 	return 0;
 
 fail:
 	return exit_errno;
 }
 
-static OPS_FN_PROTO(CudaSetDevice)
-{
-	int dev = pkt->args[0].argll;
-	pkt->ret_ex_val.err = cudaSetDevice(dev);
-	printd(DBG_DEBUG, "setDev %d\n", dev);
-	return 0;
-}
-
-static OPS_FN_PROTO(CudaConfigureCall)
-{
-	dim3 gridDim = pkt->args[0].arg_dim;
-	dim3 blockDim = pkt->args[1].arg_dim;
-	size_t sharedMem = pkt->args[2].arr_argi[0];
-	cudaStream_t stream = (cudaStream_t)pkt->args[3].argull;
-
-	printd(DBG_DEBUG, "grid={%u,%u,%u} block={%u,%u,%u}"
-			" shmem=%lu strm=%p\n",
-			gridDim.x, gridDim.y, gridDim.z,
-			blockDim.x, blockDim.y, blockDim.z,
-			sharedMem, stream);
-
-	pkt->ret_ex_val.err = 
-		cudaConfigureCall(gridDim, blockDim, sharedMem, stream);
-	return 0;
-}
-
-static OPS_FN_PROTO(CudaSetupArgument)
-{
-	const void *arg = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t size = pkt->args[1].arr_argi[0];
-	size_t offset = pkt->args[1].arr_argi[1];
-	pkt->ret_ex_val.err = cudaSetupArgument(arg, size, offset);
-	printd(DBG_DEBUG, "setupArg arg=%p size=%lu offset=%lu ret=%u\n",
-			arg, size, offset, pkt->ret_ex_val.err);
-	return 0;
-}
-
-static OPS_FN_PROTO(CudaLaunch)
+static OPS_FN_PROTO(__CudaRegisterTexture)
 {
 	int exit_errno;
-	reg_func_args_t *func;
 
-	struct cuda_fatcubin_info *fatcubin = NULL;
 	struct fatcubins *cubin_list = NULL;
 	GET_CUBIN_VALIST(cubin_list, pkt);
+	
+	char *devName = (char*)((uintptr_t)pkt + pkt->args[3].argull);
 
-	// 'entry' is some hostFun symbol pointer
-	const char *entry = (const char *)pkt->args[0].argull;
-
-	// Locate the func structure; we assume func names are unique across cubins.
-	bool found = false;
-	cubins_for_each_cubin(cubin_list, fatcubin) {
-		cubin_for_each_function(fatcubin, func) {
-			if (func->hostFun == entry) found = true;
-			if (found) break;
-		}
-		if (found) break;
-	}
-	if (!found) {
-		printd(DBG_ERROR, "launch cannot find entry func\n");
-		exit_errno = -ENOENT;
+	reg_tex_args_t *tex = calloc(1, sizeof(*tex));
+	if (!tex) {
+		fprintf(stderr, "Out of memory\n");
+		printd(DBG_ERROR, "Out of memory\n");
+		exit_errno = -ENOMEM;
 		goto fail;
 	}
+	INIT_LIST_HEAD(&tex->link);
+	// TODO Move all this packing out of this function
+	tex->fatCubinHandle = pkt->args[0].argdp; // pointer copy
+	tex->texref = pkt->args[1].argp; // address of variable in application
+	tex->devPtr = pkt->args[2].argp; // pointer copy
+	tex->devName = calloc(1, strlen(devName) + 1);
+	strncpy(tex->devName, devName, strlen(devName) + 1);
+	tex->dim = pkt->args[4].arr_argii[0];
+	tex->norm = pkt->args[4].arr_argii[1];
+	tex->ext = pkt->args[4].arr_argii[2];
 
-	pkt->ret_ex_val.err = cudaLaunch(func->hostFun);
-	printd(DBG_DEBUG, "launch(%p)\n", entry);
-	BUG(pkt->ret_ex_val.err != cudaSuccess);
+	printd(DBG_DEBUG, "handle=%p devPtr=%p devName=%s dim=%d norm=%d ext=%d\n",
+			tex->fatCubinHandle, tex->devPtr, tex->devName,
+			tex->dim, tex->norm, tex->ext);
+
+	// Make the call
+	__cudaRegisterTexture(tex->fatCubinHandle,
+			&tex->tex, // pretend this is our global; register its addr
+			(const void**)&tex->devPtr, tex->devName,
+			tex->dim, tex->norm, tex->ext);
+
+	// store the state
+	cubins_add_texture(cubin_list, tex->fatCubinHandle, &tex->link);
+	pkt->ret_ex_val.err = cudaSuccess;
 	return 0;
 
 fail:
 	return exit_errno;
-}
-
-static OPS_FN_PROTO(CudaThreadExit)
-{
-	pkt->ret_ex_val.err = cudaThreadExit();
-	printd(DBG_DEBUG, "thread exit\n");
-	return 0;
-}
-
-static OPS_FN_PROTO(CudaThreadSynchronize)
-{
-	pkt->ret_ex_val.err = cudaThreadSynchronize();
-	printd(DBG_DEBUG, "thread sync\n");
-	return 0;
-}
-
-static OPS_FN_PROTO(CudaMalloc)
-{
-	// We are to write the value of devPtr to args[0].argull
-	void *devPtr = NULL;
-	size_t size = pkt->args[1].arr_argi[0];
-
-	pkt->ret_ex_val.err = cudaMalloc(&devPtr, size);
-	pkt->args[0].argull = (unsigned long long)devPtr;
-
-	printd(DBG_DEBUG, "cudaMalloc devPtr=%p size=%lu ret:%u\n",
-			devPtr, size, pkt->ret_ex_val.err);
-	return 0;
-}
-
-static OPS_FN_PROTO(CudaMallocPitch)
-{
-	// We are to write the value of devPtr to args[0].argull, and the value of
-	// pitch to args[1].arr_argi[0].
-	void *devPtr;
-	size_t pitch;
-	size_t width = pkt->args[2].arr_argi[0];
-	size_t height = pkt->args[2].arr_argi[1];
-
-	pkt->ret_ex_val.err = cudaMallocPitch(&devPtr, &pitch, width, height);
-	pkt->args[0].argull = (unsigned long long)devPtr;
-	pkt->args[1].arr_argi[0] = pitch;
-
-	printd(DBG_DEBUG, "cudaMallocPitch devPtr=%p pitch=%lu"
-			" width=%lu height=%lu ret:%u\n",
-			devPtr, pitch, width, height, pkt->ret_ex_val.err);
-	return 0;
-}
-
-static OPS_FN_PROTO(CudaFree)
-{
-	void *ptr = pkt->args[0].argp;
-	pkt->ret_ex_val.err = cudaFree(ptr);
-	printd(DBG_DEBUG, "free %p\n", ptr);
-	return 0;
-}
-
-static OPS_FN_PROTO(CudaMemcpyH2D)
-{
-	void *dst = (void*)pkt->args[0].argull; // gpu ptr
-	const void *src = (const void*)((uintptr_t)pkt + pkt->args[1].argull);
-	size_t count = pkt->args[2].arr_argi[0];
-	enum cudaMemcpyKind kind = cudaMemcpyHostToDevice;
-
-	pkt->ret_ex_val.err = cudaMemcpy(dst, src, count, kind);
-	printd(DBG_DEBUG, "memcpyh2d dst=%p src=%p count=%lu kind=%u\n",
-			dst, src, count, kind);
-	return 0;
-}
-
-static OPS_FN_PROTO(CudaMemcpyD2H)
-{
-	void *dst = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	void *src = (void*)pkt->args[1].argull; // gpu ptr
-	size_t count = pkt->args[2].arr_argi[0];
-	enum cudaMemcpyKind kind = cudaMemcpyDeviceToHost;
-
-	pkt->ret_ex_val.err = cudaMemcpy(dst, src, count, kind);
-	printd(DBG_DEBUG, "memcpyd2h dst=%p src=%p count=%lu kind=%u\n",
-			dst, src, count, kind);
-	return 0;
-}
-
-static OPS_FN_PROTO(CudaMemcpyD2D)
-{
-	void *dst = (void*)pkt->args[0].argull;
-	void *src = (void*)pkt->args[1].argull;
-	size_t count = pkt->args[2].arr_argi[0];
-	enum cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
-
-	pkt->ret_ex_val.err = cudaMemcpy(dst, src, count, kind);
-	printd(DBG_DEBUG, "memcpyd2d dst=%p src=%p count=%lu kind=%u\n",
-			dst, src, count, kind);
-	return 0;
-}
-
-static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
-{
-	int exit_errno;
-	reg_var_args_t *var;
-
-	const char *symbol = pkt->args[0].argcp;
-	const void *src = (void*)((uintptr_t)pkt + pkt->args[1].argull);
-	size_t count = pkt->args[2].arr_argi[0];
-	size_t offset = pkt->args[2].arr_argi[1];
-
-	struct cuda_fatcubin_info *fatcubin = NULL;
-	struct fatcubins *cubins = NULL;
-	GET_CUBIN_VALIST(cubins, pkt);
-
-	// Locate the var structure; symbols are unique across cubins. FIXME Here we
-	// assume symbols are memory address; they may be strings instead.
-	// See quote from A. Kerr in libci.c
-	bool found = false;
-	cubins_for_each_cubin(cubins, fatcubin) {
-		cubin_for_each_variable(fatcubin, var) {
-			if (var->hostVar == symbol) found = true;
-			if (found) break;
-		}
-		if (found) break;
-	}
-	if (!found) {
-		printd(DBG_ERROR, "memcpyFromSymb cannot find symbol\n");
-		exit_errno = -ENOENT;
-		goto fail;
-	}
-
-	pkt->ret_ex_val.err =
-		cudaMemcpyToSymbol(var->dom0HostAddr, src, count, offset,
-				cudaMemcpyHostToDevice);
-	printd(DBG_DEBUG, "memcpyFromSymb %p\n", var->hostVar);
-	return 0;
-
-fail:
-	return exit_errno;
-}
-
-static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
-{
-	int exit_errno;
-	reg_var_args_t *var;
-
-	void *dst = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	const char *symbol = pkt->args[1].argcp;
-	size_t count = pkt->args[2].arr_argi[0];
-	size_t offset = pkt->args[2].arr_argi[1];
-
-	struct cuda_fatcubin_info *fatcubin;
-	struct fatcubins *cubins = NULL;
-	GET_CUBIN_VALIST(cubins, pkt);
-
-	// Locate the var structure; symbols are unique across cubins.
-	// See quote from A. Kerr in libci.c
-	bool found = false;
-	cubins_for_each_cubin(cubins, fatcubin) {
-		cubin_for_each_variable(fatcubin, var) {
-			// FIXME we assume symbols are memory addresses here. The
-			// CUDA Runtime API says they may also be strings, if the
-			// app desires.
-			if (var->hostVar == symbol) found = true;
-			if (found) break;
-		}
-		if (found) break;
-	}
-	if (!found) {
-		printd(DBG_ERROR, "memcpyFromSymb cannot find symbol\n");
-		exit_errno = -ENOENT;
-		goto fail;
-	}
-	pkt->ret_ex_val.err =
-		cudaMemcpyFromSymbol(dst, var->dom0HostAddr, count, offset,
-				cudaMemcpyDeviceToHost);
-	printd(DBG_DEBUG, "memcpyFromSymb %p\n", var->hostVar);
-	return 0;
-
-fail:
-	return exit_errno;
-}
-
-static OPS_FN_PROTO(CudaFuncGetAttributes)
-{
-   void *attr = (void*)((uintptr_t)pkt + pkt->args[0].argull); // output arg
-   char *func = (char*)((uintptr_t)pkt + pkt->args[1].argull); // func name
-
-   pkt->ret_ex_val.err = cudaFuncGetAttributes(attr, func);
-   printd(DBG_DEBUG, "funcGetAttr func='%s'\n", func);
-   return 0;
 }
 
 const struct cuda_ops exec_ops =
 {
 	// Functions which take only a cuda_packet*
+	.bindTexture = CudaBindTexture,
 	.configureCall = CudaConfigureCall,
 	.free = CudaFree,
+	.freeArray = CudaFreeArray,
+	.freeHost = CudaFreeHost,
+	.funcGetAttributes = CudaFuncGetAttributes,
+	.getTextureReference = CudaGetTextureReference,
+	.hostAlloc = CudaHostAlloc,
 	.malloc = CudaMalloc,
+	.mallocArray = CudaMallocArray,
 	.mallocPitch = CudaMallocPitch,
+	.memcpyAsyncD2D = CudaMemcpyAsyncD2D,
+	.memcpyAsyncD2H = CudaMemcpyAsyncD2H,
+	.memcpyAsyncH2D = CudaMemcpyAsyncH2D,
 	.memcpyD2D = CudaMemcpyD2D,
 	.memcpyD2H = CudaMemcpyD2H,
 	.memcpyH2D = CudaMemcpyH2D,
+	.memcpyToArrayD2D = CudaMemcpyToArrayD2D,
+	.memcpyToArrayH2D = CudaMemcpyToArrayH2D,
+	.memcpyToSymbolAsyncH2D = CudaMemcpyToSymbolAsyncH2D,
+	.memGetInfo = CudaMemGetInfo,
+	.memset = CudaMemset,
+	.registerTexture = __CudaRegisterTexture,
 	.setDevice = CudaSetDevice,
+	.setDeviceFlags = CudaSetDeviceFlags,
 	.setupArgument = CudaSetupArgument,
+	.setValidDevices = CudaSetValidDevices,
+	.streamCreate = CudaStreamCreate,
+	.streamSynchronize = CudaStreamSynchronize,
 	.threadExit = CudaThreadExit,
 	.threadSynchronize = CudaThreadSynchronize,
 	.unregisterFatBinary = __CudaUnregisterFatBinary,
-	.funcGetAttributes = CudaFuncGetAttributes,
 
 	// Functions which take a cuda_packet* and fatcubins*
+	.bindTextureToArray = CudaBindTextureToArray,
 	.launch = CudaLaunch,
 	.memcpyFromSymbolD2H = CudaMemcpyFromSymbolD2H,
 	.memcpyToSymbolH2D = CudaMemcpyToSymbolH2D,
@@ -502,86 +858,3 @@ const struct cuda_ops exec_ops =
 	.registerFunction = __CudaRegisterFunction,
 	.registerVar = __CudaRegisterVar,
 };
-
-/*--------------------------- ^^ CODE TO MERGE UP ^^ ---------------------*/
-
-#if 0
-case CUDA_MEMCPY_FROM_SYMBOL_D2D:
-{
-	struct cuda_fatcubin_info *fatcubin;
-	int found = 0; // 0 if var not found, 1 otherwise
-	reg_var_args_t *var;
-	void *dst = pkt->args[0].argull;
-	const char *symbol = pkt->args[1].argcp;
-	size_t count = pkt->args[2].arr_argi[0];
-	size_t offset = pkt->args[2].arr_argi[1];
-	// Locate the var structure; symbols are unique across cubins.
-	// See quote from A. Kerr in libci.c
-	cubins_for_each_cubin(cubins, fatcubin) {
-		cubin_for_each_variable(fatcubin, var) {
-			// FIXME we assume symbols are memory addresses here. The
-			// CUDA Runtime API says they may also be strings, if the
-			// app desires.
-			if (var->hostVar == symbol) found = 1;
-			if (found) break;
-		}
-		if (found) break;
-	}
-	if (unlikely(!found)) {
-		printd(DBG_ERROR, "memcpyFromSymb cannot find symbol\n");
-		fail = 1;
-		break;
-	}
-	printd(DBG_DEBUG, "memcpyFromSymb %p\n", var->hostVar);
-	pkt->ret_ex_val.err =
-		cudaMemcpyFromSymbol(dst, var->dom0HostAddr, count, offset,
-				cudaMemcpyDeviceToDevice);
-}
-break;
-#endif
-
-#if 0
-	if (pkt->method_id == __CUDA_REGISTER_FAT_BINARY &&
-			pkt->ret_ex_val.handle == NULL) {
-		printd(DBG_ERROR, "__cudaRegFatBin returned NULL handle\n");
-	} else if (pkt->method_id != __CUDA_REGISTER_FAT_BINARY &&
-			pkt->ret_ex_val.err != cudaSuccess) {
-		printd(DBG_ERROR, "method %u returned not cudaSuccess: %u\n",
-				pkt->method_id, pkt->ret_ex_val.err);
-	}
-#endif
-
-#if 0
-case CUDA_MEMCPY_TO_SYMBOL_D2D:
-{
-	struct cuda_fatcubin_info *fatcubin;
-	reg_var_args_t *var;
-	int found = 0; // 0 if var not found, 1 otherwise
-	const char *symbol = pkt->args[0].argcp;
-	const void *src = pkt->args[1].argull;
-	size_t count = pkt->args[2].arr_argi[0];
-	size_t offset = pkt->args[2].arr_argi[1];
-	// Locate the var structure; symbols are unique across cubins.
-	// See quote from A. Kerr in libci.c
-	cubins_for_each_cubin(cubins, fatcubin) {
-		cubin_for_each_variable(fatcubin, var) {
-			// FIXME we assume symbols are memory addresses here. The
-			// CUDA Runtime API says they may also be strings, if the
-			// app desires.
-			if (var->hostVar == symbol) found = 1;
-			if (found) break;
-		}
-		if (found) break;
-	}
-	if (unlikely(!found)) {
-		printd(DBG_ERROR, "memcpyFromSymb cannot find symbol\n");
-		fail = 1;
-		break;
-	}
-	printd(DBG_DEBUG, "memcpyFromSymb %p\n", var->hostVar);
-	pkt->ret_ex_val.err =
-		cudaMemcpyToSymbol(var->dom0HostAddr, src, count, offset,
-				cudaMemcpyDeviceToDevice);
-}
-break;
-#endif

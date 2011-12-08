@@ -29,7 +29,7 @@
 typedef uint32_t grant_ref_t;
 typedef pthread_t tid_t;
 
-#define MAX_ARGS 4       // most cuda calls so far
+#define MAX_ARGS 5
 
 enum cuda_packet_flags
 {
@@ -43,6 +43,10 @@ enum cuda_packet_flags
 };
 // TODO Create macros to access and modify the value of 'flags' in a cuda packet
 // instead of having code manually do raw bit ops everywhere.
+
+// XXX Move reg_*_args_t to fatcubininfo.h
+// And name that file something else
+// and move that file to include/cuda/
 
 // The cudaRegisterFunction() has 10 arguments. Instead of passing them in
 // multiple packet rounds, it is serialized onto as many pages and can be
@@ -81,11 +85,10 @@ typedef struct {
 typedef struct {
 	struct list_head link;
 	void **fatCubinHandle;
-	struct textureReference *hostVar;  // Address coming from Guest thru RegisterTexture
-	struct cudaChannelFormatDesc *hostChannel;  // Note this down as well
-	struct textureReference *hostFEVar;  // This addr will be registered with cuda driver instead
-	void **deviceAddress;
-	char *deviceName;
+	struct textureReference *texref; //! address of global in application
+	struct textureReference tex; //! actual storage registered within sink
+	void **devPtr;
+	char *devName;
 	int dim;
 	int norm;
 	int ext;
@@ -107,12 +110,10 @@ typedef union args {
 	size_t arr_argi[2];
 	unsigned long long arr_argui[2];
 	dim3 arg_dim;                       // 3D point
-	cudaStream_t arg_str;
-	// FIXME Are these ever used?? If not, delete them and move the reg_*_args_t
-	// to fatcubininfo.h
-	reg_func_args_t *reg_func_args;     // for __cudaRegisterFunction()
-	reg_var_args_t *reg_vars;           // for __cudaRegisterVar()
-	reg_tex_args_t *reg_texs;           // for __cudaRegisterTexture()
+	cudaStream_t stream;
+	struct cudaArray *cudaArray; // this is an opaque type; contains a handle
+	struct cudaChannelFormatDesc desc;
+	struct textureReference texref;
 } args_t;
 
 // Possible return types in a response or some extra information on the way to

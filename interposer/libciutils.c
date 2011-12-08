@@ -2051,6 +2051,7 @@ int packRegVar(void * const dst, void **fatCubinHandle, char *hostVar, char
 
 	// This variable actually is just the address of deviceName variable. But
 	// the adjustment is done in Dom0
+	// XXX I don't think this is a string just because the type is char *
 	offset = l_packStr(pPack, deviceAddress);
 	if( ERROR == offset ) return -1; else pPack += offset;
 
@@ -2317,8 +2318,6 @@ char * methodIdToString(const int method_id){
 	case CUDA_FREE_ARRAY: fname = "cudaFreeArray"; break;
 	case CUDA_MEMCPY_TO_ARRAY_D2D: fname = "cudaMemcpyToArrayD2D"; break;
 	case CUDA_MEMCPY_TO_ARRAY_H2D: fname = "cudaMemcpyToArrayH2D"; break;
-	case CUDA_MEMCPY_TO_ARRAY_D2H: fname = "cudaMemcpyToArrayD2H"; break;
-	case CUDA_MEMCPY_TO_ARRAY_H2H: fname = "cudaMemcpyToArrayH2H"; break;
 	case __CUDA_REGISTER_FAT_BINARY: fname = "__cudaRegisterFatBinary"; break;
 	case __CUDA_REGISTER_FUNCTION: fname = "__cudaRegisterFunction"; break;
 	case __CUDA_REGISTER_VARIABLE: fname = "__cudaRegisterVariable"; break;
