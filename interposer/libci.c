@@ -110,6 +110,14 @@ static struct shm_regions *cuda_regions;
 //! Reference count for register and unregister fatbinary invocations.
 static unsigned int num_registered_cubins = 0;
 
+#define MAX_REGISTERED_VARS 5210
+//! Symbol addresses from __cudaRegisterVar. Used to determine if the symbol
+//! parameter in certain functions is actually the address of a variable, or
+//! the string name of one of the variables in functions which accept symbols.
+//! TODO Make this cleaner code.
+static uintptr_t registered_vars[MAX_REGISTERED_VARS];
+static unsigned int num_registered_vars = 0;
+
 /*-------------------------------------- SHMGRP DEFINITIONS ------------------*/
 
 //! Amount of memory to allocate for each CUDA thread, in bytes.
@@ -291,6 +299,20 @@ get_region(pthread_t tid)
 #		define __dv(v)
 #	endif
 #endif
+
+// Lookup 'symbol' in our list of known registered variable addresses. If it
+// exists, then store it as the address of a variable residing in application
+// space. Else, it must be a string literal naming a global variable. If the
+// latter, copy the string to the shm region and indicate the symbol is a string
+// by setting a flag in the packet.
+static inline bool __func_symb_param_is_string(const char *symbol)
+{
+	unsigned int symb = 0;
+	while (symb < num_registered_vars)
+		if (registered_vars[symb++] == (uintptr_t)symbol)
+			return false;
+	return true;
+}
 
 /*-------------------------------------- INTERPOSING API ---------------------*/
 
@@ -494,7 +516,7 @@ cudaError_t cudaSetDeviceFlags(unsigned int flags)
 cudaError_t cudaSetValidDevices(int *device_arr, int len)
 {
 	struct cuda_packet *shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	void *shmptr = shmpkt;
+	void *shm_ptr = shmpkt;
 
 	printd(DBG_DEBUG, "called\n");
 
@@ -503,8 +525,8 @@ cudaError_t cudaSetValidDevices(int *device_arr, int len)
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argull = sizeof(*shmpkt);
 	shmpkt->args[1].argll = len;
-	shmptr += shmpkt->args[0].argull;
-	memcpy(shmptr, device_arr, (len * sizeof(*device_arr)));
+	shm_ptr += shmpkt->args[0].argull;
+	memcpy(shm_ptr, device_arr, (len * sizeof(*device_arr)));
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -796,7 +818,7 @@ cudaError_t cudaMallocArray(
 {
 	struct cuda_packet *shmpkt =
 		(struct cuda_packet *)get_region(pthread_self());
-	void *shmptr = (void*)shmpkt;
+	void *shm_ptr = (void*)shmpkt;
 
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_MALLOC_ARRAY;
@@ -804,8 +826,8 @@ cudaError_t cudaMallocArray(
 	// We expect the value of *array to be in args[0].cudaArray in the return
 	// packet
 	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
-	shmptr += sizeof(*shmpkt);
-	memcpy(shmptr, desc, sizeof(*desc));
+	shm_ptr += sizeof(*shmpkt);
+	memcpy(shm_ptr, desc, sizeof(*desc));
 	shmpkt->args[1].arr_argi[0] = width;
 	shmpkt->args[1].arr_argi[1] = height;
 	shmpkt->args[2].argull = flags;
@@ -990,22 +1012,17 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 	return shmpkt->ret_ex_val.err;
 }
 
-cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
+cudaError_t cudaMemcpyFromSymbol(
+		void *dst,
+		const char *symbol, //! Either an addr of a var in the app, or a string
 		size_t count, size_t offset __dv(0),
 		enum cudaMemcpyKind kind __dv(cudaMemcpyDeviceToHost))
 {
 	struct cuda_packet *shmpkt =
 		(struct cuda_packet *)get_region(pthread_self());
-	void *shm_ptr;
+	void *shm_ptr = (void*)((uintptr_t)shmpkt + sizeof(*shmpkt));
 
 	printd(DBG_DEBUG, "symb %p\n", symbol);
-	fprintf(stderr, USERMSG_PREFIX " assuming symbol is memory address\n");
-
-	if (count >= THREAD_SHM_SIZE) {
-		fprintf(stderr, "%s: error: memory region too large: %lu\n",
-				__func__, count);
-		assert(0);
-	}
 
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->thr_id = pthread_self();
@@ -1013,13 +1030,15 @@ cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 		case cudaMemcpyDeviceToHost:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_FROM_SYMBOL_D2H;
+			// offset within the shm from which we'll expect to read the user
+			// data in the return packet
 			shmpkt->args[0].argull = sizeof(*shmpkt);
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_FROM_SYMBOL_D2D;
-			shmpkt->args[0].argull = (uintptr_t)dst;
+			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
 		}
 		break;
 		default:
@@ -1028,11 +1047,19 @@ cudaError_t cudaMemcpyFromSymbol(void *dst, const char *symbol,
 			return cudaErrorInvalidMemcpyDirection;
 		}
 	}
-	shmpkt->args[1].argcp = (char*)symbol;
+	if (__func_symb_param_is_string(symbol)) {
+		shmpkt->args[1].argull = (shm_ptr - (void*)shmpkt); // store string in shm
+		memcpy(shm_ptr, symbol, strlen(symbol) + 1);
+		shm_ptr += strlen(symbol) + 1;
+		shmpkt->flags |= CUDA_PKT_SYMB_IS_STRING;
+		printd(DBG_DEBUG, "\tsymbol is string: %s\n", symbol);
+	} else {
+		shmpkt->args[1].argull = (uintptr_t)symbol;
+	}
 	shmpkt->args[2].arr_argi[0] = count;
 	shmpkt->args[2].arr_argi[1] = offset;
 	shmpkt->args[3].argll = kind;
-	shmpkt->flags = CUDA_PKT_REQUEST;
+	shmpkt->flags |= CUDA_PKT_REQUEST;
 
 	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
@@ -1106,26 +1133,27 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 {
 	struct cuda_packet *shmpkt =
 		(struct cuda_packet *)get_region(pthread_self());
-	void *shm_ptr;
+	void *shm_ptr = (void*)((uintptr_t)shmpkt + sizeof(*shmpkt));
 
 	printd(DBG_DEBUG, "symb %p\n", symbol);
-	fprintf(stderr, USERMSG_PREFIX " assuming symbol is memory address\n");
-
-	if (count >= THREAD_SHM_SIZE) {
-		fprintf(stderr, "%s: error: memory region too large: %lu\n",
-				__func__, count);
-		assert(0);
-	}
 
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argcp = (char*)symbol;
+
+	if (__func_symb_param_is_string(symbol)) {
+		shmpkt->args[0].argull = (shm_ptr - (void*)shmpkt); // offset of string
+		memcpy(shm_ptr, symbol, strlen(symbol) + 1);
+		shmpkt->flags |= CUDA_PKT_SYMB_IS_STRING;
+		shm_ptr += strlen(symbol) + 1;
+		printd(DBG_DEBUG, "\tsymb is string: %s\n", symbol);
+	} else {
+		shmpkt->args[0].argull = (uintptr_t)symbol;
+	}
+
 	switch (kind) {
 		case cudaMemcpyHostToDevice:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_H2D;
-			// FIXME We assume symbols are ptr values, not strings.
-			// CUDA API states it may be either.
 			shmpkt->args[1].argull = sizeof(*shmpkt);
 			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
 			memcpy(shm_ptr, src, count);
@@ -1134,8 +1162,6 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 		case cudaMemcpyDeviceToDevice:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_D2D;
-			// FIXME We assume symbols are ptr values, not strings.
-			// CUDA API states it may be either.
 			shmpkt->args[1].argull = (uintptr_t)src;
 		}
 		break;
@@ -1163,30 +1189,35 @@ cudaError_t cudaMemcpyToSymbolAsync(
 {
 	struct cuda_packet *shmpkt =
 		(struct cuda_packet *)get_region(pthread_self());
-	void *shm_ptr;
+	void *shm_ptr = (void*)((uintptr_t)shmpkt + sizeof(*shmpkt));
 
 	printd(DBG_DEBUG, "symb %p\n", symbol);
-	fprintf(stderr, USERMSG_PREFIX " assuming symbol is memory address\n");
 
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argcp = (char*)symbol;
+
+	if (__func_symb_param_is_string(symbol)) {
+		shmpkt->args[1].argull = (shm_ptr - (void*)shmpkt); // offset of string
+		memcpy(shm_ptr, symbol, strlen(symbol) + 1);
+		shmpkt->flags |= CUDA_PKT_SYMB_IS_STRING;
+		printd(DBG_DEBUG, "\tsymb is string: %s\n", symbol);
+		shm_ptr += strlen(symbol) + 1;
+	} else {
+		shmpkt->args[1].argull = (uintptr_t)symbol;
+	}
+
 	switch (kind) {
 		case cudaMemcpyHostToDevice:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_ASYNC_H2D;
-			// FIXME We assume symbols are ptr values, not strings.
-			// CUDA API states it may be either.
-			shmpkt->args[1].argull = sizeof(*shmpkt);
-			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
+			shmpkt->args[1].argull = (shm_ptr - (void*)shmpkt);
 			memcpy(shm_ptr, src, count);
+			shm_ptr += count;
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_ASYNC_D2D;
-			// FIXME We assume symbols are ptr values, not strings.
-			// CUDA API states it may be either.
 			shmpkt->args[1].argull = (uintptr_t)src;
 		}
 		break;
@@ -1260,41 +1291,38 @@ cudaError_t cudaMemset(void *devPtr, int value, size_t count)
 // Texture Management API
 //
 
+// see comments in __cudaRegisterTexture and cudaBindTextureToArray
 cudaError_t cudaBindTexture(size_t *offset,
-		const struct textureReference *texref, const void *devPtr,
-		const struct cudaChannelFormatDesc *desc, size_t size __dv(UINT_MAX))
+		const struct textureReference *texRef, //! addr of global var in app
+		const void *devPtr,
+		const struct cudaChannelFormatDesc *desc,
+		size_t size __dv(UINT_MAX))
 {
-	// XXX Need to copy texref to the packet, and make sure execute.c updates
-	// the sink-cached copy of it before invoking the NV function
-#if 0
 	struct cuda_packet *shmpkt =
 		(struct cuda_packet *)get_region(pthread_self());
-
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_BIND_TEXTURE;
 	shmpkt->thr_id = pthread_self();
-	// We'll expect the value of *offset to be stored in args[0].arr_argi[0] in
-	// the return packet.
-	shmpkt->args[0].argp = *texref; // whole struct copy
-	shmpkt->args[1].argp = (void*)devPtr;
-	shmpkt->args[2].fdesc = *desc; // whole struct copy
-	shmpkt->args[3].arr_argi[0] = size;
+	// We'll expect the value of *offset to be in args[0].arr_argi[0] within the
+	// return packet
+	shmpkt->args[0].argp = (void*)texRef; // address
+	shmpkt->args[1].texRef = *texRef; // data
+	shmpkt->args[2].argp = (void*)devPtr,
+	shmpkt->args[3].desc = *desc; // whole struct copy
+	shmpkt->args[4].arr_argi[0] = size;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
 		rmb();
 
-	*offset = shmpkt->args[0].arr_argi[0];
 	printd(DBG_DEBUG, "called\n");
+	*offset = shmpkt->args[0].arr_argi[0];
 	return shmpkt->ret_ex_val.err;
-#endif
-	BUG(0);
-	return -1;
 }
 
 cudaError_t cudaBindTextureToArray(
-		const struct textureReference *texref, //! address of global; copy full
+		const struct textureReference *texRef, //! address of global; copy full
 		const struct cudaArray *array, //! use as pointer only
 		const struct cudaChannelFormatDesc *desc) //! non-opaque; copied in full
 {
@@ -1303,11 +1331,11 @@ cudaError_t cudaBindTextureToArray(
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_BIND_TEXTURE_TO_ARRAY;
 	shmpkt->thr_id = pthread_self();
-	// the caller will customize the values within texref before invoking this
+	// the caller will customize the values within texRef before invoking this
 	// function, thus we need to copy the entire structure as well as its
 	// address, so the sink can find the texture it registered with CUDA
-	shmpkt->args[0].argp = (void*)texref; // address
-	shmpkt->args[1].texref = *texref; // data
+	shmpkt->args[0].argp = (void*)texRef; // address
+	shmpkt->args[1].texRef = *texRef; // data
 	shmpkt->args[2].cudaArray = (struct cudaArray*)array;
 	shmpkt->args[3].desc = *desc; // whole struct copy
 	shmpkt->flags = CUDA_PKT_REQUEST;
@@ -1324,6 +1352,7 @@ struct cudaChannelFormatDesc
 cudaCreateChannelDesc(int x, int y, int z, int w,
 		enum cudaChannelFormatKind format)
 {
+#if 0
 	// Doesn't need to be forwarded anywhere. Call the function in the NVIDIA
 	// runtime, as this function just takes multiple variables and assigns them
 	// to a struct. Why?
@@ -1341,17 +1370,50 @@ cudaCreateChannelDesc(int x, int y, int z, int w,
 			" passing to NV runtime\n",
 			x, y, z, w, format);
 	return f(x,y,z,w,format);
+#else
+	int err;
+	err = attach_assembly_runtime(); // will return if already done
+	if (err < 0) {
+		fprintf(stderr, "Error attaching to assembly runtime\n");
+		assert(0);
+	}
+
+	struct cuda_packet *shmpkt =
+		(struct cuda_packet *)get_region(pthread_self());
+
+	printd(DBG_DEBUG, "x=%d y=%d z=%d w=%d format=%u\n",
+			x, y, z, w, format);
+
+	memset(shmpkt, 0, sizeof(*shmpkt));
+	shmpkt->method_id = CUDA_CREATE_CHANNEL_DESC;
+	shmpkt->thr_id = pthread_self();
+	shmpkt->args[0].arr_argii[0] = x;
+	shmpkt->args[0].arr_argii[1] = y;
+	shmpkt->args[0].arr_argii[2] = z;
+	shmpkt->args[0].arr_argii[3] = w;
+	shmpkt->args[1].arr_arguii[0] = format;
+	shmpkt->flags = CUDA_PKT_REQUEST;
+
+	wmb();
+
+	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
+		rmb();
+
+	return shmpkt->args[0].desc;
+#endif
 }
 
 cudaError_t cudaGetTextureReference(
-		const struct textureReference **texref,
+		const struct textureReference **texRef,
 		const char *symbol)
 {
 	struct cuda_packet *shmpkt =
 		(struct cuda_packet *)get_region(pthread_self());
 
 	printd(DBG_DEBUG, "symbol=%p\n", symbol);
-#error needs matching with symbol in sink
+
+	BUG(0);
+
 	return shmpkt->ret_ex_val.err;
 }
 
@@ -1411,12 +1473,10 @@ void** __cudaRegisterFatBinary(void* cubin)
 
 	num_registered_cubins++;
 
-	if (num_registered_cubins == 1) { // attach only on first register
-		err = attach_assembly_runtime();
-		if (err < 0) {
-			fprintf(stderr, "Error attaching to assembly runtime\n");
-			assert(0);
-		}
+	err = attach_assembly_runtime(); // will return if already done
+	if (err < 0) {
+		fprintf(stderr, "Error attaching to assembly runtime\n");
+		assert(0);
 	}
 
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
@@ -1516,17 +1576,12 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 
 	return;
 }
-
-/**
- * Andrew Kerr: "this function establishes a mapping between global variables
- * defined in .ptx or .cu modules and host-side variables. In PTX, global
- * variables have module scope and can be globally referenced by module and
- * variable name. In the CUDA Runtime API, globals in two modules must not have
- * the same name."
- */
-void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
-		char *deviceAddress, const char *deviceName, int ext, int vsize,
-		int constant, int global)
+void __cudaRegisterVar(
+		void **fatCubinHandle,	//! cubin this var associates with
+		char *hostVar,			//! addr of a var within app (not string)
+		char *deviceAddress,	//! 8-byte device addr
+		const char *deviceName, //! actual string
+		int ext, int vsize, int constant, int global)
 {
 	int err;
 	struct cuda_packet *shmpkt =
@@ -1552,6 +1607,13 @@ void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		= getSize_regVar(fatCubinHandle, hostVar, deviceAddress, deviceName,
 				ext, vsize, constant, global);
 
+	// Add it to our list of known variable symbols.
+	registered_vars[num_registered_vars++] = (uintptr_t)hostVar;
+	if (num_registered_vars >= MAX_REGISTERED_VARS) {
+		fprintf(stderr, USERMSG_PREFIX " exceeded allowance on num vars to register\n");
+		BUG(1);
+	}
+
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1565,18 +1627,20 @@ void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 // addresses)
 void __cudaRegisterTexture(
 		void** fatCubinHandle,
-		const struct textureReference* texref, //! address of global; copy addr
-		const void** deviceAddress, //! dereference to extract 8-byte dev addr
-		const char* deviceName, //! actual string
+		//! address of a global variable within the application; store the addr
+		const struct textureReference* texRef,
+		//! 8-byte device address; dereference it once to get the address
+		const void** deviceAddress,
+		const char* texName, //! actual string
 		int dim, int norm, int ext)
 {
 	struct cuda_packet *shmpkt =
 		(struct cuda_packet *)get_region(pthread_self());
-	void *shmptr = (void*)shmpkt;
+	void *shm_ptr = (void*)shmpkt;
 
-	printd(DBG_DEBUG, "handle=%p texref=%p *devAddr=%p devName=%s"
+	printd(DBG_DEBUG, "handle=%p texRef=%p devAddr=%p *devAddr=%p texName=%s"
 			" dim=%d norm=%d ext=%d\n",
-			fatCubinHandle, texref, *deviceAddress, deviceName,
+			fatCubinHandle, texRef, deviceAddress, *deviceAddress, texName,
 			dim, norm, ext);
 
 	memset(shmpkt, 0, sizeof(*shmpkt));
@@ -1589,18 +1653,16 @@ void __cudaRegisterTexture(
 	// invoke such functions with the variable address allocated in the sink. We
 	// still need this address, because we cannot tell the application to change
 	// which address it provides us---we have to perform lookups of the global's
-	// address in the application with what we cache in the sink process. The
-	// value of the global at the time this function is called will be all
-	// zeros, since it resides in global memory, so there's no use in copying
-	// its actual contents here.
-	shmpkt->args[1].argp = (void*)texref; // pointer copy
-	shmpkt->args[2].argp = (void*)*deviceAddress; // copy actual address
-	shmpkt->args[3].argull = sizeof(*shmpkt); // offset
-	shmptr += sizeof(*shmpkt);
-	memcpy(shmptr, deviceName, strlen(deviceName) + 1);
-	shmpkt->args[4].arr_argii[0] = dim;
-	shmpkt->args[4].arr_argii[1] = norm;
-	shmpkt->args[4].arr_argii[2] = ext;
+	// address in the application with what we cache in the sink process.
+	shmpkt->args[1].argp = (void*)texRef; // pointer copy
+	shmpkt->args[2].texRef = *texRef; // state copy
+	shmpkt->args[3].argp = (void*)*deviceAddress; // copy actual address
+	shmpkt->args[4].argull = sizeof(*shmpkt); // offset
+	shm_ptr += sizeof(*shmpkt);
+	memcpy(shm_ptr, texName, strlen(texName) + 1);
+	shmpkt->args[5].arr_argii[0] = dim;
+	shmpkt->args[5].arr_argii[1] = norm;
+	shmpkt->args[5].arr_argii[2] = ext;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();

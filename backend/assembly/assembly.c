@@ -711,7 +711,7 @@ duplicate_call(	struct assembly *assm,
 			break;
 		case __CUDA_UNREGISTER_FAT_BINARY:
 			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
-				assm->mappings[vgpu_id].ops.registerTexture(pkt, NULL, conn);
+				assm->mappings[vgpu_id].ops.unregisterFatBinary(pkt, NULL, conn);
 			break;
 		case __CUDA_REGISTER_TEXTURE:
 			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
@@ -790,11 +790,11 @@ demux(
 		case CUDA_FUNC_GET_ATTR:
 			mapping->ops.funcGetAttributes(pkt, NULL, mapping->rpc_conn);
 			break;
-		case CUDA_BIND_TEXTURE:
-			mapping->ops.bindTexture(pkt, NULL, mapping->rpc_conn);
-			break;
 		case CUDA_GET_TEXTURE_REFERENCE:
-			mapping->ops.getTextureReference(pkt, NULL, mapping->rpc_conn);
+			BUG(1);
+			break;
+		case CUDA_CREATE_CHANNEL_DESC:
+			mapping->ops.createChannelDesc(pkt, NULL, mapping->rpc_conn);
 			break;
 		case CUDA_FREE_HOST:
 			mapping->ops.freeHost(pkt, NULL, mapping->rpc_conn);
@@ -849,6 +849,9 @@ demux(
 			break;
 		case CUDA_BIND_TEXTURE_TO_ARRAY:
 			mapping->ops.bindTextureToArray(pkt, assm->cubins, mapping->rpc_conn);
+			break;
+		case CUDA_BIND_TEXTURE:
+			mapping->ops.bindTexture(pkt, assm->cubins, mapping->rpc_conn);
 			break;
 
 		// Functions which require duplication across node instances of the
@@ -1106,6 +1109,8 @@ int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 	// Execute calls. Some return data specific to the assembly, others can go
 	// directly to NVIDIA's runtime.
 	switch (pkt->method_id) {
+
+		// TODO I may want to intercept memGetInfo and setValidDevices.
 
 		case CUDA_GET_DEVICE:
 		{

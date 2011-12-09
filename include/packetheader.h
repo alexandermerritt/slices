@@ -29,20 +29,28 @@
 typedef uint32_t grant_ref_t;
 typedef pthread_t tid_t;
 
-#define MAX_ARGS 5
+#define MAX_ARGS 6
 
-enum cuda_packet_flags
-{
-	CUDA_PKT_REQUEST = 0x1,		/* This packet is flowing from app to assembly. */
-	CUDA_PKT_RESPONSE  = 0x2,	/* Assembly -> app; RPC already executed somewhere. */
-	//CUDA_PKT_MORE_DATA = 0x4, /* Not used. */
-	//CUDA_PKT_ERROR    = 0x8		/* Used to indicate if the RPC produced an error. */
-	//CUDA_PKT_PTR_DATA = 0x10, /* Not used. */
-	//CUDA_PKT_ADDR_MAPPED = 0x20, /* Not used. */
-	//CUDA_PKT_MEM_SHARED = 0x40, /* Not used. */
-};
 // TODO Create macros to access and modify the value of 'flags' in a cuda packet
 // instead of having code manually do raw bit ops everywhere.
+enum cuda_packet_flags
+{
+	/** RPC newly created from interposer. Direction of packet is towards
+	 * assembly */
+	CUDA_PKT_REQUEST = 0x1,
+	/** RPC was executed somewhere. This packet is on the return path to the
+	 * application */
+	CUDA_PKT_RESPONSE  = 0x2,
+	/** RPC is a function that uses a symbol that was provided by the caller as
+	 * a string, instead of an address (the default is to assume a symbol is an
+	 * address): symbols can either be the address of a variable within the
+	 * application address space, or the address of a string literal containing
+	 * the name of said variable. Enabling this flag tells the runtime that the
+	 * packet argument contains an offset into the memory region where the
+	 * string has been copied. If not set, the packet argument contains the
+	 * memory address of the variable directly. */
+	CUDA_PKT_SYMB_IS_STRING = 0x4,
+};
 
 // XXX Move reg_*_args_t to fatcubininfo.h
 // And name that file something else
@@ -71,7 +79,9 @@ typedef struct {
 typedef struct {
 	struct list_head link;
 	void **fatCubinHandle;
+	// FIXME Rename this variable
 	char *hostVar;  // Address coming from Guest thru RegisterVar
+	// FIXME Rename this variable
 	char *dom0HostAddr;  // This addr will be registered with cuda driver instead
 	char *deviceAddress;
 	char *deviceName;
@@ -85,10 +95,10 @@ typedef struct {
 typedef struct {
 	struct list_head link;
 	void **fatCubinHandle;
-	struct textureReference *texref; //! address of global in application
+	struct textureReference *texRef; //! address of global in application
 	struct textureReference tex; //! actual storage registered within sink
 	void **devPtr;
-	char *devName;
+	char *texName;
 	int dim;
 	int norm;
 	int ext;
@@ -113,7 +123,7 @@ typedef union args {
 	cudaStream_t stream;
 	struct cudaArray *cudaArray; // this is an opaque type; contains a handle
 	struct cudaChannelFormatDesc desc;
-	struct textureReference texref;
+	struct textureReference texRef;
 } args_t;
 
 // Possible return types in a response or some extra information on the way to

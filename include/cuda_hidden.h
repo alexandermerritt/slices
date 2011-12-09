@@ -23,13 +23,27 @@ extern void __cudaRegisterFunction(
 		int thread_limit, uint3* tid, uint3* bid,
 		dim3* bDim, dim3* gDim, int* wSize);
 
+/**
+ * Andrew Kerr: "this function establishes a mapping between global variables
+ * defined in .ptx or .cu modules and host-side variables. In PTX, global
+ * variables have module scope and can be globally referenced by module and
+ * variable name. In the CUDA Runtime API, globals in two modules must not have
+ * the same name."
+ *
+ * This function is generated when you declare a variable in global or constant
+ * memory on the GPU within your code.
+ */
 extern void __cudaRegisterVar(void **fatCubinHandle, char *hostVar,
 		char *deviceAddress, const char *deviceName, int ext, int vsize,
 		int constant, int global);
 
+/**
+ * This function is invoked when you declare a texture variable as a global
+ * within your code.
+ */
 extern void __cudaRegisterTexture(void** fatCubinHandle, const struct
-		textureReference* texref, const void** deviceAddress, const char
-		*deviceName, int dim, int norm, int ext);
+		textureReference* hostVar, const void** deviceAddress, const char
+		*texName, int dim, int norm, int ext);
 
 // TODO register texture
 
