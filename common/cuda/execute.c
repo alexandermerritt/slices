@@ -414,8 +414,6 @@ static OPS_FN_PROTO(CudaMemcpyAsyncD2D)
 
 static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
 {
-	reg_var_args_t *var;
-
 	void *dst = (void*)((uintptr_t)pkt + pkt->args[0].argull);
 	size_t count = pkt->args[2].arr_argi[0];
 	size_t offset = pkt->args[2].arr_argi[1];
@@ -432,8 +430,8 @@ static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
 
 	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING) {
 		symbol = (char*)((uintptr_t)pkt + pkt->args[1].argull);
-		printd(DBG_DEBUG, "symbol is string: %s\n", symbol);
 	} else {
+		reg_var_args_t *var;
 		symbol = (char*)(pkt->args[1].argull);
 		// Locate the var structure; symbols are unique across cubins.
 		// See quote from A. Kerr in libci.c
@@ -450,10 +448,13 @@ static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
 		symbol = var->dom0HostAddr;
 	}
 
+	printd(DBG_DEBUG, "memcpyFromSymb symb=%p count=\n", symbol, count);
+	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING)
+		printd(DBG_DEBUG, "\tsymbol is string: %s\n", symbol);
+
 	pkt->ret_ex_val.err =
 		cudaMemcpyFromSymbol(dst, symbol, count, offset,
 				cudaMemcpyDeviceToHost);
-	printd(DBG_DEBUG, "called\n");
 	EXAMINE_CUDAERROR(pkt);
 	return 0;
 }
@@ -490,8 +491,6 @@ static OPS_FN_PROTO(CudaMemcpyToArrayD2D)
 
 static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
 {
-	reg_var_args_t *var;
-
 	const void *src = (void*)((uintptr_t)pkt + pkt->args[1].argull);
 	size_t count = pkt->args[2].arr_argi[0];
 	size_t offset = pkt->args[2].arr_argi[1];
@@ -506,8 +505,8 @@ static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
 
 	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING) {
 		symbol = (char*)((uintptr_t)pkt + pkt->args[0].argull);
-		printd(DBG_DEBUG, "symbol is string: %s\n", symbol);
 	} else {
+		reg_var_args_t *var = NULL;
 		symbol = (char*)(pkt->args[0].argull);
 		bool found = false;
 		cubins_for_each_cubin(cubins, fatcubin) {
@@ -521,10 +520,13 @@ static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
 		symbol = var->dom0HostAddr;
 	}
 
+	printd(DBG_DEBUG, "memcpyFromSymb symb=%p count=\n", symbol, count);
+	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING)
+		printd(DBG_DEBUG, "\tsymbol is string: %s\n", symbol);
+
 	pkt->ret_ex_val.err =
 		cudaMemcpyToSymbol(symbol, src, count, offset,
 				cudaMemcpyHostToDevice);
-	printd(DBG_DEBUG, "memcpyFromSymb %p\n", var->hostVar);
 	EXAMINE_CUDAERROR(pkt);
 	return 0;
 }

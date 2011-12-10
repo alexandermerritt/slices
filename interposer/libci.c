@@ -1154,9 +1154,9 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 		case cudaMemcpyHostToDevice:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_H2D;
-			shmpkt->args[1].argull = sizeof(*shmpkt);
-			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
+			shmpkt->args[1].argull = (shm_ptr - (void*)shmpkt);
 			memcpy(shm_ptr, src, count);
+			shm_ptr += count;
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
@@ -1174,7 +1174,7 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 	shmpkt->args[2].arr_argi[0] = count;
 	shmpkt->args[2].arr_argi[1] = offset;
 	shmpkt->args[3].argll = kind;
-	shmpkt->flags = CUDA_PKT_REQUEST;
+	shmpkt->flags |= CUDA_PKT_REQUEST;
 
 	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
@@ -1231,7 +1231,7 @@ cudaError_t cudaMemcpyToSymbolAsync(
 	shmpkt->args[2].arr_argi[0] = count;
 	shmpkt->args[2].arr_argi[1] = offset;
 	shmpkt->args[3].stream = stream;
-	shmpkt->flags = CUDA_PKT_REQUEST;
+	shmpkt->flags |= CUDA_PKT_REQUEST;
 
 	wmb();
 	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
