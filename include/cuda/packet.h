@@ -23,7 +23,7 @@
 #include <vector_types.h>
 
 // Project includes
-#include <method_id.h>
+#include <cuda/method_id.h>
 #include <util/list.h>
 
 typedef uint32_t grant_ref_t;
