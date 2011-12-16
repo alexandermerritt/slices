@@ -11,7 +11,7 @@
 #define _CUDA_OPS_H
 
 // Project includes
-#include <packetheader.h>
+#include <cuda/packet.h>
 
 /**
  * This defines the prototype for similarly defined functions implementing the

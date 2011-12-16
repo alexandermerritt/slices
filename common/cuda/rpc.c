@@ -13,13 +13,13 @@
 #include <stdbool.h>
 
 // Project includes
-#include <cuda_hidden.h>
+#include <cuda/fatcubininfo.h>
+#include <cuda/hidden.h>
+#include <cuda/method_id.h>
 #include <cuda/ops.h>
+#include <cuda/packet.h>
 #include <debug.h>
-#include <fatcubininfo.h>
 #include <io/sock.h>
-#include <method_id.h>
-#include <packetheader.h>
 
 /* NOTES
  *
@@ -85,6 +85,419 @@
 			goto fail;				\
 		}							\
 	} while(0)
+
+//
+// Thread Management API
+//
+
+// This function has no payload.
+static OPS_FN_PROTO(CudaThreadExit)
+{
+	int err, exit_errno;
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+// This function has no payload.
+static OPS_FN_PROTO(CudaThreadSynchronize)
+{
+	int err, exit_errno;
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+//
+// Device Management API
+//
+
+// This function has no payload.
+static OPS_FN_PROTO(CudaSetDevice)
+{
+	int err, exit_errno;
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+#if 0
+static OPS_FN_PROTO(CudaSetDeviceFlags)
+{
+#error CudaSetDeviceFlags
+}
+
+//
+// Stream Management API
+//
+
+static OPS_FN_PROTO(CudaStreamCreate)
+{
+#error CudaStreamCreate
+}
+
+static OPS_FN_PROTO(CudaStreamSynchronize)
+{
+#error CudaStreamSynchronize
+}
+#endif
+
+//
+// Execution Control API
+//
+
+// This function has no payload.
+static OPS_FN_PROTO(CudaConfigureCall)
+{
+	int err, exit_errno;
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+// This function has two payloads. The first payload is the second argument
+// pushed to the server; the second payload is the first argument, pulled from
+// the server.
+static OPS_FN_PROTO(CudaFuncGetAttributes)
+{
+	int err, exit_errno;
+	void *attr = (void*)((uintptr_t)pkt + pkt->args[0].argull);
+	char *func = (char*)((uintptr_t)pkt + pkt->args[1].argull);
+	size_t func_len = pkt->args[2].arr_argi[0];
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_put(conn, func, func_len);
+	CONN_FAIL_ON_ERR(err);
+
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, attr, sizeof(struct cudaFuncAttributes));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+// This function has no payload.
+static OPS_FN_PROTO(CudaLaunch)
+{
+	int err, exit_errno;
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+// This function has a payload, which is sent to the server.
+static OPS_FN_PROTO(CudaSetupArgument)
+{
+	int err, exit_errno;
+	void *arg = (void*)((uintptr_t)pkt + pkt->args[0].argull);
+	size_t arg_size = pkt->args[1].arr_argi[0];
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_put(conn, arg, arg_size);
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+//
+// Memory Management API
+//
+
+// This function has no payload.
+static OPS_FN_PROTO(CudaFree)
+{
+	int err, exit_errno;
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+#if 0
+static OPS_FN_PROTO(CudaFreeHost)
+{
+#error CudaFreeHost
+}
+
+static OPS_FN_PROTO(CudaHostAlloc)
+{
+#error CudaHostAlloc
+}
+#endif
+
+// This function has no payload.
+static OPS_FN_PROTO(CudaMalloc)
+{
+	int err, exit_errno;
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+// This function has no payload.
+static OPS_FN_PROTO(CudaMallocPitch)
+{
+	int err, exit_errno;
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+// This function has a payload, which is sent to the server.
+static OPS_FN_PROTO(CudaMemcpyH2D)
+{
+	int err, exit_errno;
+	void *data = (void*)((uintptr_t)pkt + pkt->args[1].argull);
+	size_t data_size = pkt->args[2].arr_argi[0];
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_put(conn, data, data_size);
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+// This function has a payload, which is pulled from the server.
+static OPS_FN_PROTO(CudaMemcpyD2H)
+{
+	int err, exit_errno;
+	void *data = (void*)((uintptr_t)pkt + pkt->args[0].argull);
+	size_t data_size = pkt->args[2].arr_argi[0];
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, data, data_size);
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+// This function has no payload.
+static OPS_FN_PROTO(CudaMemcpyD2D)
+{
+	int err, exit_errno;
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+#if 0
+// This function has a payload, which is sent to the server.
+static OPS_FN_PROTO(CudaMemcpyAsyncH2D)
+{
+#error CudaMemcpyAsyncH2D
+}
+
+// This function has a payload, which is pulled from the server.
+static OPS_FN_PROTO(CudaMemcpyAsyncD2H)
+{
+#error CudaMemcpyAsyncD2H
+}
+
+// This function has no payload.
+static OPS_FN_PROTO(CudaMemcpyAsyncD2D)
+{
+#error CudaMemcpyAsyncD2D
+}
+#endif
+
+// This function has a payload, which is pulled from the server.
+static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
+{
+	int err, exit_errno;
+	void *data = (void*)((uintptr_t)pkt + pkt->args[0].argull);
+	size_t data_size = pkt->args[2].arr_argi[0];
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, data, data_size);
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+// This function has a payload, which is sent to the server.
+static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
+{
+	int err, exit_errno;
+	void *data = (void*)((uintptr_t)pkt + pkt->args[1].argull);
+	size_t data_size = pkt->args[2].arr_argi[0];
+
+	struct sockconn *conn;
+	GET_CONN_VALIST(conn,pkt);
+
+	err = conn_put(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+	err = conn_put(conn, data, data_size);
+	CONN_FAIL_ON_ERR(err);
+	err = conn_get(conn, pkt, sizeof(*pkt));
+	CONN_FAIL_ON_ERR(err);
+
+	return 0;
+fail:
+	return exit_errno;
+}
+
+#if 0
+// This function has a payload, which is sent to the server.
+static OPS_FN_PROTO(CudaMemcpyToSymbolAsyncH2D)
+{
+#error CudaMemcpyToSymbolAsyncH2D
+}
+
+// This function has no payload.
+static OPS_FN_PROTO(CudaMemcpyToSymbolAsyncD2D)
+{
+#error CudaMemcpyToSymbolAsyncD2D
+}
+
+static OPS_FN_PROTO(CudaMemGetInfo)
+{
+#error CudaMemGetInfo
+}
+
+static OPS_FN_PROTO(CudaMemset)
+{
+#error CudaMemset
+}
+
+//
+// Texture Management API
+//
+
+static OPS_FN_PROTO(CudaBindTexture)
+{
+#error CudaBindTexture
+}
+
+// cudaCreateChannelDesc is handled in the interposer.
+
+static OPS_FN_PROTO(CudaGetTextureReference)
+{
+#error CudaGetTextureReference
+}
+#endif
+
+//
+// Undocumented API
+//
 
 // This function has a payload, which is sent to the server.
 static OPS_FN_PROTO(__CudaRegisterFatBinary)
@@ -174,306 +587,12 @@ fail:
 	return exit_errno;
 }
 
-// This function has no payload.
-static OPS_FN_PROTO(CudaSetDevice)
+#if 0
+static OPS_FN_PROTO(__CudaRegisterTexture)
 {
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
+#error __CudaRegisterTexture
 }
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaConfigureCall)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has a payload, which is sent to the server.
-static OPS_FN_PROTO(CudaSetupArgument)
-{
-	int err, exit_errno;
-	void *arg = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t arg_size = pkt->args[1].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_put(conn, arg, arg_size);
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaLaunch)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaThreadExit)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaThreadSynchronize)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaMalloc)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaMallocPitch)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaFree)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has a payload, which is sent to the server.
-static OPS_FN_PROTO(CudaMemcpyH2D)
-{
-	int err, exit_errno;
-	void *data = (void*)((uintptr_t)pkt + pkt->args[1].argull);
-	size_t data_size = pkt->args[2].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_put(conn, data, data_size);
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has a payload, which is pulled from the server.
-static OPS_FN_PROTO(CudaMemcpyD2H)
-{
-	int err, exit_errno;
-	void *data = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t data_size = pkt->args[2].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, data, data_size);
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaMemcpyD2D)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has a payload, which is sent to the server.
-static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
-{
-	int err, exit_errno;
-	void *data = (void*)((uintptr_t)pkt + pkt->args[1].argull);
-	size_t data_size = pkt->args[2].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_put(conn, data, data_size);
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has a payload, which is pulled from the server.
-static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
-{
-	int err, exit_errno;
-	void *data = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t data_size = pkt->args[2].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, data, data_size);
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has two payloads. The first payload is the second argument
-// pushed to the server; the second payload is the first argument, pulled from
-// the server.
-static OPS_FN_PROTO(CudaFuncGetAttributes)
-{
-	int err, exit_errno;
-	void *attr = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	char *func = (char*)((uintptr_t)pkt + pkt->args[1].argull);
-	size_t func_len = pkt->args[2].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_put(conn, func, func_len);
-	CONN_FAIL_ON_ERR(err);
-
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, attr, sizeof(struct cudaFuncAttributes));
-	CONN_FAIL_ON_ERR(err);
-
-	return 0;
-fail:
-	return exit_errno;
-}
+#endif
 
 const struct cuda_ops rpc_ops =
 {

@@ -78,13 +78,15 @@
 #include <driver_types.h>
 #include <vector_types.h>
 
+// Other project includes
+#include <shmgrp.h>
+
 // Project includes
 #include <assembly.h>
-#include <cuda_hidden.h>
+#include <cuda/hidden.h>
+#include <cuda/method_id.h>
+#include <cuda/packet.h> 
 #include <debug.h>
-#include <method_id.h>
-#include <packetheader.h> 
-#include <shmgrp.h>
 #include <util/compiler.h>
 #include <util/x86_system.h>
 

@@ -18,15 +18,15 @@
 #include <cuda_runtime_api.h>
 
 // Project includes
-#include <cuda_hidden.h>
+#include <cuda/fatcubininfo.h>
+#include <cuda/hidden.h>
+#include <cuda/method_id.h>
 #include <cuda/ops.h>
+#include <cuda/packet.h>
 #include <debug.h>
-#include <fatcubininfo.h>
 // FIXME Remove this dependence. Move the marshaling code to another file,
 // perhaps common/cuda/marshal.c (even if only the interposer uses it).
 #include <libciutils.h>
-#include <method_id.h>
-#include <packetheader.h>
 #include <util/compiler.h>
 
 /* preprocess out debug statements */

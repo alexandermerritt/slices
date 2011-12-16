@@ -78,8 +78,6 @@ envInterposerShiva = Environment(
         CUDA_ROOT + 'include', 
         '../include', 
 #        '../remote',
-        '../backend',
-        '../shmgrp/include',
         '/usr/include/glib-2.0',
         '/usr/lib/glib-2.0/include'
         ],
@@ -96,8 +94,6 @@ envInterposerIfrit = Environment(
         CUDA_ROOT + 'include', 
         '../include', 
 #        '../remote',
-        '../backend',
-        '../shmgrp/include',
         '/usr/include/glib-2.0',
         '/usr/lib/glib-2.0/include'
         ],

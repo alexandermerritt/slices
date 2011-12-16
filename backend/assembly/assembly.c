@@ -34,9 +34,9 @@
 
 // Project includes
 #include <assembly.h>
+#include <cuda/fatcubininfo.h>
+#include <cuda/method_id.h>
 #include <debug.h>
-#include <fatcubininfo.h>
-#include <method_id.h>
 #include <util/list.h>
 
 // Directory-immediate includes
@@ -1272,7 +1272,8 @@ int assembly_teardown(asmid_t id)
 		}
 	}
 	list_del(&assm->link);
-	free(assm->cubins);
+	//free(assm->cubins); // XXX this segvs
+	assm->cubins = NULL;
 	free(assm);
 	pthread_mutex_unlock(&internals->lock);
 	return 0;

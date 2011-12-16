@@ -7,18 +7,23 @@
  * @author Magda Slawinska, magg __at_ gatech __dot_ edu
  */
 
-#include <__cudaFatFormat.h>
-#include <string.h>
-#include "libciutils.h"
+// System includes
+#include <assert.h>
+#include <glib.h>		 // for ini files
 #include <stdio.h>
 #include <stdlib.h>
-#include "debug.h"
-#include <assert.h>
+#include <string.h>
 
-#include "method_id.h"   // for method identifiers
+// CUDA includes
+#include <__cudaFatFormat.h>
 
-#include <glib.h>		 // for ini files
+// Project includes
+#include <cuda/fatcubininfo.h>
+#include <cuda/method_id.h>
+#include <debug.h>
 
+// Directory-immediate includes
+#include "libciutils.h"
 
 /**
  * checks if the memory has been appropriately allocated
@@ -385,7 +390,6 @@ int l_getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t
 	size += l_getStringPktSize(pFatCubin->ident);
 	size += l_getStringPktSize(pFatCubin->usageMode);
 
-	p_debug("Here!!!!!!!\n");
 	// this probably means the information where the debug information
 	// can be found (eg. the name of the file with debug, or something)
 	// @todo don't know what to do with this member, originally a size of the
@@ -1984,10 +1988,8 @@ int unpackRegFuncArgs(reg_func_args_t * pRegFuncArgs, char * pPacket){
 	int offset = 0;
 
 	void *** v = (void***) pPacket;
-	printf("Start: pPacket = %p, offset = %d\n",  pPacket, offset);
 	pRegFuncArgs->fatCubinHandle = v[0];
 	pPacket += sizeof(void*);
-	printf("Handle: pPacket = %p, offset = %d\n",  pPacket, offset);
 
 	// @todo it should be done better with NULL and with communicating
 	// an error - right now it doesn't have an effect

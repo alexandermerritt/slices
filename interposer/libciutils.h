@@ -9,10 +9,16 @@
 #ifndef CITUILS_H_
 #define CITUILS_H_
 
-#include <__cudaFatFormat.h>
-#include "packetheader.h"
-#include "fatcubininfo.h"
+// System includes
 #include <glib.h>		// GArray
+
+// CUDA includes
+#include <__cudaFatFormat.h>
+
+// Project includes
+#include <cuda/fatcubininfo.h>
+#include <cuda/packet.h>
+
 /**
  * For storing the number of records  for particular structures
  * contained in the __cudaFatCubinBinaryRec

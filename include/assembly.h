@@ -11,7 +11,7 @@
 #include <uuid/uuid.h>
 
 // Project includes
-#include <packetheader.h>
+#include <cuda/packet.h>
 
 /*-------------------------------------- DEFINITIONS -------------------------*/
 

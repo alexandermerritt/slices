@@ -21,11 +21,11 @@
 
 // Project includes
 #include <assembly.h>
+#include <cuda/fatcubininfo.h>
 #include <cuda/ops.h>
+#include <cuda/packet.h>
 #include <debug.h>
-#include <fatcubininfo.h>
 #include <io/sock.h>
-#include <packetheader.h>
 #include <util/compiler.h>
 
 // Directory-immediate includes
