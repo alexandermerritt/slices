@@ -1069,10 +1069,6 @@ int shmgrp_open(const char *key, group_callback func)
 			exit_errno = -(errno); // possible internal error, maybe don't expose this?
 			goto fail;
 		}
-	} else if (err >= 0) {
-		pthread_mutex_unlock(&(groups->lock));
-		exit_errno = -EEXIST;
-		goto fail;
 	}
 
 	// Begin accepting registration requests. Spawn an inotify thread on the
