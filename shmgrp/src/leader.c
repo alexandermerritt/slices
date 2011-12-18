@@ -1058,6 +1058,22 @@ int shmgrp_open(const char *key, group_callback func)
 		exit_errno = -(errno); // possible internal error, maybe don't expose this?
 		goto fail;
 	}
+	// verify directory was actually created
+	err = stat(new_grp->memb_dir, &statbuf);
+	if (err < 0) {
+		pthread_mutex_unlock(&(groups->lock));
+		if (err == ENOENT) { // this shouldn't happen...
+			exit_errno = -EIO;
+			goto fail;
+		} else {
+			exit_errno = -(errno); // possible internal error, maybe don't expose this?
+			goto fail;
+		}
+	} else if (err >= 0) {
+		pthread_mutex_unlock(&(groups->lock));
+		exit_errno = -EEXIST;
+		goto fail;
+	}
 
 	// Begin accepting registration requests. Spawn an inotify thread on the
 	// membership directory we just created.
