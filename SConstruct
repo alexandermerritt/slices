@@ -32,8 +32,6 @@ Help("""
 
 # points to the directory where the CUDA root is
 CUDA_ROOT=None
-# points to the directory where the GLIB20 is
-GLIB20=None
 
 def get_platform_characteristic_str():
     """
@@ -55,7 +53,6 @@ def build_variables_set():
       are working on
     """
     global CUDA_ROOT
-    global GLIB20
         
     nodename = get_platform_characteristic_str()
     print('The configuration will be applied for: ' + nodename)
@@ -64,25 +61,21 @@ def build_variables_set():
     if ( nodename.startswith('kid') ):
         print('kid prefix detected ...')
         CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary/'
-        GLIB20='/nics/d/home/smagg/opt/glib-2.28.7/'
     
     # custom machine at Georgia Tech configuration for prost
     if ( nodename.startswith('prost')):
         print('prost prefix detected ...')
         CUDA_ROOT = '/opt/cuda/'
-        GLIB20='/opt/glib-2.28.7/'
     
     # Custom machine at Georgia Tech
     if nodename.startswith('shiva'):
  	print('shiva prefix detected ...')
         CUDA_ROOT = '/usr/local/cuda/'
-        GLIB20 = '/usr/include/glib-2.0/'
     
     # Custom machine at Georgia Tech, same as shiva
     if nodename.startswith('ifrit') :
 	print('ifrit prefix detected ...')
         CUDA_ROOT = '/usr/local/cuda/'
-        GLIB20 = '/usr/include/glib-2.0/'
 
 
 def variable_check_exit(var_name, var):
@@ -105,7 +98,6 @@ def build_variables_print():
       prints the build variables or exits the script if they are not set
     """
     variable_check_exit('CUDA_ROOT', CUDA_ROOT)
-    variable_check_exit('GLIB20', GLIB20)
 
 #######################################
 # start actual execution script
@@ -118,8 +110,7 @@ build_variables_print()
 
 
 # export variables to other scripts
-Export( 'CUDA_ROOT', 
-        'GLIB20')
+Export( 'CUDA_ROOT')
 
 					  
 # call all scripts

@@ -10,8 +10,7 @@ import os
 import commands
 import sys
 
-Import('CUDA_ROOT', 
-       'GLIB20')
+Import('CUDA_ROOT')
 
 
 def get_platform_characteristic_str():
@@ -36,24 +35,11 @@ GLOBAL_CCFLAGS='-ggdb ' + CCFLAGS_WARN
 #######################################################3
 # environment for the Keeneland and prost
 envBackendKeeneland = Environment(
-      LIBS=['pthread', 
-            'rt', 
-            'dl', 
-            'cudart', 
-            'glib-2.0' ],
-      LIBPATH=[CUDA_ROOT + 'lib64',
-               GLIB20 + 'lib'],
-      CPPPATH=['.',
-#      '../remote',
-      '../include',
-      '../interposer',
-      '../backend',
-      CUDA_ROOT + 'include',
-      GLIB20 + 'include/glib-2.0',
-      GLIB20 + 'include/gio-unix-2.0',
-      GLIB20 + 'lib/glib-2.0/include'
-      ],
-	  CCFLAGS=GLOBAL_CCFLAGS)
+      LIBS=['pthread', 'rt', 'dl', 'cudart' ],
+      LIBPATH=[CUDA_ROOT + 'lib64'],
+      CPPPATH=['.', '../include', CUDA_ROOT + 'include', ],
+	  CCFLAGS=GLOBAL_CCFLAGS
+	  )
 
 # env for Prost, GT machine
 envBackendProst = envBackendKeeneland
@@ -61,38 +47,13 @@ envBackendProst = envBackendKeeneland
 # Shiva, GT machine
 envBackendShiva = Environment(
       CC='/usr/local/bin/gcc4.4.4',
-      #CC='/home/alex/bin/icc',
-      LIBS=['pthread', 'rt', 'dl', 'glib-2.0', 'uuid',
-            'cudart', 'cuda', 
-			'shmgrp'],
+      LIBS=['pthread', 'rt', 'dl', 'uuid', 'cudart', 'cuda', 'shmgrp'],
       LIBPATH=[CUDA_ROOT + 'lib64'],
-      CPPPATH=['.',
-      '../include',
-      '../interposer',
-      CUDA_ROOT + 'include',
-      '/usr/include/glib-2.0',
-      '/usr/include/gio-unix-2.0',
-      '/usr/lib/glib-2.0/include'
-      ],
+      CPPPATH=['.', '../include', '../interposer', CUDA_ROOT + 'include', ],
 	  CCFLAGS=GLOBAL_CCFLAGS)
 
 # Ifrit, GT machine
-envBackendIfrit = Environment(
-      CC='/usr/local/bin/gcc4.4.4',
-      #CC='/home/alex/bin/icc',
-      LIBS=['pthread', 'rt', 'dl', 'glib-2.0', 'uuid',
-            'cudart', 'cuda', 
-			'shmgrp'],
-      LIBPATH=[CUDA_ROOT + 'lib64'],
-      CPPPATH=['.',
-      '../include',
-      '../interposer',
-      CUDA_ROOT + 'include',
-      '/usr/include/glib-2.0',
-      '/usr/include/gio-unix-2.0',
-      '/usr/lib/glib-2.0/include'
-      ],
-	  CCFLAGS=GLOBAL_CCFLAGS)
+envBackendIfrit = envBackendShiva
 
 #############################################
 # end of environment definitions
@@ -100,21 +61,15 @@ envBackendIfrit = Environment(
 
 
 def build_backend(env):
-    """
-        @param env: The environment that will be used to build a backend 
-    """
     srclist = ['assembly/assembly.c', 'assembly/assemble.c', 'assembly/rpc.c',
-			'assembly/export.c', '../common/io/sock.c', '../common/cuda/execute.c', '../common/cuda/rpc.c']
-    srclist.append('../interposer/libciutils.c') # FIXME THE BACKEND SHOULD NOT BE COUPLED WITH INTERPOSER CODE
+			'assembly/export.c', '../common/io/sock.c', '../common/cuda/execute.c',
+			'../common/cuda/rpc.c', '../common/cuda/marshal.c']
     env.Program('runtime', ['runtime.c', srclist])
     env.Program('localsink', ['localsink.c', srclist])
     env.Program('assembly/remotesink', ['assembly/remotesink.c', srclist])
 
 
 def build_program():
-    """
-       builds the program depending on the characteristics
-    """
     global envBackendKeeneland
     global envBackendProst
     global envBackendShiva

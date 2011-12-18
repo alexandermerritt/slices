@@ -1,15 +1,21 @@
 /**
- * @file libciutils.c
- * @brief Have some utils functions copied from cudart.c; but some of them
- * refactored by Magic (MS)
+ * @file marshal.c
+ * @brief Marshaling utilities for functions in common/cuda/hidden.h
  *
  * @date Mar 1, 2011
- * @author Magda Slawinska, magg __at_ gatech __dot_ edu
+ * @author Magda Slawinska, magg@gatech.edu
+ *
+ * @date 2011-12-18
+ * @author Alex Merritt, merritt.alex@gatech.edu
+ * - renamed file. removed obsolete functions using glib
+ *
+ * TODO This file needs *major* cleanup. Many of the functions are copy/paste
+ * with less than one line difference. There's no need for this file to be more
+ * than 1000 lines at most.
  */
 
 // System includes
 #include <assert.h>
-#include <glib.h>		 // for ini files
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,40 +25,9 @@
 
 // Project includes
 #include <cuda/fatcubininfo.h>
+#include <cuda/marshal.h>
 #include <cuda/method_id.h>
 #include <debug.h>
-
-// Directory-immediate includes
-#include "libciutils.h"
-
-/**
- * checks if the memory has been appropriately allocated
- * @todo this function should go to a separate library
- * @param p (in) a pointer to a memory to be verified
- * @param pFuncName the name of the function when the problem occurred
- * @param pExtraMsg if you need to add an extra message
- *
- * @return 0 - pointer ok, -1 pointer not ok
- */
-int mallocCheck(const void * const p, const char * const pFuncName,
-		const char * pExtraMsg){
-	if( NULL == p ){
-		printd(DBG_ERROR, "%s: Problems with memory allocation. %s\n", pFuncName, pExtraMsg);
-		return ERROR;
-	}
-	return OK;
-}
-
-/**
- * releases the buffer
- *
- * @param pBuffer the buffer to be released
- * @return NULL (always)
- */
-char * freeBuffer(char * pBuffer){
-	free(pBuffer);
-	return NULL;
-}
 
 #if 0
 /**
@@ -437,244 +412,6 @@ int getFatRecPktSize(const __cudaFatCudaBinary *pFatCubin, cache_num_entries_t *
 }
 
 /**
- * allocates the cuda packet
- *
- * @param pFunctionName (in) the name of the function that called this allocation
- * @param pCudaError (out) sets cudaErrorMemoryAllocation if problems with allocating
- *        the packet appeared
- * @return pointer to the newly allocated cuda packet, NULL if memory allocation occurred
- */
-cuda_packet_t * callocCudaPacket(const char * pFunctionName, cudaError_t * pCudaError){
-	cuda_packet_t * packet = (cuda_packet_t *) calloc(1, sizeof(cuda_packet_t));
-	if (packet == NULL) {
-		printd(DBG_DEBUG, "%s, Problems with memory allocation for a cuda packet\n", pFunctionName);
-		*pCudaError = cudaErrorMemoryAllocation;
-	}
-	return packet;
-}
-
-// -------------------------------
-// print functions
-// ------------------------------
-static void l_printPtxE(__cudaFatPtxEntry * p){
-	int i = 0;
-	p_debug( "__cudaFatPtxEntry: %p\n", p);
-
-	while(1){
-		p_debug( "p[%d] (gpuProfileName, ptx): %s, %s\n",
-						i, p[i].gpuProfileName, p[i].ptx);
-
-		if( !(p+i) || !p[i].gpuProfileName || !p[i].ptx )
-			break;
-
-		i++;
-	}
-}
-
-static void l_printCubinE(__cudaFatCubinEntry * p){
-	int i = 0;
-	p_debug( "__cudaFatCubinEntry: %p\n", p);
-
-	while(1){
-		p_debug( "p[%d] (gpuProfileName, cubin): %s, %s\n",
-				i, p[i].gpuProfileName, p[i].cubin);
-
-		if( !(p+i) || !p[i].gpuProfileName || !p[i].cubin )
-			break;
-
-		i++;
-	}
-}
-
-static void l_printSymbolE(__cudaFatSymbol * p, char * name){
-	int i = 0;
-	p_debug( "__cudaFatSymbol: %s,  %p\n", name, p);
-
-	while(p && p->name ){
-		p_debug( "p[%d] (name): %s\n",
-				i, p[i].name);
-		i++;
-	}
-}
-
-static void l_printDebugE(__cudaFatDebugEntry * p){
-	int i = 0;
-	p_debug( "__cudaFatDebugEntry: %p\n", p);
-	while( p ){
-		p_debug( "p[%d] (gpuProfileName, debug, next, size): %s, %s, %p, %u\n",
-				i, p->gpuProfileName, p->debug, p->next, p->size);
-		p = p->next;
-		i++;
-	}
-}
-
-static void l_printDepE(__cudaFatCudaBinary * p){
-	int i = 0;
-
-	p_debug( "__cudaFatCudaBinary: %p\n", p);
-
-	while( p && p->ident){
-
-		p_debug( "p[%i]\n", i);
-		i++;
-		p = p->dependends;
-	}
-}
-
-static void l_printElfE(__cudaFatElfEntry * p){
-
-	int i = 0;
-	p_debug( "__cudaFatElfEntry: %p\n", p);
-
-	while( p ){
-		p_debug( "p[%d] (gpuProfileName, elf, next, size): %s, %p, %p, %u\n",
-				i, p->gpuProfileName,  p->elf, p->next, p->size);
-		p = p->next;
-		i++;
-	}
-}
-
-void printFatBinary(__cudaFatCudaBinary * pFatBin){
-	if( pFatBin == NULL ){
-		p_info( "~~~~~~~~ FatBinary  = %p\n", pFatBin);
-	} else {
-		p_debug( "\tmagic: %lu, version: %lu , gpuInfoVersion: %lu\n",
-				pFatBin->magic, pFatBin->version, pFatBin->gpuInfoVersion);
-		p_debug( "\tkey: %s, ident: %s, usageMode: %s\n",
-				pFatBin->key, pFatBin->ident, pFatBin->usageMode);
-		l_printPtxE(pFatBin->ptx);
-		l_printCubinE(pFatBin->cubin);
-		l_printDebugE(pFatBin->debug);
-
-		p_debug( "\tdebugInfo (pointer, char*): %p, %s\n", pFatBin->debugInfo, (char*) pFatBin->debugInfo);
-		p_debug( "\tflags: %u\n", pFatBin->flags);
-		l_printSymbolE(pFatBin->exported, "exported");
-		l_printSymbolE(pFatBin->imported, "imported");
-		l_printDepE(pFatBin->dependends);
-		p_debug( "\tcharacteristics: %u\n", pFatBin->characteristic);
-		l_printElfE(pFatBin->elf);
-	}
-}
-
-void printRegFunArgs(void** fatCubinHandle, const char* hostFun,
-		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
-		uint3* bid, dim3* bDim, dim3* gDim, int* wSize){
-	printd(DBG_DEBUG, "\t REG FUN ARGS:\n");
-	printd(DBG_DEBUG, "fatCubinHandle: %p\n", fatCubinHandle);
-	printd(DBG_DEBUG, "hostFun: %p\n", hostFun);
-	printd(DBG_DEBUG, "deviceFun: %s\n", deviceFun);
-	printd(DBG_DEBUG, "deviceName: %s\n", deviceName);
-	printd(DBG_DEBUG, "thread_limit: %d\n", thread_limit);
-	printd(DBG_DEBUG, "tid: %p\n", tid);
-	if( tid )
-		printd(DBG_DEBUG, "tid: (%ud, %ud, %ud)\n", tid->x, tid->y, tid->z );
-	printd(DBG_DEBUG, "bid: %p\n", bid);
-	if( bid )
-		printd(DBG_DEBUG, "bid: (%ud, %ud, %ud)\n", bid->x, bid->y, bid->z);
-	printd(DBG_DEBUG, "bDim: %p\n", bDim);
-	if( bDim )
-		printd(DBG_DEBUG, "bDim: (%ud, %ud, %ud)\n", bDim->x, bDim->y, bDim->z);
-	printd(DBG_DEBUG, "gDim: %p\n", gDim);
-	if( gDim )
-		printd(DBG_DEBUG, "gDim: (%ud, %ud, %ud)\n", gDim->x, gDim->y, gDim->z);
-
-	printd(DBG_DEBUG, "wSize: %p\n", wSize);
-}
-
-void printRegVar(void **fatCubinHandle, char *hostVar,
-		char *deviceAddress, const char *deviceName, int ext, int vsize,
-		int constant, int global){
-	p_debug( "\t REG VAR:\n");
-	p_debug( "fatCubinHandle: %p\n", fatCubinHandle);
-	//p_debug( "hostVar: %p, (%s)\n", hostVar, hostVar);
-	p_debug( "hostVar: %p\n", hostVar);
-	p_debug( "deviceAddress: %s\n", deviceAddress);
-	p_debug( "deviceName: %s\n", deviceName);
-	p_debug( "ext: %d\n", ext);
-	p_debug( "vsize: %d\n", vsize);
-	p_debug( "constant: %d\n", constant);
-	p_debug( "global: %d\n", global);
-}
-
-/**
- * Prints the device properties
- */
-int printCudaDeviceProp(const struct cudaDeviceProp * const pProp){
-	printd(DBG_INFO, "\nDevice \"%s\"\n",  pProp->name);
-	printd(DBG_INFO, "  CUDA Capability Major/Minor version number:    %d.%d\n", pProp->major, pProp->minor);
-	printd(DBG_INFO, "  Total amount of global memory:                 %llu bytes\n", (unsigned long long) pProp->totalGlobalMem);
-	printd(DBG_INFO, "  Multiprocessors: %d (MP) \n", pProp->multiProcessorCount);
-    printd(DBG_INFO, "  Total amount of constant memory:               %lu bytes\n", pProp->totalConstMem);
-    printd(DBG_INFO, "  Total amount of shared memory per block:       %lu bytes\n", pProp->sharedMemPerBlock);
-    printd(DBG_INFO, "  Total number of registers available per block: %d\n", pProp->regsPerBlock);
-    printd(DBG_INFO, "  Warp size:                                     %d\n", pProp->warpSize);
-    printd(DBG_INFO, "  Maximum number of threads per block:           %d\n", pProp->maxThreadsPerBlock);
-    printd(DBG_INFO, "  Maximum sizes of each dimension of a block:    %d x %d x %d\n",
-           pProp->maxThreadsDim[0],
-           pProp->maxThreadsDim[1],
-           pProp->maxThreadsDim[2]);
-    printd(DBG_INFO, "  Maximum sizes of each dimension of a grid:     %d x %d x %d\n",
-           pProp->maxGridSize[0],
-           pProp->maxGridSize[1],
-           pProp->maxGridSize[2]);
-    return OK;
-}
-
-#if 0
-/**
- * prints the fatcubin_info array
- */
-
-int printFatCIArray(GArray * fcia){
-	guint i;
-
-	if( NULL == fcia)
-		return OK;
-
-	printd(DBG_INFO, "\n -------- FatCubin_info array: length = %u -----------\n", fcia->len);
-
-	for (i = 0; i < fcia->len; i++) {
-		fatcubin_info_t * p =
-				&g_array_index(fcia, fatcubin_info_t, i);
-
-		printd(DBG_INFO, "\t FAT Cubin Handle: %p, Fat Cubin: %p", p->fatCubinHandle, p->fatCubin);
-	}
-
-	return OK;
-}
-#endif
-
-/**
- * prints the hash table of handlers and vars
- */
-static void  l_printGPtrArr(gpointer key, gpointer value, gpointer user_data){
-
-	GPtrArray* varArr = (GPtrArray*) value;
-	guint i;
-
-	p_debug("Key (FatCubinHandler)=%p: Value [\n", key);
-
-//	g_ptr_array_foreach(varArr, (GFunc)printf, NULL);
-	for(i = 0; i < varArr->len; i++){
-		vars_val_t * v = g_ptr_array_index(varArr, i);
-		if( v != NULL ) {
-			p_debug("[%u] = hostVar: %p, deviceName: %s\n",
-					i, (void*)v->hostVar, v->deviceName);
-		}
-	}
-	p_debug("]\n");
-}
-
-int printRegVarTab(GHashTable * tab){
-
-
-	if( tab != NULL )
-		g_hash_table_foreach(tab,l_printGPtrArr, NULL );
-
-	return OK;
-}
-
-/**
  * writes the string with the information about its
  * size to the pDst address
  *
@@ -750,7 +487,7 @@ static char * l_unpackStr(const char *pSrc, int * pOffset){
 	// now allocate enough memory for the string and the NULL
 	// terminator
 	pDst = malloc(length + 1);
-	if( mallocCheck(pDst, __FUNCTION__, NULL) == ERROR )
+	if (!pDst)
 		return NULL;
 
 	if( length > 0){
@@ -780,7 +517,7 @@ static char * l_unpackChars(char * pSrc, int size){
 		return NULL;
 
 	pDst = malloc(size);
-	if( mallocCheck(pDst, __FUNCTION__, NULL ) == ERROR )
+	if (!pDst)
 		return NULL;
 
 	assert( pDst != NULL );
@@ -858,7 +595,10 @@ static __cudaFatPtxEntry * l_unpackPtx(char * pSrc, int * pOffset){
 	pSrc += sizeof(size_pkt_field_t);
 
 	// make place for the terminating NULL entry
-	pEntry = (__cudaFatPtxEntry *) malloc(n * sizeof(__cudaFatPtxEntry ) + sizeof(__cudaFatPtxEntry));
+	pEntry = (__cudaFatPtxEntry *) malloc(n * sizeof(__cudaFatPtxEntry ) +
+			sizeof(__cudaFatPtxEntry));
+	if (!pEntry)
+		return NULL;
 
 	for(i = 0; i < n; i++){
 		pEntry[i].gpuProfileName =  l_unpackStr(pSrc, &offset);
@@ -957,6 +697,8 @@ static __cudaFatCubinEntry * l_unpackCubin(char * pSrc, int * pOffset){
 
 	// make place for the terminating NULL entry
 	pEntry = (__cudaFatCubinEntry *) malloc( (n + 1) * sizeof(__cudaFatCubinEntry ));
+	if (!pEntry)
+		return NULL;
 
 	for(i = 0; i < n; i++){
 		pEntry[i].gpuProfileName =  l_unpackStr(pSrc, &offset);
@@ -1065,6 +807,8 @@ static __cudaFatDebugEntry * l_unpackDebug(char * pSrc, int * pOffset){
 	}
 
 	pEntry = (__cudaFatDebugEntry *) malloc((n+1) * sizeof(__cudaFatDebugEntry ));
+	if (!pEntry)
+		return NULL;
 
 	for(i = 0; i < n; i++){
 		pEntry[i].gpuProfileName =  l_unpackStr(pSrc, &offset);
@@ -1190,6 +934,8 @@ static __cudaFatElfEntry * l_unpackElf(char * pSrc, int * pOffset){
 	}
 
 	pEntry = (__cudaFatElfEntry *) malloc((n+1) * sizeof(__cudaFatElfEntry ));
+	if (!pEntry)
+		return NULL;
 
 	for(i = 0; i < n; i++){
 		pEntry[i].gpuProfileName =  l_unpackStr(pSrc, &offset);
@@ -1302,6 +1048,8 @@ static __cudaFatSymbol * l_unpackSymbol(char * pSrc, int * pOffset){
 		// create the place and unpack the stuff
 		// make place for the terminating NULL entry
 		pEntry = (__cudaFatSymbol *) malloc((n + 1) * sizeof(__cudaFatSymbol ));
+		if (!pEntry)
+			return NULL;
 
 		for (i = 0; i < n; i++) {
 			pEntry[i].name = l_unpackStr(pSrc, &offset);
@@ -1414,6 +1162,8 @@ static __cudaFatCudaBinary * l_unpackDep(char * pSrc, int * pOffset){
 
 	// make place for the terminating NULL entry
 	pEntry = (__cudaFatCudaBinary *) malloc( n  * sizeof(__cudaFatCudaBinary ));
+	if (!pEntry)
+		return NULL;
 
 	for(i = 0; i < n; i++){
 		offset = unpackFatBinary(pEntry[i].dependends, pSrc);
@@ -1746,7 +1496,7 @@ static uint3 * l_unpackUint3Ptr(const char *pSrc, int * pOffset){
 	if( pUint3[0]){
 		// not null
 		p = (uint3 *) malloc(sizeof(uint3));
-		if( mallocCheck(p, __FUNCTION__, NULL ) == ERROR ){
+		if (!p) {
 			*pOffset = ERROR;
 			return NULL;
 		}
@@ -1831,7 +1581,7 @@ static dim3 * l_unpackDim3Ptr(const char *pSrc, int * pOffset){
 	if( pDim3[0]){
 		// not null
 		p = (dim3 *) malloc(sizeof(dim3));
-		if( mallocCheck(p, __FUNCTION__, NULL ) == ERROR ){
+		if (!p) {
 			*pOffset = ERROR;
 			return NULL;
 		}
@@ -1904,7 +1654,7 @@ static int * l_unpackIntPtr(const char *pSrc, int * pOffset){
 	if( t1[0]){
 		// not null
 		p = (int*) malloc(sizeof(int));
-		if( mallocCheck(p, __FUNCTION__, NULL ) == ERROR ){
+		if (!p) {
 			*pOffset = ERROR;
 			return NULL;
 		}
@@ -2274,461 +2024,4 @@ int freeFatBinary(__cudaFatCudaBinary *fatCubin){
 	free(fatCubin);
 
 	return OK;
-}
-
-// ---------------------------
-// misc
-// ---------------------------
-/**
- * Translates method id to string
- * @param method_id The method id
- * @return a string corresponding to a given method id
- *         NULL if a method id has not been found
- */
-char * methodIdToString(const int method_id){
-	// could be an array of char* where you access the string with the
-	// method_id indices, but then it might lead to errors if the order
-	// in method_id.h will change, so this way is safer
-
-	char * fname;
-
-	switch(method_id){
-	case CUDA_MALLOC: fname = "cudaMalloc"; break;
-	case CUDA_FREE: fname = "cudaFree"; break;
-	case CUDA_MEMCPY_H2D: fname = "cudaMemcpyH2D"; break;
-	case CUDA_MEMCPY_D2H: fname = "cudaMemcpyD2H"; break;
-	case CUDA_MEMCPY_H2H: fname = "cudaMemcpyH2H"; break;
-	case CUDA_MEMCPY_D2D: fname = "cudaMemcpyD2D"; break;
-	case CUDA_SETUP_ARGUMENT: fname = "cudaSetupArgument"; break;
-	case CUDA_LAUNCH: fname = "cudaLaunch"; break;
-	case CUDA_GET_DEVICE_COUNT: fname = "cudaGetDeviceCount"; break;
-	case CUDA_GET_DEVICE_PROPERTIES: fname = "cudaGetDeviceProperties"; break;
-	case CUDA_GET_DEVICE: fname = "cudaGetDevice"; break;
-	case CUDA_SET_DEVICE: fname = "cudaSetDevice"; break;
-	case CUDA_CONFIGURE_CALL: fname = "cudaConfigureCall"; break;
-	case CUDA_THREAD_SYNCHRONIZE: fname = "cudaThreadSynchronize"; break;
-	case CUDA_THREAD_EXIT: fname = "cudaThreadExit"; break;
-	case CUDA_MEMSET: fname = "cudaMemset"; break;
-	case CUDA_UNBIND_TEXTURE: fname = "cudaUnbindTexture"; break;
-	case CUDA_BIND_TEXTURE_TO_ARRAY: fname = "cudaBindTextureToArray"; break;
-	case CUDA_FREE_HOST: fname = "cudaFreeHost"; break;
-	case CUDA_MEMCPY_TO_SYMBOL_H2D: fname = "cudaMemcpyToSymbol"; break;
-	case CUDA_MEMCPY_TO_SYMBOL_D2D: fname = "cudaMemcpyToSymbol"; break;
-	case CUDA_MEMCPY_FROM_SYMBOL_D2H: fname = "cudaMemcpyFromSymbol"; break;
-	case CUDA_MEMCPY_FROM_SYMBOL_D2D: fname = "cudaMemcpyFromSymbol"; break;
-	case CUDA_MALLOC_ARRAY: fname = "cudaMallocArray"; break;
-	case CUDA_FREE_ARRAY: fname = "cudaFreeArray"; break;
-	case CUDA_MEMCPY_TO_ARRAY_D2D: fname = "cudaMemcpyToArrayD2D"; break;
-	case CUDA_MEMCPY_TO_ARRAY_H2D: fname = "cudaMemcpyToArrayH2D"; break;
-	case __CUDA_REGISTER_FAT_BINARY: fname = "__cudaRegisterFatBinary"; break;
-	case __CUDA_REGISTER_FUNCTION: fname = "__cudaRegisterFunction"; break;
-	case __CUDA_REGISTER_VARIABLE: fname = "__cudaRegisterVariable"; break;
-	case __CUDA_REGISTER_TEXTURE: fname = "__cudaRegisterTexture"; break;
-	case __CUDA_REGISTER_SHARED: fname = "__cudaRegisterShared"; break;
-	case __CUDA_UNREGISTER_FAT_BINARY: fname = "__cudaUnregisterFatBinary"; break;
-
-	default: fname = NULL; break;
-	}
-
-	return fname;
-}
-
-/**
- * check if the pointer is null and if yes then exit
- *
- * @param p pointer to be checked
- * @param message the message that needs to be displayed when error occurs
- */
-void nullExitChkpt(void *p, char * message){
-	if(NULL == p)
-		g_error(message);
-}
-
-/**
- * check if the pointer is null and if yes then exit
- *
- * @param p pointer to be checked
- * @param func The name of the function checking the pointer
- * @param message the message that needs to be displayed when error occurs
- * @return TRUE print the message and indicate that the pointer
- *              is null
- *         FALSE the pointer is not null and the message is
- *               not displayed
- */
-gboolean nullDebugChkpt(const void * p, const char * func, char * message){
-	if( NULL == p ){
-		p_debug("%s: The pointer is NULL. %s ", func, message);
-		return TRUE;
-	}
-	return FALSE;
-}
-
-/**
- * checks if the pointer is null and if yes then exits
- * Displays memory info
- *
- * @param p pointer to be checked
- * @param message the message the needs to be displayed when error occurs
- */
-void nullExitChkptMalloc(void *p, char * message){
-	if(NULL == p){
-		if( NULL == message)
-			g_error("Problems with memory allocation.\n");
-		else
-			g_error("Problems with memory allocation. %s\n", message);
-	}
-}
-// ---------------------------------------------
-// glib helper functions
-// ---------------------------------------------
-
-
-#if 0
-/**
- * returns the the pointer to the fatcubin_info_t corresponding to
- * a fatCubinHandle. If there is a few the same fatCubinHandles
- * the first found is returned
- *
- * infix fcia stays for F_atC_ubin_I_nfo A_rray
- *
- * @todo check for uniqueness of the fatCubinHandle
- *
- * @param fatCubinInfoArr the pointer to the array
- * @param fatCubinHandle against which handle do we compare entries in fatCubinInfoArr
- *
- * @return index of the entry holding the fatCubinHandle
- *         -1 if no entry equal to fatCubinHandle can be found or the fatCubinInfoArr
- *            is NULL
- */
-int g_fcia_idx(GArray * fatCubinInfoArr, void ** fatCubinHandle) {
-	fatcubin_info_t * e = NULL;
-	int index = -1;
-	unsigned int i;
-
-	if (NULL == fatCubinInfoArr)
-		return -1;
-
-	for (i = 0; i < fatCubinInfoArr->len; i++) {
-		e = &g_array_index( fatCubinInfoArr, fatcubin_info_t, i);
-		if (e->fatCubinHandle == fatCubinHandle) {
-			// we have found it
-			index = (int) i;
-			break;
-		}
-	}
-
-	return index;
-}
-#endif
-
-
-#if 0
-/**
- * returns the the pointer to the fatcubin_info_t corresponding to
- * a fatCubinHandle and an index . If there is a few the same fatCubinHandles
- * the first found is returned; invokes @see g_find_fatci
- *
- * @todo check for uniqueness of the fatCubinHandle
- *
- * @param fatCubinHandle against which handle do we compare entries in fatCubinInfoArr
- * @param fatCubinInfoArr the pointer to the array
- * @param pIndex (out) The return value of the index; -1 if not found
- * @return pointer to  the entry holding the fatCubinHandle
- *         NULL if no entry equal to fatCubinHandle can be found or fatCubinInfoArr
- *         is lost
- */
-fatcubin_info_t * g_fcia_elidx(GArray * fatCubinInfoArr, void ** fatCubinHandle, int * pIndex){
-	*pIndex = g_fcia_idx(fatCubinInfoArr, fatCubinHandle);
-
-	return (-1 == *pIndex ? NULL : &g_array_index(fatCubinInfoArr, fatcubin_info_t, *pIndex));
-}
-
-/**
- * returns the the pointer to the fatcubin_info_t corresponding to
- * a fatCubinHandle. If there is a few the same fatCubinHandles
- * the first found is returned; invokes @see g_find_fatci
- *
- * @todo check for uniqueness of the fatCubinHandle
- *
- * @param fatCubinHandle against which handle do we compare entries in fatCubinInfoArr
- * @param fatCubinInfoArr the pointer to the array
- * @return pointer to  the entry holding the fatCubinHandle
- *         NULL if no entry equal to fatCubinHandle can be found or fatCubinInfoArr
- *         is lost
- */
-fatcubin_info_t * g_fcia_elem(GArray * fatCubinInfoArr, void ** fatCubinHandle){
-
-	int idx;
-
-	return g_fcia_elidx(fatCubinInfoArr, fatCubinHandle, &idx);
-}
-
-/**
- * it looks for hostVar in the fatCubinInfoArr
- *
- * @param fatCubinInfoArr (in) The array we are searching through
- * @param hostVar (in) The original value as originally issued on the client side
- *                we assume this is a pointer - the client sends not the name
- *                but the pointer
- * @param pIndex (out) The index in fatcubin_info_t->variables where
- *          you found this; if not found then it is set to -1
- * @return pointer to the fatcubin_info_t containing the hostVar
- *         NULL  if the hostVar has not been found
- */
-fatcubin_info_t * g_fcia_host_var(GArray * fatCubinInfoArr, char * hostVar, int * pIndex) {
-	guint i;
-	int j;
-	fatcubin_info_t *fci = NULL;
-
-	*pIndex = -1;
-
-	if( fatCubinInfoArr == NULL )
-		return NULL;
-
-	for (i = 0; i < fatCubinInfoArr->len; i++) {
-		fatcubin_info_t * p = &g_array_index(fatCubinInfoArr, fatcubin_info_t, i);
-		assert( p != NULL );
-		// now iterate through chosen fatcubin registered structure
-		for (j = 0; j < p->num_reg_vars; j++) {
-			if (p->variables[j] != NULL && p->variables[j]->hostVar == hostVar) {
-				fci = p;
-				*pIndex = j;
-				break;
-			}
-		}
-	}
-
-	return fci;
-}
-#endif
-
-// -------------------------------
-// dealing with regVarsHashTable
-// -------------------------------
-/**
- * it inserts the hostVar to the regHostVarsTab; if the handler doesn't exist
- * it will be created
- * @param regHostVarsTab The table that will be updated
- * @param fcHandle The key
- * @param val the variable that will be stored
- *
- * @return NULL it means that fcHandle is NULL
- *         the value (pointer to array) corresponding to fcHandle in regHostVarsTab where the pValue
- *         has been inserted
- */
-GPtrArray * g_vars_insert(GHashTable * regHostVarsTab, void ** fcHandle, vars_val_t * pValue){
-//@todo
-	// the array that holds or will hold the hostVar
-	GPtrArray *varArr = NULL;
-
-	if( NULL == fcHandle || NULL == pValue){
-		p_debug("FatCubinHandler or pValue is NULL. We do not insert NULL fatCubinHandler\n");
-		return NULL;
-	}
-
-	if( (varArr = g_hash_table_lookup(regHostVarsTab, fcHandle)) == NULL ){
-		// we need to initiate a new array for hostVariable before we insert the
-		// variable; and preallocate expected max registered vars
-		varArr = g_ptr_array_new() ;
-		g_hash_table_insert(regHostVarsTab, fcHandle, varArr);
-	}
-
-	g_ptr_array_add (varArr, (gpointer)pValue);
-
-	return varArr;
-}
-
-/**
- * removes the handler and associated array of pointers from the table
- * @param regHostVarsTab The pointer to the table of host vars
- * @param fatCubinHandle The handler to be removed
- * @return OK
- */
-int g_vars_remove(GHashTable * regHostVarsTab, void** fatCubinHandle){
-	if( nullDebugChkpt(regHostVarsTab, "g_vars_remove", "regHostVarsTab\n") == TRUE
-		|| nullDebugChkpt(fatCubinHandle, "g_vars_remove", "fatCubinHandle\n") == TRUE)
-		return OK;
-
-	// this trigger calling g_vars_remove_val
-	g_hash_table_remove(regHostVarsTab, fatCubinHandle);
-
-	return OK;
-}
-
-/**
- * removes the array; the call should be triggered automatically
- * when removing key from regHostVarTab (@see g_vars_remove())
- * @param value The array corresponding to the fat cubin handle.
- */
-void g_vars_remove_val(gpointer * value){
-	guint i;
-	GPtrArray * varArr = (GPtrArray*) value;
-
-	p_debug("Triggered call.\n");
-	if( NULL == value )
-		return;		// everything is freed
-
-	for(i = 0; i < varArr->len; i++){
-		g_vars_val_delete(g_ptr_array_index(varArr, i));
-	}
-
-	g_ptr_array_free(varArr, TRUE);
-}
-
-/**
- * predicate used by @see g_vars_find()
- *
- * @param key
- * @param value
- * @param user_data which should be an array containing two pointers to char:
- *        user_data[0] is a value we are checking, user_data[1]
- *        which is hostVar is the found
- *        result if return is TRUE;
- *
- * @return TRUE if the user_data has been found
- *         FALSE if the user_data has not been found
- */
-static gboolean l_g_vars_find_hostVar(gpointer key, gpointer value, gpointer user_data) {
-	guint i ;
-	GPtrArray * varArr = (GPtrArray*)value;
-	GPtrArray * a = (GPtrArray *) user_data;
-	// what for we are looking for
-	char * symbol;
-
-	if( user_data == NULL )
-		return FALSE;
-
-	symbol = g_ptr_array_index(a, 0);
-
-	// first you need to iterate over
-	for( i = 0; i < varArr->len; i++){
-		vars_val_t * v = (vars_val_t *) g_ptr_array_index(varArr, i);
-		if( (v->hostVar == symbol) ){
-			g_ptr_array_add(a, v->hostVar);
-			return TRUE;
-		}
-	}
-
-	return FALSE;
-}
-
-/**
- * predicate used by @see g_vars_find(); this function should be called
- * after l_g_vars_find_hostVar;
- *
- * @param key
- * @param value
- * @param user_data which should be an array containing two pointers to char:
- *        user_data[0] is a value we are checking, user_data[1]
- *        which is hostVar is the found
- *        result if return is TRUE;
- *
- * @return TRUE if the user_data has been found
- *         FALSE if the user_data has not been found
- */
-static gboolean l_g_vars_find_deviceName(gpointer key, gpointer value, gpointer user_data) {
-	guint i ;
-	GPtrArray * varArr = (GPtrArray*)value;
-	GPtrArray * a = (GPtrArray *) user_data;
-	// what for we are looking for
-	char * symbol;
-
-	if( user_data == NULL )
-		return FALSE;
-
-	symbol = g_ptr_array_index(a, 0);
-
-
-	// first you need to iterate over
-	for( i = 0; i < varArr->len; i++){
-		vars_val_t * v = (vars_val_t *) g_ptr_array_index(varArr, i);
-
-		if( strcmp(v->deviceName, symbol) == 0 ){
-			g_ptr_array_add(a, v->hostVar);
-
-			return TRUE;
-		}
-	}
-
-	return FALSE;
-}
-
-
-/**
- * checks if the regHostVarsTab contains specified hostVar pointer
- *
- * @param regHostVarsTab The table to be search of registered
- *        values
- * @param symbol what we are looking for - it is a symbol which can be a pointer
- *        (i.e., the address of the variable) or a string name (i.e. a pointer
- *        to the name of the variable - @see cudaMemcpyToSymbol() )
- * @return hostVar corresponding to a symbol which can be a pointer (the address
- *         of the variable) or a string name (i.e. a pointer to the name of the variable)
- *         NULL if symbol has not been found
- */
-char * g_vars_find(GHashTable * regHostVarsTab, const char * symbol){
-
-	char * result;
-
-	if( nullDebugChkpt(regHostVarsTab,  "g_vars_find", "regHostVarsTab\n" ) == TRUE)
-		return NULL;
-
-	if( nullDebugChkpt( symbol, "g_vars_find", "symbol\n") == TRUE)
-		return NULL;
-
-	// find the array
-	GPtrArray * user_data = g_ptr_array_new();
-	g_ptr_array_add(user_data, (char* ) symbol);
-
-	// first check if symbol is a pointer; if you change the sequence (first look
-	// for a deviceName then for hostVar, if symbol is a hostVar, then it
-	// strcmp used likely will be confused and will stop working
-	g_hash_table_find(regHostVarsTab, (GHRFunc)l_g_vars_find_hostVar, (gpointer) user_data);
-
-	if( user_data->len == 1)
-		// now try with a device name;
-		g_hash_table_find(regHostVarsTab, (GHRFunc)l_g_vars_find_deviceName, (gpointer) user_data);
-
-	result = (user_data->len == 2 ? g_ptr_array_index(user_data, 1) : NULL);
-	// if g_hash_table_find returns TRUE, user_data[1] contains the deviceName
-	// if g_hash_table_find returns FALSE, we should return NULL and it means
-	// that user_data has not been changed (and are initiated to NULL)
-	g_ptr_array_free(user_data, TRUE);
-	return result;
-}
-
-/**
- * creates a single structure from provied arguments: allocates memory and copies
- * strings; so you are responsible for removing this from memory later
- *
- * @param hostVar a pointer to the hostVariable on the client side
- * @param deviceName a string representing the device name
- * @return the pointer to a new structure
- *         NULL if you cannot allocate the memory
- */
-vars_val_t * g_vars_val_new(char * hostVar, const char * deviceName){
-	vars_val_t * v = g_new(vars_val_t, 1);
-
-	v->hostVar = hostVar;
-	v->deviceName = g_strdup(deviceName);
-
-	return v;
-}
-
-/**
- * frees the memory; it should deal with NULL values, return NULL
- *
- * @param pValue value to be deleted
- * @return NULL
- */
-vars_val_t * g_vars_val_delete(vars_val_t * pValue){
-	p_debug("Executing: %s\n", __FUNCTION__);
-	if( pValue != NULL ){
-		g_free(pValue->deviceName);
-		pValue->deviceName = NULL;
-	}
-
-	g_free(pValue);
-
-	return NULL;
 }

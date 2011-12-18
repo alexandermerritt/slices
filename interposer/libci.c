@@ -84,14 +84,12 @@
 // Project includes
 #include <assembly.h>
 #include <cuda/hidden.h>
+#include <cuda/marshal.h>
 #include <cuda/method_id.h>
 #include <cuda/packet.h> 
 #include <debug.h>
 #include <util/compiler.h>
 #include <util/x86_system.h>
-
-// Directory-immediate includes
-#include "libciutils.h"
 
 /* preprocess out debug statements */
 //#undef printd
@@ -1405,6 +1403,7 @@ cudaCreateChannelDesc(int x, int y, int z, int w,
 #endif
 }
 
+#if 0
 cudaError_t cudaGetTextureReference(
 		const struct textureReference **texRef,
 		const char *symbol)
@@ -1418,6 +1417,7 @@ cudaError_t cudaGetTextureReference(
 
 	return shmpkt->ret_ex_val.err;
 }
+#endif
 
 //
 // Version Management API
