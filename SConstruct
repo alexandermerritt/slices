@@ -60,7 +60,7 @@ def build_variables_set():
     # configuration for keeneland
     if ( nodename.startswith('kid') ):
         print('kid prefix detected ...')
-        CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary/'
+        CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary'
     
     # custom machine at Georgia Tech configuration for prost
     if ( nodename.startswith('prost')):

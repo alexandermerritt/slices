@@ -45,9 +45,9 @@ GLOBAL_CCFLAGS='-fPIC -ggdb -Wall -Wextra -Werror'
 #######################################################3
 # keeneland node
 envInterposerKeeneland = Environment(
-     LIBS = ['rt', 'dl'],
-     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64'],
-     CPPPATH = [ '.', CUDA_ROOT + 'include', '../include'],
+     LIBS = ['rt', 'dl', 'shmgrp'],
+     LIBPATH = [CUDA_ROOT + '/lib64', '/lib64', '/nics/b/home/merritt/local/lib'],
+     CPPPATH = [ '.', CUDA_ROOT + '/include', '../include', '/nics/b/home/merritt/local/include'],
      CCFLAGS=GLOBAL_CCFLAGS
 	 )
 
@@ -58,8 +58,8 @@ envInterposerProst = envInterposerKeeneland
 envInterposerShiva = Environment(
      CC = 'gcc4.4.4',
      LIBS = ['rt', 'dl', 'shmgrp'],
-     LIBPATH = [CUDA_ROOT + 'lib64', '/lib64', '../shmgrp/lib'],
-     CPPPATH = [ '.', CUDA_ROOT + 'include', '../include'],
+     LIBPATH = [CUDA_ROOT + '/lib64', '/lib64', '../shmgrp/lib'],
+     CPPPATH = [ '.', CUDA_ROOT + '/include', '../include'],
      CCFLAGS=GLOBAL_CCFLAGS
 	 )
 
