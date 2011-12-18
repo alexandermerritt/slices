@@ -193,11 +193,6 @@ static void sigint_handler(int sig)
 static int start_runtime(enum node_type type, const char *main_ip)
 {
 	int err;
-	err = assembly_runtime_init(type, main_ip);
-	if (err < 0) {
-		printd(DBG_ERROR, "Could not initialize assembly runtime\n");
-		return -1;
-	}
 	err = shmgrp_init();
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not initialize shmgrp state\n");
@@ -207,6 +202,11 @@ static int start_runtime(enum node_type type, const char *main_ip)
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not open shmgrp %s\n", ASSEMBLY_SHMGRP_KEY);
 		shmgrp_tini();
+		return -1;
+	}
+	err = assembly_runtime_init(type, main_ip);
+	if (err < 0) {
+		printd(DBG_ERROR, "Could not initialize assembly runtime\n");
 		return -1;
 	}
 	// FIXME Initialize a list of sinks instead of one child.
