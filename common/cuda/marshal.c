@@ -582,7 +582,7 @@ static __cudaFatPtxEntry * l_unpackPtx(char * pSrc, int * pOffset){
 	size_pkt_field_t n; 		// the number of entries
 	__cudaFatPtxEntry * pEntry;
 	unsigned int i;
-	int offset;
+	int offset = 0;
 	// to remember the start position to allow to say
 	// how many bytes we have read
 	char * pSrcOrig = pSrc;
@@ -683,7 +683,7 @@ static __cudaFatCubinEntry * l_unpackCubin(char * pSrc, int * pOffset){
 	size_pkt_field_t n; 		// the number of entries
 	__cudaFatCubinEntry * pEntry;
 	unsigned int i;
-	int offset;
+	int offset = 0;
 	// to remember the start position to allow to say
 	// how many bytes we have read
 	char * pSrcOrig = pSrc;
@@ -1287,7 +1287,7 @@ int unpackFatBinary(__cudaFatCudaBinary *pFatC, char * pFatPack){
 	// to remember how many bytes we have read
 	char * pFatPackOrig = pFatPack;
 	// how many bytes we have read
-	int offset;
+	int offset = 0;
 
 	memcpy(&pFatC->magic, (unsigned long*)pFatPack, sizeof(pFatC->magic));
 	pFatPack += sizeof(pFatC->magic);

@@ -10,8 +10,7 @@ import os
 import commands
 import sys
 
-Import('CUDA_ROOT')
-
+Import('CUDA_ROOT', 'DEBUG')
 
 def get_platform_characteristic_str():
     """
@@ -26,9 +25,13 @@ def get_platform_characteristic_str():
     nodename = commands.getoutput('uname -n') # doesn't work on keeneland
     return nodename
 
-CCFLAGS_WARN='-Wall -Wextra -Werror -Wno-unused-parameter'
-GLOBAL_CCFLAGS='-ggdb ' + CCFLAGS_WARN
-#GLOBAL_CCFLAGS='-O3 ' + CCFLAGS_WARN
+GLOBAL_CCFLAGS=['-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter']
+if int(DEBUG) == 1:
+	GLOBAL_CCFLAGS.append('-ggdb')
+	GLOBAL_CCFLAGS.append('-DDEBUG')
+	print 'Debugging code enabled for backend'
+else:
+	GLOBAL_CCFLAGS.append('-O3')
 
 ########################################################333
 # here we define the environments for particular nodes

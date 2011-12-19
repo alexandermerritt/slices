@@ -386,9 +386,10 @@ remote_disable(void)
 			pthread_mutex_lock(&internals->lock);
 			return -(errno);
 		}
-		if (status != 0)
+		if (status != 0) {
 			printd(DBG_DEBUG,
 					"remotesink exited with non-zero status %d\n", status);
+		}
 		internals->rsink_pid = -1;
 	}
 	pthread_mutex_unlock(&internals->lock);
@@ -507,7 +508,7 @@ node_main_shutdown(void)
 static int
 node_minion_init(const char *main_ip)
 {
-	int err, exit_errno;
+	int err = 0, exit_errno = 0;
 	struct node_participant *p = NULL;
 	struct minion_state *state;
 

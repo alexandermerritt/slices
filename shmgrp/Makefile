@@ -3,7 +3,7 @@
 ## @date 2011-11-08
 ## @brief Makefile to build the shmgrp dynamic library
 
-PREFIX=/usr/local
+PREFIX=/nics/b/home/merritt/local
 SONAME=libshmgrp.so
 
 CC=gcc
@@ -41,11 +41,9 @@ clean:
 install: all
 	install -m 0444 include/shmgrp.h $(PREFIX)/include
 	install -m 0555 lib/$(SONAME) $(PREFIX)/lib
-	ldconfig
 
 .PHONY: install
 
 uninstall:
 	rm -f $(PREFIX)/include/shmgrp.h
 	rm -f $(PREFIX)/lib/$(SONAME)
-	ldconfig

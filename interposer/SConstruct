@@ -17,7 +17,7 @@ import os
 import commands
 import sys
 
-Import( 'CUDA_ROOT' )
+Import( 'CUDA_ROOT', 'DEBUG' )
 
 def get_platform_characteristic_str():
     """
@@ -34,11 +34,13 @@ def get_platform_characteristic_str():
     return nodename
 
 
-# for glib options run: glib-config --cflags  for glib1.2 
-# glib2 lacks this thing
-
-GLOBAL_CCFLAGS='-fPIC -ggdb -Wall -Wextra -Werror'
-#GLOBAL_CCFLAGS='-fPIC -O3 -Wall -Wextra -Werror'
+GLOBAL_CCFLAGS=['-fPIC', '-Wall', '-Wextra', '-Werror']
+if int(DEBUG) == 1:
+	GLOBAL_CCFLAGS.append('-ggdb')
+	GLOBAL_CCFLAGS.append('-DDEBUG')
+	print 'Debugging code enabled for interposer'
+else:
+	GLOBAL_CCFLAGS.append('-O3')
 
 ########################################################333
 # here we define the environments for particular nodes

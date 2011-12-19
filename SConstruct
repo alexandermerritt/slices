@@ -4,7 +4,6 @@
    @author Magdalena Slawinska magg@gatech.edu
    @author Alex Merritt, merritt.alex@gatech.edu
    @date 2011-02-15
-   @brief Building kidron-utils-remote-cuda-exec-2
 """
 import os
 import commands
@@ -33,6 +32,8 @@ Help("""
 # points to the directory where the CUDA root is
 CUDA_ROOT=None
 
+DEBUG=0
+
 def get_platform_characteristic_str():
     """
        intended to get the characteristic string to allow for automatic
@@ -53,6 +54,7 @@ def build_variables_set():
       are working on
     """
     global CUDA_ROOT
+    global DEBUG
         
     nodename = get_platform_characteristic_str()
     print('The configuration will be applied for: ' + nodename)
@@ -69,12 +71,12 @@ def build_variables_set():
     
     # Custom machine at Georgia Tech
     if nodename.startswith('shiva'):
- 	print('shiva prefix detected ...')
-        CUDA_ROOT = '/usr/local/cuda/'
+		print('shiva prefix detected ...')
+		CUDA_ROOT = '/usr/local/cuda/'
     
     # Custom machine at Georgia Tech, same as shiva
     if nodename.startswith('ifrit') :
-	print('ifrit prefix detected ...')
+    	print('ifrit prefix detected ...')
         CUDA_ROOT = '/usr/local/cuda/'
 
 
@@ -108,15 +110,17 @@ build_variables_set()
 # check if the variables are set and directories exist and print them
 build_variables_print()
 
+# Extract debug flag from command line.
+DEBUG = ARGUMENTS.get('dbg', 0)
 
 # export variables to other scripts
-Export( 'CUDA_ROOT')
+Export('CUDA_ROOT', 'DEBUG')
 
-					  
+                      
 # call all scripts
 SConscript([
 #        'cuda-app/SConstruct', # it doesn't depend on anything
         'interposer/SConstruct',    # it compiles a bunch of stuff
-        'backend/SConstruct'			
+        'backend/SConstruct'            
         ])
 

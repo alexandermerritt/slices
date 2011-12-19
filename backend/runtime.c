@@ -218,14 +218,17 @@ static void shutdown_runtime(void)
 {
 	int err;
 	err = shmgrp_close(ASSEMBLY_SHMGRP_KEY);
-	if (err < 0)
+	if (err < 0) {
 		printd(DBG_ERROR, "Could not close shmgrp\n");
+	}
 	err = shmgrp_tini();
-	if (err < 0)
+	if (err < 0) {
 		printd(DBG_ERROR, "Could not deallocate shmgrp state\n");
+	}
 	err = assembly_runtime_shutdown();
-	if (err < 0)
+	if (err < 0) {
 		printd(DBG_ERROR, "Could not shutdown assembly runtime\n");
+	}
 	printf("\nAssembly runtime shut down.\n");
 
 }
@@ -263,7 +266,7 @@ static void print_usage(void)
 
 int main(int argc, char *argv[])
 {
-	int err;
+	int err = 0;
 	sigset_t mask;
 	struct sigaction action;
 	enum node_type type;

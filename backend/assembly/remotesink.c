@@ -629,7 +629,7 @@ do_cuda_rpc(
 	BUG(!pkt);
 
 	bool has_payload; //! any data an RPC requires is stored after the pkt
-	data_direction direction;
+	data_direction direction = 0;
 	payload_size data_size;
 
 	// Transactions always start with the packet itself. This allows both ends
@@ -716,8 +716,9 @@ wait_for_termination(void)
 	sigfillset(&mask);
 	sigdelset(&mask, REMOTE_TERM_SIG);
 	err = sigsuspend(&mask);
-	if (err < 0)
+	if (err < 0) {
 		printd(DBG_ERROR, "sigsuspend returned error\n");
+	}
 }
 
 // Tell the compiler all calls to teardown never return.

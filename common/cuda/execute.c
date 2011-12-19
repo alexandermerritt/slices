@@ -27,10 +27,6 @@
 #include <debug.h>
 #include <util/compiler.h>
 
-/* preprocess out debug statements */
-//#undef printd
-//#define printd(level, fmt, args...)
-
 /* NOTES
  *
  * The following functions shall be interposed by the assembly runtime and are
@@ -447,8 +443,9 @@ static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
 	}
 
 	printd(DBG_DEBUG, "memcpyFromSymb symb=%p count=%lu\n", symbol, count);
-	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING)
+	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING) {
 		printd(DBG_DEBUG, "\tsymbol is string: %s\n", symbol);
+	}
 
 	pkt->ret_ex_val.err =
 		cudaMemcpyFromSymbol(dst, symbol, count, offset,
@@ -519,8 +516,9 @@ static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
 	}
 
 	printd(DBG_DEBUG, "memcpyFromSymb symb=%p count=%lu\n", symbol, count);
-	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING)
+	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING) {
 		printd(DBG_DEBUG, "\tsymbol is string: %s\n", symbol);
+	}
 
 	pkt->ret_ex_val.err =
 		cudaMemcpyToSymbol(symbol, src, count, offset,
@@ -802,8 +800,7 @@ static OPS_FN_PROTO(__CudaRegisterTexture)
 	GET_CUBIN_VALIST(cubin_list, pkt);
 	
 	char *texName = (char*)((uintptr_t)pkt + pkt->args[4].argull);
-	int nameLen = strlen(texName) + 1;
-	printd(DBG_DEBUG, "name='%s' name_len=%d\n", texName, nameLen);
+	printd(DBG_DEBUG, "name='%s' name_len=%lu\n", texName, strlen(texName) + 1);
 
 	reg_tex_args_t *tex = calloc(1, sizeof(*tex));
 	if (!tex) {
@@ -819,7 +816,7 @@ static OPS_FN_PROTO(__CudaRegisterTexture)
 	tex->tex = pkt->args[2].texRef; // initial state
 	tex->devPtr = pkt->args[3].argp; // pointer copy
 	tex->texName = calloc(1, strlen(texName) * 2);
-	strncpy(tex->texName, texName, strlen(texName) + 1);
+	strncpy((char *)tex->texName, texName, strlen(texName) + 1);
 	tex->dim = pkt->args[5].arr_argii[0];
 	tex->norm = pkt->args[5].arr_argii[1];
 	tex->ext = pkt->args[5].arr_argii[2];
@@ -831,7 +828,7 @@ static OPS_FN_PROTO(__CudaRegisterTexture)
 	// Make the call
 	__cudaRegisterTexture(tex->fatCubinHandle,
 			&tex->tex, // pretend this is our global; register its addr
-			(const void**)&tex->devPtr, tex->texName,
+			&tex->devPtr, tex->texName,
 			tex->dim, tex->norm, tex->ext);
 
 	// store the state

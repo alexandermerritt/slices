@@ -19,6 +19,9 @@
 #include <cuda/fatcubininfo.h>
 #include <cuda/packet.h>
 
+#define OK 0
+#define ERROR -1
+
 /**
  * For storing the number of records  for particular structures
  * contained in the __cudaFatCubinBinaryRec

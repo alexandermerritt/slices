@@ -97,8 +97,8 @@ typedef struct {
 	void **fatCubinHandle;
 	struct textureReference *texRef; //! address of global in application
 	struct textureReference tex; //! actual storage registered within sink
-	void **devPtr;
-	char *texName;
+	const void *devPtr;
+	const char *texName;
 	int dim;
 	int norm;
 	int ext;

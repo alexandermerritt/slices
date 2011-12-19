@@ -203,7 +203,7 @@ int conn_peername(struct sockconn *conn, char *hostname)
 	err = getpeername(conn->socket, (struct sockaddr*)&peer, &len);
 	if (err < 0)
 		return -(errno);
-	BUG(peer.ss_family != AF_INET); // we only support IPv4
+	//BUG(peer.ss_family != AF_INET); // we only support IPv4
 	addr = (struct sockaddr_in*)&peer;
 	inet_ntop(AF_INET, &(addr->sin_addr), hostname, INET_ADDRSTRLEN);
 	return 0;
