@@ -6,121 +6,177 @@
    @date 2011-02-15
 """
 import os
-import commands
 import sys
+import getpass
+import socket
 
 Help("""
-   Type: 'scons -Q' to build the production program,
-         'scons -c' to clean the program
-   Currently automatically detected environments: 
-   - keeneland (NICS, UTK) 
-   - prost     (Georgia Tech)
-   - shiva     (Georgia TEch)
-   - ifrit     (Georgia TEch)
-   If you want to add another environment check the function
-   build_variables_set(). Currently it is based on the
-   hostnames you are building on.
+   $ scons -Q   # builds quietly the program
+   $ scons -c   # cleans the program
+
+   # run with the debug compilation options enabled
+   $ scons --set-debug-flags  
+   
+   # to run with the optimization compilation flag enabled
+   $ scons --set-opt-flags  
+   
+   For defined configurations see function
+          
+   set_build_variables()
     """)
 
+# default values
+GCC = { 
+        'CC' : 'gcc',
+        'CCFLAGS' :  ['-fPIC', '-Wall', '-Wextra', '-Wno-unused-parameter', '-std=gnu99'],
+        'CCDEBUGFLAGS' : ['-ggdb', '-g', '-DDEBUG'],
+        'CCOPTFLAGS' : ['-O3']
+      }
 
-""" 
-  required variables for this building system
-  if you need to add another configuration you need to modify the 
-  setBuildVariables()
-"""
+CUDA_ROOT = None
 
-# points to the directory where the CUDA root is
-CUDA_ROOT=None
+# where is the installation directory
+INSTALL_DIR = os.getcwd() + '/distro'
 
-DEBUG=0
-
-def get_platform_characteristic_str():
+#################################################
+# helper functions
+#################################################
+def set_build_context():
     """
-       intended to get the characteristic string to allow for automatic
-       recognition of the platform and applied customized build environment
-       @return: the characteristic string for the platform
-       @rtype: string
+    tries to get a configuration characteristic string
+    currently: three first letters of the machine hostname
+    concatenated with '_' and concatenated with the user name
+    e.g. kidlogin.nics.utk.edu and a user john
+    kid_john
     """
-    nodename = commands.getoutput('uname -n')
-    return nodename
+    
+    nodename = socket.gethostname()
+    username = getpass.getuser()
+
+    return nodename[:3] + '_' + username
     
 
 #################################################
 # helper functions
 #################################################
-def build_variables_set():
+def set_build_variables(build_ctx):
     """
       sets the build variables automatically depending on the system you
       are working on
+      @param build_ctx: the detected build context (string) 
     """
     global CUDA_ROOT
-    global DEBUG
-        
-    nodename = get_platform_characteristic_str()
-    print('The configuration will be applied for: ' + nodename)
+    global GCC
     
-    # configuration for keeneland
-    if ( nodename.startswith('kid') ):
-        print('kid prefix detected ...')
+    # configuration for kid_smagg
+    if build_ctx == 'kid_smagg':
+        print(build_ctx + ' build context detected ...')
         CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary'
-    
-    # custom machine at Georgia Tech configuration for prost
-    if ( nodename.startswith('prost')):
-        print('prost prefix detected ...')
-        CUDA_ROOT = '/opt/cuda/'
-    
+        
+        # configuration for keeneland
+    elif build_ctx == 'kid_merritt' :
+        print(build_ctx + ' build context detected ...')
+        CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary'
+        
     # Custom machine at Georgia Tech
-    if nodename.startswith('shiva'):
-		print('shiva prefix detected ...')
-		CUDA_ROOT = '/usr/local/cuda/'
+    elif build_ctx == 'shi_alex' or build_ctx == 'ifr_alex':
+        print(build_ctx + ' detected ...')
+        CUDA_ROOT = '/usr/local/cuda'
+        GCC['CC'] = 'gcc4.4.4'
     
-    # Custom machine at Georgia Tech, same as shiva
-    if nodename.startswith('ifrit') :
-    	print('ifrit prefix detected ...')
-        CUDA_ROOT = '/usr/local/cuda/'
-
-
-def variable_check_exit(var_name, var):
-    """
-        checks if the variable is correctly set and quits the script if not
-        @param var_name: The name of the variable to be checked 
-        @param var: The variable that supposed to be a path to the directory 
-    """
-    if var == None :
-        print(var_name +  ' not set. You have to set it in build_variables_set() in this script')
+    else:
+        print('''ERROR: no build configuration detected. Define
+        a build configuration for this machine''')
         sys.exit(-1)
-    if not os.path.exists(var):
-        print(var_name + '= ' + var + ' does not exist!')
-        sys.exit(-1)
-    print(var_name + '= ' +  var)
 
-
-def build_variables_print():
+def determine_extra_compiler_options(env):
     """
-      prints the build variables or exits the script if they are not set
+    determines the additional compiler options such as 
+    debug or optimization and appends it to the base environment
+    @param env: Environment - the environment to which the new things will be appended 
     """
-    variable_check_exit('CUDA_ROOT', CUDA_ROOT)
+    debug = GetOption('DEBUG')
+    optimized = GetOption('OPTIMIZED')
+    ok = True
+    if None == debug:
+        debug = False
+    if None == optimized:
+        optimized == False
 
-#######################################
-# start actual execution script
-#######################################
+    if debug and optimized:
+        print('Contradictory build options: Debug and Optimized flags set. ')
+        sys.exit(0)
+    
+    if False == debug and False == optimized:
+        print('Neither optimization nor debug compilation options enabled')
+    elif debug: 
+        env.Append(CCFLAGS = GCC['CCDEBUGFLAGS'])
+        print('Debug compilation option enabled')
+    elif optimized:
+        env.Append(CCFLAGS = GCC['CCOPTFLAGS'])
+        print('Optimized compilation enabled')
+    
+    
+def print_vars():
+    """
+       print variables that will be used for the build
+    """
+    global CUDA_ROOT
+    global INSTALL_DIR
+    global GCC
+    
+    print('IMPORTANT BUILD VARIABLES')
+    print('=========================')
+    
+    print('CUDA_ROOT= ' + CUDA_ROOT)
+    print('INSTALL_DIR=' + INSTALL_DIR)
 
-# set build variables    
-build_variables_set()
-# check if the variables are set and directories exist and print them
-build_variables_print()
+    print('GCC base settings:')
+    for key in GCC.keys():
+        sys.stdout.write('\t' + key + '=')
+        print(GCC[key])
+    sys.stdout.write('Debug options appended: ') 
+    print( GetOption('DEBUG'))    
+    sys.stdout.write('Optimized options appended: ')
+    print(       GetOption('OPTIMIZED'))
+    print('=========================')
+    
 
-# Extract debug flag from command line.
-DEBUG = ARGUMENTS.get('dbg', 0)
+###################
+# the actual build
+
+AddOption('--set-debug-flags', action='store_true', dest='DEBUG',  
+          help='if present the debug compilation options will be enabled')
+AddOption('--set-opt-flags', action='store_true', dest='OPTIMIZED', 
+          help='if present, the optimized compilation options will be enabled')
+
+
+# determine the build configuration    
+build_ctx = set_build_context()
+print('Detected build context: ' + build_ctx)
+
+set_build_variables(build_ctx)
+
+# the environment for building the ib_rdma
+BASE_ENV = Environment(
+    CPPPATH = ['../include'],
+    CCFLAGS = GCC['CCFLAGS'],
+    CC = GCC['CC']
+    )          
+
+determine_extra_compiler_options(BASE_ENV)
+
+print_vars()
+
 
 # export variables to other scripts
-Export('CUDA_ROOT', 'DEBUG')
-
-                      
+Export('CUDA_ROOT', 
+       'GCC',
+       'INSTALL_DIR',        
+       'BASE_ENV')
+               
 # call all scripts
-SConscript([
-#        'cuda-app/SConstruct', # it doesn't depend on anything
-        'interposer/SConstruct',    # it compiles a bunch of stuff
-        'backend/SConstruct'            
-        ])
-
+SConscript('shmgrp/SConstruct')
+SConscript('shmgrp/test/SConstruct')
+SConscript('interposer/SConstruct')
+SConscript('backend/SConstruct')

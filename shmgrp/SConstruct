@@ -1,0 +1,22 @@
+"""
+	@file SConstruct
+	@date Dec 20, 2011
+	@author Magdalena Slawinska a.k.a. Magic Magg magg dot gatech @ gmail dot edu
+"""
+
+Import('INSTALL_DIR',        
+       'BASE_ENV')
+
+
+env = BASE_ENV.Clone()
+
+env.Append(LIBS = ['rt'])
+env.Append(CCFLAGS = ['-Werror'])
+env.Append(CPPPATH = ['include'])
+
+# build the lib
+SHMGRP_LIB = 'libshmgrp.so'
+env.SharedLibrary(SHMGRP_LIB, ['src/common.c', 'src/leader.c', 'src/member.c'])
+
+env.Install(INSTALL_DIR+'/lib', SHMGRP_LIB)
+env.Install(INSTALL_DIR+'/include', 'include/shmgrp.h')
