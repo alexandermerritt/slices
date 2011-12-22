@@ -7,18 +7,93 @@
    @brief Building the interposer
 """
 
-Import('CUDA_ROOT', 
-       'INSTALL_DIR',        
-       'BASE_ENV')
+# LIBS - A list of one or more libraries that will be linked with 
+# any executable programs created by this environment.
+# LIBPATH - The list of directories that will be searched for libraries.
+# CPPPATH  - The $CPPPATH value tells SCons to look in the current 
+#   directory ('.') for any files included by C source files (.c or .h files)
 
-env = BASE_ENV.Clone()
+import os
+import commands
+import sys
 
-env.Append(LIBS = ['rt', 'dl', 'shmgrp'])
-env.Append(LIBPATH = [CUDA_ROOT + '/lib64', '/lib64', '../shmgrp'])
-env.Append(CPPPATH = [ '.', CUDA_ROOT + '/include', '../include', '../shmgrp/include']) 
-env.Append(CCFLAGS = ['-Werror'])
+Import( 'CUDA_ROOT', 'DEBUG' )
 
-LIBCI_LIB = 'libci.so'
-env.SharedLibrary(LIBCI_LIB, [ 'libci.c', '../common/cuda/marshal.c'])
+def get_platform_characteristic_str():
+    """
+        @todo It should be imported like something
+        from ...SConstruct import get_platform_characteristic
+        but I need time to figure out how to do this (likely additional module
+        with util functions if import doesn't work)
+       intended to get the characteristic string to allow for automatic
+       recognition of the platform and applied customized build environment
+       @return: the characteristic string for the platform
+       @rtype: string
+    """    
+    nodename = commands.getoutput('uname -n') # doesn't work on keeneland
+    return nodename
 
-env.Install(INSTALL_DIR+'/lib', LIBCI_LIB)
+
+GLOBAL_CCFLAGS=['-fPIC', '-Wall', '-Wextra', '-Werror']
+if int(DEBUG) == 1:
+	GLOBAL_CCFLAGS.append('-ggdb')
+	GLOBAL_CCFLAGS.append('-DDEBUG')
+	print 'Debugging code enabled for interposer'
+else:
+	GLOBAL_CCFLAGS.append('-O3')
+
+########################################################333
+# here we define the environments for particular nodes
+#######################################################3
+# keeneland node
+envInterposerKeeneland = Environment(
+     LIBS = ['rt', 'dl', 'shmgrp'],
+     LIBPATH = [CUDA_ROOT + '/lib64', '/lib64', '/nics/b/home/merritt/local/lib'],
+     CPPPATH = [ '.', CUDA_ROOT + '/include', '../include', '/nics/b/home/merritt/local/include'],
+     CCFLAGS=GLOBAL_CCFLAGS
+	 )
+
+# prost node
+envInterposerProst = envInterposerKeeneland
+
+# shiva
+envInterposerShiva = Environment(
+     CC = 'gcc4.4.4',
+     LIBS = ['rt', 'dl', 'shmgrp'],
+     LIBPATH = [CUDA_ROOT + '/lib64', '/lib64', '../shmgrp/lib'],
+     CPPPATH = [ '.', CUDA_ROOT + '/include', '../include'],
+     CCFLAGS=GLOBAL_CCFLAGS
+	 )
+
+# ifrit
+envInterposerIfrit = envInterposerShiva
+
+#############################################
+# end of environment definitions
+##########################################3
+
+def build_interposer_lib(env):
+    env.SharedLibrary('libci.so', [ 'libci.c', '../common/cuda/marshal.c'])
+    
+def build_interposer():
+    global envInterposerKeeneland
+    global envInterposerProst
+    global envInterposerShiva
+    global envInterposerIfrit
+    
+    # try to recognize the machine
+    nodename = get_platform_characteristic_str()
+    
+    if nodename.startswith('kid'):
+        build_interposer_lib(envInterposerKeeneland)
+    elif nodename.startswith('prost'):
+        build_interposer_lib(envInterposerProst)
+    elif nodename.startswith('shiva'):
+        build_interposer_lib(envInterposerShiva)
+    elif nodename.startswith('ifrit'):
+        build_interposer_lib(envInterposerIfrit)
+    else:
+        print("Error: Define build environment for this machine in interposer/SConstruct")
+        sys.exit()
+
+build_interposer()
