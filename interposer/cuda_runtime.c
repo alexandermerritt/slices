@@ -881,9 +881,6 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 		(struct cuda_packet *)get_region(pthread_self());
 	void *shm_ptr;
 
-	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d\n",
-			dst, src, count, kind);
-
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->thr_id = pthread_self();
 	switch (kind) {
