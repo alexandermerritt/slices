@@ -73,7 +73,7 @@ envInterposerIfrit = envInterposerShiva
 ##########################################3
 
 def build_interposer_lib(env):
-    env.SharedLibrary('libci.so', [ 'libci.c', '../common/cuda/marshal.c'])
+    env.SharedLibrary('libci.so', [ 'cuda_runtime.c', '../common/cuda/marshal.c'])
     
 def build_interposer():
     global envInterposerKeeneland
