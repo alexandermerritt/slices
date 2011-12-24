@@ -37,9 +37,9 @@
 
 #define MEMB_DIR_PREFIX_DIR		"/tmp/shmgrp/"
 #define MEMB_DIR_FMT			MEMB_DIR_PREFIX_DIR "%s/" // group key
-#define MEMB_DIR_PERMS			0770
+#define MEMB_DIR_PERMS			0777
 #define MEMB_FILE_FMT			MEMB_DIR_FMT "%d"		// pid
-#define MEMB_FILE_PERMS			0660
+#define MEMB_FILE_PERMS			0666
 
 /*
  * Message queues exist once for each pairing between a process and a group
@@ -75,7 +75,8 @@
 #define MQ_NAME_FMT_LEADER		MQ_NAME_FMT_BASE "-leader"
 #define MQ_NAME_FMT_MEMBER		MQ_NAME_FMT_BASE "-member"
 
-#define MQ_PERMS				(S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)
+#define MQ_PERMS				(S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | \
+														S_IROTH | S_IWOTH)
 
 //! Flags used to create the MQ under ownership. A leader will use these flags
 //! to open MQ_NAME_FMT_LEADER. Note that mq_open takes four arguments when
@@ -116,7 +117,7 @@
 
 #define SHM_PREFIX				"/shmgrp"
 #define SHM_NAME_FMT			SHM_PREFIX "-%s-%d-%d" // grp key - pid - regid
-#define SHM_PERMS				0660
+#define SHM_PERMS				0666
 #define SHM_OPEN_LEADER_FLAGS	(O_RDWR | O_CREAT | O_EXCL)
 #define SHM_OPEN_MEMBER_FLAGS	(O_RDWR)
 
