@@ -20,6 +20,7 @@
 #include <cuda/packet.h>
 #include <debug.h>
 #include <io/sock.h>
+#include <util/compiler.h>
 
 /* NOTES
  *
@@ -80,7 +81,7 @@
  */
 #define CONN_FAIL_ON_ERR(err)		\
 	do { 							\
-		if (err < 0) {				\
+		if (unlikely(err < 0)) {				\
 			exit_errno = -ENETDOWN;	\
 			goto fail;				\
 		}							\
@@ -103,6 +104,8 @@ static OPS_FN_PROTO(CudaThreadExit)
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
 
+	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
+
 	return 0;
 fail:
 	return exit_errno;
@@ -120,6 +123,8 @@ static OPS_FN_PROTO(CudaThreadSynchronize)
 	CONN_FAIL_ON_ERR(err);
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
+
+	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
 
 	return 0;
 fail:
@@ -142,6 +147,8 @@ static OPS_FN_PROTO(CudaSetDevice)
 	CONN_FAIL_ON_ERR(err);
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
+
+	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
 
 	return 0;
 fail:
@@ -186,6 +193,8 @@ static OPS_FN_PROTO(CudaConfigureCall)
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
 
+	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
+
 	return 0;
 fail:
 	return exit_errno;
@@ -209,10 +218,15 @@ static OPS_FN_PROTO(CudaFuncGetAttributes)
 	err = conn_put(conn, func, func_len);
 	CONN_FAIL_ON_ERR(err);
 
+	printd(DBG_DEBUG, ">%lu >%lu\n", sizeof(*pkt), func_len);
+
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
 	err = conn_get(conn, attr, sizeof(struct cudaFuncAttributes));
 	CONN_FAIL_ON_ERR(err);
+
+	printd(DBG_DEBUG, "<%lu <%lu\n",
+			sizeof(*pkt), sizeof(struct cudaFuncAttributes));
 
 	return 0;
 fail:
@@ -231,6 +245,8 @@ static OPS_FN_PROTO(CudaLaunch)
 	CONN_FAIL_ON_ERR(err);
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
+
+	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
 
 	return 0;
 fail:
@@ -254,6 +270,9 @@ static OPS_FN_PROTO(CudaSetupArgument)
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
 
+	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
+			sizeof(*pkt), arg_size, sizeof(*pkt));
+
 	return 0;
 fail:
 	return exit_errno;
@@ -275,6 +294,8 @@ static OPS_FN_PROTO(CudaFree)
 	CONN_FAIL_ON_ERR(err);
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
+
+	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
 
 	return 0;
 fail:
@@ -306,6 +327,8 @@ static OPS_FN_PROTO(CudaMalloc)
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
 
+	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
+
 	return 0;
 fail:
 	return exit_errno;
@@ -323,6 +346,8 @@ static OPS_FN_PROTO(CudaMallocPitch)
 	CONN_FAIL_ON_ERR(err);
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
+
+	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
 
 	return 0;
 fail:
@@ -346,6 +371,9 @@ static OPS_FN_PROTO(CudaMemcpyH2D)
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
 
+	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
+			sizeof(*pkt), data_size, sizeof(*pkt));
+
 	return 0;
 fail:
 	return exit_errno;
@@ -368,6 +396,9 @@ static OPS_FN_PROTO(CudaMemcpyD2H)
 	err = conn_get(conn, data, data_size);
 	CONN_FAIL_ON_ERR(err);
 
+	printd(DBG_DEBUG, ">%lu <%lu <%lu\n",
+			sizeof(*pkt), sizeof(*pkt), data_size);
+
 	return 0;
 fail:
 	return exit_errno;
@@ -385,6 +416,8 @@ static OPS_FN_PROTO(CudaMemcpyD2D)
 	CONN_FAIL_ON_ERR(err);
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
+
+	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
 
 	return 0;
 fail:
@@ -428,6 +461,9 @@ static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
 	err = conn_get(conn, data, data_size);
 	CONN_FAIL_ON_ERR(err);
 
+	printd(DBG_DEBUG, ">%lu <%lu <%lu\n",
+			sizeof(*pkt), sizeof(*pkt), data_size);
+
 	return 0;
 fail:
 	return exit_errno;
@@ -449,6 +485,9 @@ static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
 	CONN_FAIL_ON_ERR(err);
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
+
+	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
+			sizeof(*pkt), data_size, sizeof(*pkt));
 
 	return 0;
 fail:
@@ -520,6 +559,9 @@ static OPS_FN_PROTO(__CudaRegisterFatBinary)
 	err = conn_get(conn, pkt, sizeof(*pkt)); // return value captured in pkt
 	CONN_FAIL_ON_ERR(err);
 
+	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
+			sizeof(*pkt), cubin_size, sizeof(*pkt));
+
 	return 0;
 fail:
 	return exit_errno;
@@ -537,6 +579,8 @@ static OPS_FN_PROTO(__CudaUnregisterFatBinary)
 	CONN_FAIL_ON_ERR(err);
 	err = conn_get(conn, pkt, sizeof(*pkt));
 	CONN_FAIL_ON_ERR(err);
+
+	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
 
 	return 0;
 fail:
@@ -560,6 +604,9 @@ static OPS_FN_PROTO(__CudaRegisterFunction)
 	err = conn_get(conn, pkt, sizeof(*pkt)); // return value captured in pkt
 	CONN_FAIL_ON_ERR(err);
 
+	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
+			sizeof(*pkt), func_size, sizeof(*pkt));
+
 	return 0;
 fail:
 	return exit_errno;
@@ -581,6 +628,9 @@ static OPS_FN_PROTO(__CudaRegisterVar)
 	CONN_FAIL_ON_ERR(err);
 	err = conn_get(conn, pkt, sizeof(*pkt)); // return value captured in pkt
 	CONN_FAIL_ON_ERR(err);
+
+	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
+			sizeof(*pkt), var_size, sizeof(*pkt));
 
 	return 0;
 fail:
