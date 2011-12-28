@@ -41,7 +41,11 @@ extern char **environ;
 
 // XXX We assume a single-process single-threaded CUDA application for now. Thus
 // one assembly, one hint and one sink child.
-static struct assembly_hint hint;
+static const struct assembly_hint hint =
+{
+	.num_gpus = 1,
+	.nic_type = HINT_USE_IB
+};
 static struct sink sink;
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
@@ -123,8 +127,6 @@ static void runtime_entry(group_event e, pid_t pid)
 {
 	int err;
 	asmid_t asmid;
-	memset(&hint, 0, sizeof(hint));
-	hint.num_gpus = 1;
 
 	switch (e) {
 		case MEMBERSHIP_JOIN:
@@ -273,6 +275,10 @@ int main(int argc, char *argv[])
 	const char start_msg[] =
 		"Assembly runtime up. Start other participants and/or CUDA applications.\n"
 		"Type [Ctrl+c] or issue [kill -s SIGINT] to pid %d to shutdown.\n";
+
+#ifdef DEBUG
+	printf("(Built with debug symbols)\n");
+#endif
 
 	if (!verify_args(argc, argv, &type)) {
 		print_usage();

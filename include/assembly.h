@@ -37,6 +37,15 @@ enum node_type
 
 typedef unsigned long asmid_t;
 
+enum hint_nic_type
+{
+	HINT_USE_ETH = 1,
+	HINT_USE_IB // Can be IPoIB, or SDP
+	// TODO HINT_USE_RDMA
+};
+#define HINT_ETH_STR	"eth"
+#define HINT_IB_STR		"ib"
+
 /**
  * Structure used by clients/apps/etc to specify how they want their assembly
  * cooked. Thus, 'hint'.
@@ -44,6 +53,7 @@ typedef unsigned long asmid_t;
 struct assembly_hint
 {
 	int num_gpus;
+	enum hint_nic_type nic_type;
 
 	// TODO
 

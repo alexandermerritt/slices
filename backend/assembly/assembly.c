@@ -151,6 +151,7 @@ self_participant(struct node_participant *p)
 		goto fail;
 	}
 	idx = 0;
+	p->num_nics = 0;
 	for (ifa = addrstruct; ifa; ifa = ifa->ifa_next) { // iterate the list
 		if (ifa->ifa_addr->sa_family == AF_INET) { // IPv4
 			addr = &((struct sockaddr_in*)ifa->ifa_addr)->sin_addr;
@@ -159,6 +160,9 @@ self_participant(struct node_participant *p)
 				continue; // skip 127.0.0.1
 			snprintf(p->nic_name[idx], HOST_LEN, "%s", ifa->ifa_name); // name of NIC
 			snprintf(p->ip[idx], HOST_LEN, "%s", addr_buffer); // NIC IP
+			printd(DBG_INFO, "%s has %s with %s\n",
+					p->hostname, p->nic_name[idx], p->ip[idx]);
+			p->num_nics++;
 			idx++;
 			if (idx >= PARTICIPANT_MAX_NICS)
 				break;

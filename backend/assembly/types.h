@@ -100,6 +100,7 @@ struct node_participant
 	char hostname[HOST_LEN];
 	char ip[PARTICIPANT_MAX_NICS][HOST_LEN];
 	char nic_name[PARTICIPANT_MAX_NICS][HOST_LEN];
+	int num_nics;
 
 	// GPU information
 	int num_gpus;

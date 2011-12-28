@@ -137,11 +137,30 @@ set_vgpu_mapping(const struct global *global,
 		const struct gpu *gpu, struct vgpu_mapping *vgpu)
 {
 	const struct node_participant *node = gpu->node;
+	int nic;
 	vgpu->fixation =
 		(node_is_remote(global, node) ? VGPU_REMOTE : VGPU_LOCAL);
 	vgpu->pgpu_id = gpu->id;
 	strncpy(vgpu->hostname, node->hostname, HOST_LEN);
-	strncpy(vgpu->ip, node->ip[1], HOST_LEN); // FIXME Figure out NIC
+	// find the NIC specified in the hint
+	// TODO find a better way to store this information
+	nic = 0;
+	enum hint_nic_type type = global->hint->nic_type;
+	const char *nic_str_cmp;
+	if (type == HINT_USE_ETH)
+		nic_str_cmp = HINT_ETH_STR;
+	else if (type == HINT_USE_IB)
+		nic_str_cmp = HINT_IB_STR;
+	else
+		BUG(1);
+	while (nic < PARTICIPANT_MAX_NICS || nic < (node->num_nics)) {
+		if (strncmp(node->nic_name[nic], nic_str_cmp, strlen(nic_str_cmp)) == 0) {
+			strncpy(vgpu->ip, node->ip[nic], HOST_LEN);
+			break;
+		}
+		nic++;
+	}
+	BUG(nic >= node->num_nics);
 	memcpy(&vgpu->cudaDevProp, &node->dev_prop[gpu->id],
 			sizeof(struct cudaDeviceProp));
 }
