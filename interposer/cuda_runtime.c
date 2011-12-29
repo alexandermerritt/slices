@@ -329,6 +329,8 @@ cudaError_t cudaThreadExit(void)
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_THREAD_EXIT;
 	shmpkt->thr_id = pthread_self();
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	printd(DBG_DEBUG, "called\n");
@@ -347,6 +349,8 @@ cudaError_t cudaThreadSynchronize(void)
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_THREAD_SYNCHRONIZE;
 	shmpkt->thr_id = pthread_self();
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	printd(DBG_DEBUG, "called\n");
@@ -395,7 +399,9 @@ cudaError_t cudaGetDevice(int *device)
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_GET_DEVICE;
 	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(*shmpkt);
+	shmpkt->args[0].argull = sizeof(*shmpkt); // FIXME just use an arg
+	shmpkt->len = sizeof(*shmpkt) + sizeof(int);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -439,7 +445,9 @@ cudaError_t cudaGetDeviceCount(int *count)
 	memset((void*)shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_GET_DEVICE_COUNT;
 	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
+	shmpkt->args[0].argull = sizeof(*shmpkt); // offset; FIXME just use an arg
+	shmpkt->len = sizeof(*shmpkt) + sizeof(int);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST; // set this last FIXME sink spins on this
 
 	wmb(); // flush writes from caches
@@ -463,6 +471,8 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
 	shmpkt->args[1].argll = device;
+	shmpkt->len = sizeof(*shmpkt) + sizeof(*prop);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -485,6 +495,8 @@ cudaError_t cudaSetDevice(int device)
 	shmpkt->method_id = CUDA_SET_DEVICE;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argll = device;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -504,6 +516,8 @@ cudaError_t cudaSetDeviceFlags(unsigned int flags)
 	shmpkt->method_id = CUDA_SET_DEVICE_FLAGS;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argull = flags;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -527,6 +541,8 @@ cudaError_t cudaSetValidDevices(int *device_arr, int len)
 	shmpkt->args[1].argll = len;
 	shm_ptr += shmpkt->args[0].argull;
 	memcpy(shm_ptr, device_arr, (len * sizeof(*device_arr)));
+	shmpkt->len = sizeof(*shmpkt) + (len * sizeof(*device_arr));
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -562,6 +578,8 @@ cudaError_t cudaStreamCreate(cudaStream_t *pStream)
 	shmpkt->method_id = CUDA_STREAM_CREATE;
 	shmpkt->thr_id = pthread_self();
 	// We'll expect the value of *pStream to exist in args[0]
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -581,6 +599,8 @@ cudaError_t cudaStreamSynchronize(cudaStream_t stream)
 	shmpkt->method_id = CUDA_STREAM_SYNCHRONIZE;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].stream = stream;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -611,6 +631,8 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 	shmpkt->args[1].arg_dim = blockDim;
 	shmpkt->args[2].arr_argi[0] = sharedMem;
 	shmpkt->args[3].argull = (uint64_t)stream;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = false;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -644,7 +666,8 @@ cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *f
 	shmpkt->args[2].arr_argi[0] = func_len;
 	func_shm = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
 	memcpy(func_shm, func, func_len);
-
+	shmpkt->len = sizeof(*shmpkt) + func_len;
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -669,6 +692,8 @@ cudaError_t cudaLaunch(const char *entry)
 	// FIXME We assume entry is just a memory pointer, not a string.
 	shmpkt->args[0].argull = (uintptr_t)entry;
 	printd(DBG_DEBUG, "entry=%p\n", (void*)shmpkt->args[0].argull);
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = false;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -689,6 +714,8 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset)
 	shmpkt->args[0].argull = sizeof(*shmpkt);
 	shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
 	memcpy(shm_ptr, arg, size);
+	shmpkt->len = sizeof(*shmpkt) + size;
+	shmpkt->is_sync = false;
 	shmpkt->args[1].arr_argi[0] = size;
 	shmpkt->args[1].arr_argi[1] = offset;
 	shmpkt->flags = CUDA_PKT_REQUEST;
@@ -716,6 +743,8 @@ cudaError_t cudaFree(void * devPtr)
 	shmpkt->method_id = CUDA_FREE;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argp = devPtr;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	printd(DBG_DEBUG, "devPtr=%p\n", devPtr);
@@ -736,6 +765,8 @@ cudaError_t cudaFreeArray(struct cudaArray * array)
 	shmpkt->method_id = CUDA_FREE_ARRAY;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].cudaArray = array;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	printd(DBG_DEBUG, "array=%p\n", array);
@@ -756,6 +787,8 @@ cudaError_t cudaFreeHost(void * ptr)
 	shmpkt->method_id = CUDA_FREE_HOST;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argp = ptr;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	printd(DBG_DEBUG, "ptr=%p\n", ptr);
@@ -778,6 +811,8 @@ cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
 	// We'll expect the value of *pHost to reside in args[0].argull
 	shmpkt->args[1].arr_argi[0] = size;
 	shmpkt->args[2].argull = flags;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -799,6 +834,8 @@ cudaError_t cudaMalloc(void **devPtr, size_t size)
 	shmpkt->thr_id = pthread_self();
 	// We expect the sink to write the value of devPtr to args[0].argull
 	shmpkt->args[1].arr_argi[0] = size;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -828,9 +865,11 @@ cudaError_t cudaMallocArray(
 	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
 	shm_ptr += sizeof(*shmpkt);
 	memcpy(shm_ptr, desc, sizeof(*desc));
+	shmpkt->len = sizeof(*shmpkt) + sizeof(*desc);
 	shmpkt->args[1].arr_argi[0] = width;
 	shmpkt->args[1].arr_argi[1] = height;
 	shmpkt->args[2].argull = flags;
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -855,6 +894,8 @@ cudaError_t cudaMallocPitch(
 	// We expect the sink to write the value of pitch to args[1].arr_argi[0]
 	shmpkt->args[2].arr_argi[0] = width;
 	shmpkt->args[2].arr_argi[1] = height;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	if ((width * height) >= THREAD_SHM_SIZE) {
@@ -898,6 +939,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 			shmpkt->args[1].argull = sizeof(*shmpkt);
 			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
 			memcpy(shm_ptr, src, count);
+			shmpkt->len = sizeof(*shmpkt) + count;
 		}
 		break;
 		case cudaMemcpyDeviceToHost:
@@ -907,6 +949,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 			shmpkt->args[0].argull = sizeof(*shmpkt);
 			// We will expect to read 'count' bytes at this ^ offset into dst
 			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
+			shmpkt->len = sizeof(*shmpkt);
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
@@ -914,12 +957,14 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 			shmpkt->method_id = CUDA_MEMCPY_D2D;
 			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
 			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
+			shmpkt->len = sizeof(*shmpkt);
 		}
 		break;
 		default:
 			return cudaErrorInvalidMemcpyDirection;
 	}
 	shmpkt->args[2].arr_argi[0] = count;
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d\n",
@@ -965,6 +1010,7 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 			shmpkt->args[1].argull = sizeof(*shmpkt);
 			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
 			memcpy(shm_ptr, src, count);
+			shmpkt->len = sizeof(*shmpkt) + count;
 		}
 		break;
 		case cudaMemcpyDeviceToHost:
@@ -977,6 +1023,7 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 			// be there just yet. For now, we force all async calls to be
 			// synchronous until a solution is found.
 			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
+			shmpkt->len = sizeof(*shmpkt);
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
@@ -984,6 +1031,7 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 			shmpkt->method_id = CUDA_MEMCPY_D2D;
 			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
 			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
+			shmpkt->len = sizeof(*shmpkt);
 		}
 		break;
 		default:
@@ -991,6 +1039,7 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 	}
 	shmpkt->args[2].arr_argi[0] = count;
 	shmpkt->args[3].stream = stream;
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1030,12 +1079,14 @@ cudaError_t cudaMemcpyFromSymbol(
 			// offset within the shm from which we'll expect to read the user
 			// data in the return packet
 			shmpkt->args[0].argull = sizeof(*shmpkt);
+			shmpkt->len = sizeof(*shmpkt);
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_FROM_SYMBOL_D2D;
 			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
+			shmpkt->len = sizeof(*shmpkt);
 		}
 		break;
 		default:
@@ -1050,12 +1101,14 @@ cudaError_t cudaMemcpyFromSymbol(
 		shm_ptr += strlen(symbol) + 1;
 		shmpkt->flags |= CUDA_PKT_SYMB_IS_STRING;
 		printd(DBG_DEBUG, "\tsymbol is string: %s\n", symbol);
+		shmpkt->len += strlen(symbol) + 1;
 	} else {
 		shmpkt->args[1].argull = (uintptr_t)symbol;
 	}
 	shmpkt->args[2].arr_argi[0] = count;
 	shmpkt->args[2].arr_argi[1] = offset;
 	shmpkt->args[3].argll = kind;
+	shmpkt->is_sync = true;
 	shmpkt->flags |= CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1102,18 +1155,21 @@ cudaError_t cudaMemcpyToArray(
 			shmpkt->args[2].argull = sizeof(*shmpkt);
 			shm_ptr = (void*)((uintptr_t)shmpkt + sizeof(*shmpkt));
 			memcpy(shm_ptr, src, count);
+			shmpkt->len = sizeof(*shmpkt) + count;
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
 		{
 			shmpkt->method_id = CUDA_MEMCPY_TO_ARRAY_D2D;
 			shmpkt->args[2].argp = (void*)src; // gpu ptr?
+			shmpkt->len = sizeof(*shmpkt);
 		}
 		break;
 		default:
 			return cudaErrorInvalidMemcpyDirection;
 	}
 	shmpkt->args[3].arr_argi[0] = count;
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1136,6 +1192,7 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->thr_id = pthread_self();
+	shmpkt->len = sizeof(*shmpkt);
 
 	if (__func_symb_param_is_string(symbol)) {
 		shmpkt->args[0].argull = (shm_ptr - (void*)shmpkt); // offset of string
@@ -1143,6 +1200,7 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 		shmpkt->flags |= CUDA_PKT_SYMB_IS_STRING;
 		shm_ptr += strlen(symbol) + 1;
 		printd(DBG_DEBUG, "\tsymb is string: %s\n", symbol);
+		shmpkt->len += strlen(symbol) + 1;
 	} else {
 		shmpkt->args[0].argull = (uintptr_t)symbol;
 	}
@@ -1154,6 +1212,7 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 			shmpkt->args[1].argull = (shm_ptr - (void*)shmpkt);
 			memcpy(shm_ptr, src, count);
 			shm_ptr += count;
+			shmpkt->len += count;
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
@@ -1171,6 +1230,7 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 	shmpkt->args[2].arr_argi[0] = count;
 	shmpkt->args[2].arr_argi[1] = offset;
 	shmpkt->args[3].argll = kind;
+	shmpkt->is_sync = true;
 	shmpkt->flags |= CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1192,6 +1252,7 @@ cudaError_t cudaMemcpyToSymbolAsync(
 
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->thr_id = pthread_self();
+	shmpkt->len = sizeof(*shmpkt);
 
 	if (__func_symb_param_is_string(symbol)) {
 		shmpkt->args[1].argull = (shm_ptr - (void*)shmpkt); // offset of string
@@ -1199,6 +1260,7 @@ cudaError_t cudaMemcpyToSymbolAsync(
 		shmpkt->flags |= CUDA_PKT_SYMB_IS_STRING;
 		printd(DBG_DEBUG, "\tsymb is string: %s\n", symbol);
 		shm_ptr += strlen(symbol) + 1;
+		shmpkt->len += strlen(symbol) + 1;
 	} else {
 		shmpkt->args[1].argull = (uintptr_t)symbol;
 	}
@@ -1210,6 +1272,7 @@ cudaError_t cudaMemcpyToSymbolAsync(
 			shmpkt->args[1].argull = (shm_ptr - (void*)shmpkt);
 			memcpy(shm_ptr, src, count);
 			shm_ptr += count;
+			shmpkt->len += count;
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
@@ -1228,6 +1291,7 @@ cudaError_t cudaMemcpyToSymbolAsync(
 	shmpkt->args[2].arr_argi[0] = count;
 	shmpkt->args[2].arr_argi[1] = offset;
 	shmpkt->args[3].stream = stream;
+	shmpkt->is_sync = true;
 	shmpkt->flags |= CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1249,6 +1313,7 @@ cudaError_t cudaMemGetInfo(size_t *free, size_t *total)
 	// 		args[0].arr_argi[0], and
 	// 		args[0].arr_argi[1]
 	// respectively.
+	shmpkt->len = sizeof(*shmpkt);
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1273,6 +1338,8 @@ cudaError_t cudaMemset(void *devPtr, int value, size_t count)
 	shmpkt->args[0].argull = (uintptr_t)devPtr;
 	shmpkt->args[1].argll = value;
 	shmpkt->args[2].arr_argi[0] = count;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1307,6 +1374,8 @@ cudaError_t cudaBindTexture(size_t *offset,
 	shmpkt->args[2].argp = (void*)devPtr,
 	shmpkt->args[3].desc = *desc; // whole struct copy
 	shmpkt->args[4].arr_argi[0] = size;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1335,6 +1404,8 @@ cudaError_t cudaBindTextureToArray(
 	shmpkt->args[1].texRef = *texRef; // data
 	shmpkt->args[2].cudaArray = (struct cudaArray*)array;
 	shmpkt->args[3].desc = *desc; // whole struct copy
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1389,6 +1460,8 @@ cudaCreateChannelDesc(int x, int y, int z, int w,
 	shmpkt->args[0].arr_argii[2] = z;
 	shmpkt->args[0].arr_argii[3] = w;
 	shmpkt->args[1].arr_arguii[0] = format;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1429,6 +1502,8 @@ cudaError_t cudaDriverGetVersion(int *driverVersion)
 	shmpkt->method_id = CUDA_DRIVER_GET_VERSION;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argull = sizeof(*shmpkt);
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1449,6 +1524,8 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
 	shmpkt->method_id = CUDA_RUNTIME_GET_VERSION;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argull = sizeof(*shmpkt);
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1502,6 +1579,8 @@ void** __cudaRegisterFatBinary(void* cubin)
 		return NULL;
 	}
 	shmpkt->args[1].argll = cubin_size;
+	shmpkt->len = sizeof(*shmpkt) + cubin_size;
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST; // set this last FIXME sink spins on this
 
 	wmb(); // flush writes from caches
@@ -1523,6 +1602,8 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle)
 	shmpkt->method_id = __CUDA_UNREGISTER_FAT_BINARY;
 	shmpkt->thr_id = pthread_self();
 	shmpkt->args[0].argdp = fatCubinHandle;
+	shmpkt->len = sizeof(*shmpkt);
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	printd(DBG_INFO, "handle=%p\n", fatCubinHandle);
@@ -1563,7 +1644,8 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	shmpkt->args[1].arr_argi[0] =
 		getSize_regFuncArgs(fatCubinHandle, hostFun, deviceFun, deviceName,
 				thread_limit, tid, bid, bDim, gDim, wSize);
-
+	shmpkt->len = sizeof(*shmpkt) + shmpkt->args[1].arr_argi[0];
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();
@@ -1605,6 +1687,8 @@ void __cudaRegisterVar(
 	shmpkt->args[1].arr_argi[0]
 		= getSize_regVar(fatCubinHandle, hostVar, deviceAddress, deviceName,
 				ext, vsize, constant, global);
+	shmpkt->len = sizeof(*shmpkt) + shmpkt->args[1].arr_argi[0];
+	shmpkt->is_sync = true;
 
 	// Add it to our list of known variable symbols.
 	registered_vars[num_registered_vars++] = (uintptr_t)hostVar;
@@ -1662,6 +1746,8 @@ void __cudaRegisterTexture(
 	shmpkt->args[5].arr_argii[0] = dim;
 	shmpkt->args[5].arr_argii[1] = norm;
 	shmpkt->args[5].arr_argii[2] = ext;
+	shmpkt->len = sizeof(*shmpkt) + strlen(texName) + 1;
+	shmpkt->is_sync = true;
 	shmpkt->flags = CUDA_PKT_REQUEST;
 
 	wmb();

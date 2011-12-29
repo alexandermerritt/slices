@@ -16,6 +16,7 @@
 
 // System includes
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 // CUDA includes
@@ -144,10 +145,25 @@ typedef struct cuda_packet {
 	tid_t thr_id;           // thread sending request
 	uint8_t flags;          // if ever needed to indicate more data for the same call
 	args_t args[MAX_ARGS];  // arguments to be copied on ring
+	size_t len; //! total bytes of marshalled packet incl appended data
+	bool is_sync; //! whether this func must be interposed/invoked synchronously
 	ret_extra_t ret_ex_val; // return value from call filled in response packet
-							// when coming from backend or extra information from
-							// frontend
 } cuda_packet_t;
 
+#define CUDA_BATCH_MAX			512
+#define CUDA_BATCH_BUFFER_SZ	(128 << 20)
+
+struct cuda_pkt_batch {
+	struct {
+		int num_pkts; //! packets stored in this batch; limited by CUDA_BATCH_MAX
+		//! Offsets of packets within buffer. Offsets specified within packet
+		//! arguments are relative to the address of the packet itself.
+		// XXX Be careful the storage type of 'offsets' is able to hold offset
+		// values into the storage pointed to by 'buffer'.
+		unsigned int offsets[CUDA_BATCH_MAX];
+		size_t bytes_used;
+	} header;
+	void *buffer;
+};
 
 #endif /* PACKETHEADER_H_ */

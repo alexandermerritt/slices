@@ -654,7 +654,7 @@ __get_participant(const char *hostname)
 static int
 duplicate_call(	struct assembly *assm,
 				struct cuda_packet *pkt,
-				struct sockconn* conn)
+				struct cuda_rpc* rpc)
 {
 	int vgpu_id;
 
@@ -702,26 +702,26 @@ duplicate_call(	struct assembly *assm,
 		case __CUDA_REGISTER_FAT_BINARY:
 			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
 				assm->mappings[vgpu_id].ops.registerFatBinary(
-						pkt, assm->cubins, conn);
+						pkt, assm->cubins, rpc);
 			break;
 		case __CUDA_REGISTER_FUNCTION:
 			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
 				assm->mappings[vgpu_id].ops.registerFunction(
-						pkt, assm->cubins, conn);
+						pkt, assm->cubins, rpc);
 			break;
 		case __CUDA_REGISTER_VARIABLE:
 			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
 				assm->mappings[vgpu_id].ops.registerVar(
-						pkt, assm->cubins, conn);
+						pkt, assm->cubins, rpc);
 			break;
 		case __CUDA_UNREGISTER_FAT_BINARY:
 			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
-				assm->mappings[vgpu_id].ops.unregisterFatBinary(pkt, NULL, conn);
+				assm->mappings[vgpu_id].ops.unregisterFatBinary(pkt, NULL, rpc);
 			break;
 		case __CUDA_REGISTER_TEXTURE:
 			for (vgpu_id = 0; vgpu_id <= uniq; vgpu_id++)
 				assm->mappings[vgpu_id].ops.registerTexture(
-						pkt, assm->cubins, conn);
+						pkt, assm->cubins, rpc);
 			break;
 		default:
 			break;
@@ -748,91 +748,91 @@ demux(
 		// is ignored. The second argument is reserved for fatcubin* which is
 		// not used for these functions.
 		case CUDA_CONFIGURE_CALL:
-			mapping->ops.configureCall(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.configureCall(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_FREE:
-			mapping->ops.free(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.free(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_FREE_ARRAY:
-			mapping->ops.freeArray(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.freeArray(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MALLOC:
-			mapping->ops.malloc(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.malloc(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MALLOC_ARRAY:
-			mapping->ops.mallocArray(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.mallocArray(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MALLOC_PITCH:
-			mapping->ops.mallocPitch(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.mallocPitch(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MEMCPY_D2D:
-			mapping->ops.memcpyD2D(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.memcpyD2D(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MEMCPY_D2H:
-			mapping->ops.memcpyD2H(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.memcpyD2H(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MEMCPY_H2D:
-			mapping->ops.memcpyH2D(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.memcpyH2D(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MEMCPY_TO_ARRAY_H2D:
-			mapping->ops.memcpyToArrayH2D(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.memcpyToArrayH2D(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MEMCPY_TO_ARRAY_D2D:
-			mapping->ops.memcpyToArrayD2D(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.memcpyToArrayD2D(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_SET_DEVICE:
-			mapping->ops.setDevice(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.setDevice(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_SETUP_ARGUMENT:
-			mapping->ops.setupArgument(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.setupArgument(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_THREAD_EXIT:
-			mapping->ops.threadExit(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.threadExit(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_THREAD_SYNCHRONIZE:
-			mapping->ops.threadSynchronize(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.threadSynchronize(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_FUNC_GET_ATTR:
-			mapping->ops.funcGetAttributes(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.funcGetAttributes(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_GET_TEXTURE_REFERENCE:
 			BUG(1);
 			break;
 		case CUDA_CREATE_CHANNEL_DESC:
-			mapping->ops.createChannelDesc(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.createChannelDesc(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_FREE_HOST:
-			mapping->ops.freeHost(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.freeHost(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_HOST_ALLOC:
-			mapping->ops.hostAlloc(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.hostAlloc(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MEMCPY_ASYNC_H2D:
-			mapping->ops.memcpyAsyncH2D(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.memcpyAsyncH2D(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MEMCPY_ASYNC_D2H:
-			mapping->ops.memcpyAsyncD2H(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.memcpyAsyncD2H(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MEMCPY_ASYNC_D2D:
-			mapping->ops.memcpyAsyncD2D(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.memcpyAsyncD2D(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MEM_GET_INFO:
-			mapping->ops.memGetInfo(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.memGetInfo(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_MEMSET:
-			mapping->ops.memset(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.memset(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_SET_DEVICE_FLAGS:
-			mapping->ops.setDeviceFlags(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.setDeviceFlags(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_SET_VALID_DEVICES:
-			mapping->ops.setValidDevices(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.setValidDevices(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_STREAM_CREATE:
-			mapping->ops.streamCreate(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.streamCreate(pkt, NULL, mapping->rpc);
 			break;
 		case CUDA_STREAM_SYNCHRONIZE:
-			mapping->ops.streamSynchronize(pkt, NULL, mapping->rpc_conn);
+			mapping->ops.streamSynchronize(pkt, NULL, mapping->rpc);
 			break;
 
 		// Functions which take a cuda_packet* and fatcubins*.
@@ -841,22 +841,22 @@ demux(
 		// will ignore the third parameter; ops that execute remotely ignore the
 		// cubins parameter.
 		case CUDA_LAUNCH:
-			mapping->ops.launch(pkt, assm->cubins, mapping->rpc_conn);
+			mapping->ops.launch(pkt, assm->cubins, mapping->rpc);
 			break;
 		case CUDA_MEMCPY_FROM_SYMBOL_D2H:
-			mapping->ops.memcpyFromSymbolD2H(pkt, assm->cubins, mapping->rpc_conn);
+			mapping->ops.memcpyFromSymbolD2H(pkt, assm->cubins, mapping->rpc);
 			break;
 		case CUDA_MEMCPY_TO_SYMBOL_H2D:
-			mapping->ops.memcpyToSymbolH2D(pkt, assm->cubins, mapping->rpc_conn);
+			mapping->ops.memcpyToSymbolH2D(pkt, assm->cubins, mapping->rpc);
 			break;
 		case CUDA_MEMCPY_TO_SYMBOL_ASYNC_H2D:
-			mapping->ops.memcpyToSymbolAsyncH2D(pkt, assm->cubins, mapping->rpc_conn);
+			mapping->ops.memcpyToSymbolAsyncH2D(pkt, assm->cubins, mapping->rpc);
 			break;
 		case CUDA_BIND_TEXTURE_TO_ARRAY:
-			mapping->ops.bindTextureToArray(pkt, assm->cubins, mapping->rpc_conn);
+			mapping->ops.bindTextureToArray(pkt, assm->cubins, mapping->rpc);
 			break;
 		case CUDA_BIND_TEXTURE:
-			mapping->ops.bindTexture(pkt, assm->cubins, mapping->rpc_conn);
+			mapping->ops.bindTexture(pkt, assm->cubins, mapping->rpc);
 			break;
 
 		// Functions which require duplication across node instances of the
@@ -866,7 +866,7 @@ demux(
 		case __CUDA_REGISTER_VARIABLE:
 		case __CUDA_UNREGISTER_FAT_BINARY:
 		case __CUDA_REGISTER_TEXTURE:
-			err = duplicate_call(assm, pkt, mapping->rpc_conn);
+			err = duplicate_call(assm, pkt, mapping->rpc);
 			if (err < 0) goto fail;
 			break;
 
@@ -1189,11 +1189,9 @@ int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 			pkt->args[0].argll = vgpu->pgpu_id;
 			printd(DBG_DEBUG, "thread=%lu vgpu=%d pgpu=%d\n",
 					pkt->thr_id, vgpu->vgpu_id, vgpu->pgpu_id);
-			// Let setDevice fall through to NVIDIA runtime, as driver also
-			// needs to maintain a mapping for real thread contexts.
-			vgpu->ops.setDevice(pkt);
 		}
-		break;
+		// Let setDevice fall through to NVIDIA runtime, as driver also
+		// needs to maintain a mapping for real thread contexts.
 
 		default: // Send to NVIDIA runtime.
 		{
@@ -1332,14 +1330,20 @@ int assembly_map(asmid_t id)
 		vgpu = &assm->mappings[vgpu_id];
 
 		if (vgpu->fixation == VGPU_REMOTE) {
-			vgpu->rpc_conn = calloc(1, sizeof(*(vgpu->rpc_conn)));
-			if (!vgpu->rpc_conn) {
+			vgpu->rpc = calloc(1, sizeof(*(vgpu->rpc)));
+			if (!vgpu->rpc) {
 				exit_errno = -ENOMEM;
 				goto fail;
 			}
-			err = conn_connect(vgpu->rpc_conn, vgpu->ip, REMOTE_CUDA_PORT);
+			err = cuda_rpc_init(vgpu->rpc);
 			if (err < 0) {
-				free(vgpu->rpc_conn);
+				free(vgpu->rpc);
+				exit_errno = -EIO;
+				goto fail;
+			}
+			err = cuda_rpc_connect(vgpu->rpc, vgpu->ip, REMOTE_CUDA_PORT);
+			if (err < 0) {
+				free(vgpu->rpc);
 				exit_errno = -EIO;
 				goto fail;
 			}
@@ -1349,10 +1353,10 @@ int assembly_map(asmid_t id)
 			// application PID so long as each application processes and
 			// localsink processes exist 1:1
 			pid_t app_pid = getpid();
-			err = conn_put(vgpu->rpc_conn, &app_pid, sizeof(pid_t));
+			err = conn_put(&vgpu->rpc->sockconn, &app_pid, sizeof(pid_t));
 			if (err < 0) {
-				conn_close(vgpu->rpc_conn);
-				free(vgpu->rpc_conn);
+				cuda_rpc_close(vgpu->rpc);
+				free(vgpu->rpc);
 				exit_errno = -EIO;
 				goto fail;
 			}
@@ -1360,7 +1364,7 @@ int assembly_map(asmid_t id)
 
 		else if (vgpu->fixation == VGPU_LOCAL) {
 			vgpu->ops = exec_ops;
-			vgpu->rpc_conn = NULL;
+			vgpu->rpc = NULL;
 		}
 		
 		else {

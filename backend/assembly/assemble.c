@@ -13,6 +13,7 @@
  */
 
 // System includes
+#include <stdbool.h>
 #include <string.h>
 
 // Other project includes

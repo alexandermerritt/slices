@@ -24,6 +24,7 @@
 #include <cuda/fatcubininfo.h>
 #include <cuda/ops.h>
 #include <cuda/packet.h>
+#include <cuda/rpc.h>
 #include <debug.h>
 #include <io/sock.h>
 #include <util/compiler.h>
@@ -33,15 +34,6 @@
 #include "types.h"
 
 /*-------------------------------------- INTERNAL DEFINITIONS ----------------*/
-
-/**
- * TODO
- */
-struct payload
-{
-	void *buffer;
-	size_t size;
-};
 
 /**
  * Each application process that exists in a system which implements an assembly
@@ -93,7 +85,7 @@ struct rpc_thread
 	char hostname[HOST_LEN]; //! remote host connected
 	pid_t pid; //! localsink process attached to us; used to lookup cubin state
 	struct remote_cubin *rcubin; //! (shared) cubin state with other minions
-	struct payload payload;	//! packet and data; like the interposer shm region
+	struct cuda_pkt_batch batch;
 
 	// state common to the admin and minion threads
 	bool is_alive;
@@ -274,14 +266,14 @@ minion_cleanup(void *arg)
 	}
 	pthread_mutex_unlock(&rcubin_lock);
 
-	if (state->payload.buffer)
-		free(state->payload.buffer);
+	if (state->batch.buffer)
+		free(state->batch.buffer);
 	free(state);
 	printd(DBG_INFO, "exiting\n");
 }
 
 // forward declaration
-static int do_cuda_rpc(struct sockconn*, struct payload*, struct remote_cubin*);
+static int do_cuda_rpc(struct sockconn*, struct cuda_pkt_batch*, struct remote_cubin*);
 
 static void *
 minion_thread(void *arg)
@@ -325,15 +317,14 @@ minion_thread(void *arg)
 	printd(DBG_INFO, "outbound vgpu mapped to us from PID %d on %s\n",
 			state->pid, state->hostname);
 
-	state->payload.size = (64 << 20); // FIXME Don't hard code this
-	state->payload.buffer = malloc(state->payload.size);
-	if (!state->payload.buffer) {
+	state->batch.buffer = malloc(CUDA_BATCH_BUFFER_SZ);
+	if (!state->batch.buffer) {
 		state->exit_code = -ENOMEM;
 		pthread_exit(NULL);
 	}
 
 	while (1) {
-		err = do_cuda_rpc(conn, &state->payload, state->rcubin);
+		err = do_cuda_rpc(conn, &state->batch, state->rcubin);
 		if (unlikely(err < 0)) {
 			if (unlikely(err == -ECANCELED)) {
 				break; // client app finished w/o error, we stop processing
@@ -559,6 +550,7 @@ cudarpc_has_payload(
 	 * specifying payload parameters and size in the packet generically, instead
 	 * of this damn jump table.
 	 */
+	size->from_host = pkt->len - sizeof(*pkt);
 	switch (pkt->method_id) {
 		case CUDA_GET_DEVICE_PROPERTIES:
 			*direction = TO_HOST;
@@ -566,11 +558,9 @@ cudarpc_has_payload(
 			break;
 		case CUDA_SETUP_ARGUMENT:
 			*direction = FROM_HOST;
-			size->from_host = pkt->args[1].arr_argi[0];
 			break;
 		case CUDA_MEMCPY_H2D:
 			*direction = FROM_HOST;
-			size->from_host = pkt->args[2].arr_argi[0];
 			break;
 		case CUDA_MEMCPY_D2H:
 			*direction = TO_HOST;
@@ -578,7 +568,6 @@ cudarpc_has_payload(
 			break;
 		case CUDA_MEMCPY_TO_SYMBOL_H2D:
 			*direction = FROM_HOST;
-			size->from_host = pkt->args[2].arr_argi[0];
 			break;
 		case CUDA_MEMCPY_FROM_SYMBOL_D2H:
 			*direction = TO_HOST;
@@ -586,19 +575,15 @@ cudarpc_has_payload(
 			break;
 		case  __CUDA_REGISTER_FAT_BINARY:
 			*direction = FROM_HOST;
-			size->from_host = pkt->args[1].argll;
 			break;
 		case __CUDA_REGISTER_FUNCTION:
 			*direction = FROM_HOST;
-			size->from_host = pkt->args[1].arr_argi[0];
 			break;
 		case __CUDA_REGISTER_VARIABLE:
 			*direction = FROM_HOST;
-			size->from_host = pkt->args[1].arr_argi[0];
 			break;
 		case CUDA_FUNC_GET_ATTR:
 			*direction = (FROM_HOST | TO_HOST);
-			size->from_host = pkt->args[2].arr_argi[0]; // func name
 			size->to_host = sizeof(struct cudaFuncAttributes);
 		default: // everything else has no data, or is not a supported call
 			has_payload = false;
@@ -609,51 +594,55 @@ cudarpc_has_payload(
 }
 
 /**
- * Receive, process and dismiss one CUDA RPC. The goal is to set up the memory
- * region in a way that common/cuda/execute.c expects it, which is how the
- * interposer sets it up. This function is thread-safe as it operates only on
- * data accessible via the parameters.
+ * Receive, process and dismiss a batch of CUDA RPCs. The goal is to set up the
+ * memory region in a way that common/cuda/execute.c expects it, which is how
+ * the interposer sets it up. This function is thread-safe as it operates only
+ * on data accessible via the parameters.
  *
  * @param paylod	memory region used for receiving and sending data, exactly
  *					like the shm region used by the interposer
  */
 static int
 do_cuda_rpc(
-		struct sockconn *conn,		//! network connection to use
-		struct payload *payload,	//! contiguous mem reg storing pkt + data
+		struct sockconn *conn,			//! network connection to use
+		struct cuda_pkt_batch *batch,	//! buffer to use for receiving RPCs + payloads
 		struct remote_cubin *rcubin)	//! CUBIN state necessary for symbol lookup
 {
 	int err, retval = 0;
-	struct cuda_packet *pkt = payload->buffer; //! pkt placed at top of region
+	struct cuda_packet *pkt = NULL;
 
-	BUG(!pkt);
+	BUG(!batch->buffer);
 
 	bool has_payload; //! any data an RPC requires is stored after the pkt
 	data_direction direction = 0;
 	payload_size data_size;
 
-	// Transactions always start with the packet itself. This allows both ends
-	// to determine the remainder of the protocol from the method_id directly.
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	if (err < 0) return -ENETDOWN;
-
-	has_payload = cudarpc_has_payload(pkt, &direction, &data_size);
-
-	if (has_payload && (direction & FROM_HOST)) {
-		// TODO realloc buffer if size greater
-		err = conn_get(conn, (pkt + 1), data_size.from_host);
-		if (err < 0) return -ENETDOWN;
-	}
-
-	err = demux(pkt, &(rcubin->cubins));
+	// pull in the batch of serialized RPCs
+	err = conn_get(conn, &batch->header, sizeof(batch->header));
+	if (err < 0) return -1;
+	err = conn_get(conn, batch->buffer, batch->header.bytes_used);
 	if (err < 0) return -1;
 
-	// Always return the packet. Some RPCs don't need anything else.
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	if (err < 0) return -ENETDOWN;
+	// execute them in-place
+	printd(DBG_INFO, "executing %d RPCs\n", batch->header.num_pkts);
+	int pkt_num;
+	for (pkt_num = 0; pkt_num < batch->header.num_pkts; pkt_num++) {
+		pkt = (struct cuda_packet*)(batch->buffer + batch->header.offsets[pkt_num]);
+		err = demux(pkt, &(rcubin->cubins));
+		if (err < 0) return -1;
+	}
 
+	// Always return one packet. Some RPCs don't need anything else.
+	has_payload = cudarpc_has_payload(pkt, &direction, &data_size);
 	if (has_payload && (direction & TO_HOST)) {
-		err = conn_put(conn, (pkt + 1), data_size.to_host);
+		pkt->len = sizeof(*pkt) + data_size.to_host;
+		err = conn_put(conn, pkt, sizeof(*pkt));
+		if (err < 0) return -ENETDOWN;
+		err = conn_put(conn, (pkt + 1), (data_size.to_host));
+		if (err < 0) return -ENETDOWN;
+	} else {
+		pkt->len = sizeof(*pkt);
+		err = conn_put(conn, pkt, sizeof(*pkt));
 		if (err < 0) return -ENETDOWN;
 	}
 

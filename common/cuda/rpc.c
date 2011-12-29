@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <string.h>
 
 // Project includes
 #include <cuda/fatcubininfo.h>
@@ -18,6 +19,7 @@
 #include <cuda/method_id.h>
 #include <cuda/ops.h>
 #include <cuda/packet.h>
+#include <cuda/rpc.h>
 #include <debug.h>
 #include <io/sock.h>
 #include <util/compiler.h>
@@ -25,647 +27,188 @@
 /* NOTES
  *
  * Please read the notes in execute.c in addition to these.
- *
- * Some functions here require an additional argument; it is found at the
- * _second_ argument in the va_list (so third function argument), ignoring the
- * first:
- *
- * 		struct sockconn*
- *
- * Input and/or output pointer arguments in most functions have a known size via
- * use of well-defined data types, such as struct cudaDeviceProp. Others' sizes
- * can only be determined at runtime, such as the argument to
- * __cudaRegisterFatBinary() and of course all cudaMemcpy*() functions. However,
- * the latter specify the size in the argument list, allowing us to send the
- * packet first, then the data. This enables the remote end to deduce how much
- * data, if at all, it should expect. The function itself tells us also who
- * sends data: cudaGetDeviceProperties says the server sends a data portion, not
- * the client. Unfortunately, registerFatBinary does not have a size argument;
- * where that is is documented in the comments for that function within the
- * interposer.
- *
- * In other words, each function is implemented specifically for the call that
- * is made.
- *
- * The order of operations for each RPC below is tightly coupled with the
- * operation of remotesink.c:cudarpc_has_payload() and depends on how the
- * interposer packs the RPC to begin with.
  */
+
+/*-------------------------------------- PUBLIC FUNCTIONS --------------------*/
+
+int cuda_rpc_init(struct cuda_rpc *rpc)
+{
+	memset(rpc, 0, sizeof(*rpc));
+	rpc->batch.buffer = malloc(CUDA_BATCH_BUFFER_SZ);
+	if (!rpc->batch.buffer) {
+		printd(DBG_ERROR, "Out of memory\n");
+		fprintf(stderr, "Out of memory\n");
+		return -1;
+	}
+	return 0;
+}
+
+int cuda_rpc_connect(struct cuda_rpc *rpc, const char *ip, const char *port)
+{
+	return conn_connect(&rpc->sockconn, ip, port);
+}
+
+int cuda_rpc_close(struct cuda_rpc *rpc)
+{
+	int err;
+	err = conn_close(&rpc->sockconn);
+	if (err < 0)
+		return -ENETDOWN;
+	if (rpc->batch.buffer)
+		free(rpc->batch.buffer);
+	return 0;
+}
 
 /*-------------------------------------- HIDDEN FUNCTIONS --------------------*/
 
-// Any TODOs that are in execute.c also apply to this file.
-
-/**
- * Pull out the network connection structure from the va_list given to the
- * function. It is found second in the va_list.
- *
- * @param conn		Pointer to struct sockconn*
- * @param argname	Name of last named parameter of function. Refer to
- * 					OPS_FN_PROTO.
- */
-#define GET_CONN_VALIST(conn,argname)					\
-	do {												\
-		va_list extra;									\
-		va_start(extra, argname);						\
-		va_arg(extra, void*);	/* skip first arg */	\
-		(conn) = va_arg(extra, struct sockconn*);		\
-		BUG(!(conn));										\
-		va_end(extra);									\
-	} while(0)
-
-/**
- * Examine 'err' (the return code for conn_*() calls). If indicative of failure,
- * set 'exit_errno' to -ENETDOWN and jump to label 'fail' in function. Just to
- * save some very repetitive typing.
- */
-#define CONN_FAIL_ON_ERR(err)		\
+#define FAIL_ON_CONN_ERR(err)		\
 	do { 							\
-		if (unlikely(err < 0)) {				\
+		if (unlikely(err <= 0)) {	\
 			exit_errno = -ENETDOWN;	\
 			goto fail;				\
 		}							\
 	} while(0)
 
-//
-// Thread Management API
-//
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaThreadExit)
+static int
+batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 {
-	int err, exit_errno;
+	int exit_errno;
+	struct cuda_pkt_batch *batch = &rpc->batch;
 
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
+	printd(DBG_INFO, "pkts = %d size = %lu\n",
+			batch->header.num_pkts, batch->header.bytes_used);
 
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
-
+	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, &batch->header, sizeof(batch->header)) );
+	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->buffer, batch->header.bytes_used) );
+	FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt)) );
+	size_t payload_len = return_pkt->len - sizeof(*return_pkt);
+	if (payload_len > 0) {
+		printd(DBG_INFO, "\treturn payload = %lu\n", payload_len);
+		FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len) );
+	}
 	return 0;
 fail:
 	return exit_errno;
 }
 
-// This function has no payload.
-static OPS_FN_PROTO(CudaThreadSynchronize)
+static void
+batch_clear(struct cuda_pkt_batch *batch)
 {
-	int err, exit_errno;
+	memset(&batch->header, 0, sizeof(batch->header));
+	// don't free buffer storage
+}
 
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
+static int
+batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
+{
+	// We append unless we do not have space or the packet holds state for a
+	// synchronous function call
 
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
+	int err = 0;
+	struct cuda_pkt_batch *batch = &rpc->batch;
+	size_t rpc_size = pkt->len; // len includes size of struct cuda_packet
+	uintptr_t buf_ptr = (uintptr_t)batch->buffer + batch->header.bytes_used;
 
-	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
+	printd(DBG_DEBUG, "pkt %d offset %lu len %lu\n",
+			batch->header.num_pkts, batch->header.bytes_used, rpc_size);
 
+	batch->header.offsets[batch->header.num_pkts++] = batch->header.bytes_used;
+
+	// We assume we will always have storage space to hold a packet and its
+	// data, and that a "flush" will only occur due to a synchronous packet or
+	// we run out of slots to hold packets. Thus, we batch as aggressively as we
+	// can.
+	size_t remaining_storage = CUDA_BATCH_BUFFER_SZ - batch->header.bytes_used;
+	BUG(remaining_storage < rpc_size);
+	BUG(batch->header.num_pkts >= CUDA_BATCH_MAX);
+	BUG(!batch->buffer);
+
+	memcpy((void*)buf_ptr, pkt, rpc_size);
+	batch->header.bytes_used += rpc_size;
+
+	if (pkt->is_sync || batch->header.num_pkts >= CUDA_BATCH_MAX) {
+		printd(DBG_INFO, "\t--> flushing\n");
+		err = batch_deliver(rpc, pkt);
+		batch_clear(batch);
+	} else {
+		pkt->ret_ex_val.err = cudaSuccess;
+	}
+
+	return err;
+}
+
+/**
+ * Pull out the network connection structure from the va_list given to the
+ * function. It is found second in the va_list.
+ *
+ * @param rpc		Pointer to struct cuda_rpc*
+ * @param argname	Name of last named parameter of function. Refer to
+ * 					OPS_FN_PROTO.
+ */
+#define GET_CONN_VALIST(rpc,argname)					\
+	do {												\
+		va_list extra;									\
+		va_start(extra, argname);						\
+		va_arg(extra, void*);	/* skip first arg */	\
+		(rpc) = va_arg(extra, struct cuda_rpc*);		\
+		BUG(!(rpc));									\
+		va_end(extra);									\
+	} while(0)
+
+#define FAIL_ON_BATCH_ERR(err)		\
+	do { 							\
+		if (unlikely(err < 0)) {	\
+			exit_errno = -ENETDOWN;	\
+			goto fail;				\
+		}							\
+	} while(0)
+
+/**
+ * This function requires an additional argument beyond those found in
+ * cuda/execute.c; it is found at the _second_ argument in the va_list (so third
+ * function argument), ignoring the first:
+ *
+ * 		struct cuda_rpc*
+ *
+ * Each RPC is queued into a separate structure called a 'batch'. Metadata
+ * maintains offsets for each packet into the batch, and when a synchronous
+ * function is encountered, the entire batch is sent to the remote node to
+ * reduce network overheads.
+ *
+ * As each packet contains a length member, we needn't examine each function
+ * individually to calculate the size of the payload associated with the RPC, as
+ * this is done for us in the interposing library.
+ */
+static OPS_FN_PROTO(CudaDoRPC)
+{
+	int exit_errno;
+	struct cuda_rpc *rpc;
+	GET_CONN_VALIST(rpc,pkt);
+	FAIL_ON_BATCH_ERR( batch_append_and_flush(rpc, pkt) );
 	return 0;
 fail:
 	return exit_errno;
 }
-
-//
-// Device Management API
-//
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaSetDevice)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-#if 0
-static OPS_FN_PROTO(CudaSetDeviceFlags)
-{
-#error CudaSetDeviceFlags
-}
-
-//
-// Stream Management API
-//
-
-static OPS_FN_PROTO(CudaStreamCreate)
-{
-#error CudaStreamCreate
-}
-
-static OPS_FN_PROTO(CudaStreamSynchronize)
-{
-#error CudaStreamSynchronize
-}
-#endif
-
-//
-// Execution Control API
-//
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaConfigureCall)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has two payloads. The first payload is the second argument
-// pushed to the server; the second payload is the first argument, pulled from
-// the server.
-static OPS_FN_PROTO(CudaFuncGetAttributes)
-{
-	int err, exit_errno;
-	void *attr = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	char *func = (char*)((uintptr_t)pkt + pkt->args[1].argull);
-	size_t func_len = pkt->args[2].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_put(conn, func, func_len);
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu >%lu\n", sizeof(*pkt), func_len);
-
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, attr, sizeof(struct cudaFuncAttributes));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, "<%lu <%lu\n",
-			sizeof(*pkt), sizeof(struct cudaFuncAttributes));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaLaunch)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has a payload, which is sent to the server.
-static OPS_FN_PROTO(CudaSetupArgument)
-{
-	int err, exit_errno;
-	void *arg = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t arg_size = pkt->args[1].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_put(conn, arg, arg_size);
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
-			sizeof(*pkt), arg_size, sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-//
-// Memory Management API
-//
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaFree)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-#if 0
-static OPS_FN_PROTO(CudaFreeHost)
-{
-#error CudaFreeHost
-}
-
-static OPS_FN_PROTO(CudaHostAlloc)
-{
-#error CudaHostAlloc
-}
-#endif
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaMalloc)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaMallocPitch)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has a payload, which is sent to the server.
-static OPS_FN_PROTO(CudaMemcpyH2D)
-{
-	int err, exit_errno;
-	void *data = (void*)((uintptr_t)pkt + pkt->args[1].argull);
-	size_t data_size = pkt->args[2].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_put(conn, data, data_size);
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
-			sizeof(*pkt), data_size, sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has a payload, which is pulled from the server.
-static OPS_FN_PROTO(CudaMemcpyD2H)
-{
-	int err, exit_errno;
-	void *data = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t data_size = pkt->args[2].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, data, data_size);
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu <%lu <%lu\n",
-			sizeof(*pkt), sizeof(*pkt), data_size);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaMemcpyD2D)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-#if 0
-// This function has a payload, which is sent to the server.
-static OPS_FN_PROTO(CudaMemcpyAsyncH2D)
-{
-#error CudaMemcpyAsyncH2D
-}
-
-// This function has a payload, which is pulled from the server.
-static OPS_FN_PROTO(CudaMemcpyAsyncD2H)
-{
-#error CudaMemcpyAsyncD2H
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaMemcpyAsyncD2D)
-{
-#error CudaMemcpyAsyncD2D
-}
-#endif
-
-// This function has a payload, which is pulled from the server.
-static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
-{
-	int err, exit_errno;
-	void *data = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t data_size = pkt->args[2].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, data, data_size);
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu <%lu <%lu\n",
-			sizeof(*pkt), sizeof(*pkt), data_size);
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has a payload, which is sent to the server.
-static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
-{
-	int err, exit_errno;
-	void *data = (void*)((uintptr_t)pkt + pkt->args[1].argull);
-	size_t data_size = pkt->args[2].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_put(conn, data, data_size);
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
-			sizeof(*pkt), data_size, sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-#if 0
-// This function has a payload, which is sent to the server.
-static OPS_FN_PROTO(CudaMemcpyToSymbolAsyncH2D)
-{
-#error CudaMemcpyToSymbolAsyncH2D
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(CudaMemcpyToSymbolAsyncD2D)
-{
-#error CudaMemcpyToSymbolAsyncD2D
-}
-
-static OPS_FN_PROTO(CudaMemGetInfo)
-{
-#error CudaMemGetInfo
-}
-
-static OPS_FN_PROTO(CudaMemset)
-{
-#error CudaMemset
-}
-
-//
-// Texture Management API
-//
-
-static OPS_FN_PROTO(CudaBindTexture)
-{
-#error CudaBindTexture
-}
-
-// cudaCreateChannelDesc is handled in the interposer.
-
-static OPS_FN_PROTO(CudaGetTextureReference)
-{
-#error CudaGetTextureReference
-}
-#endif
-
-//
-// Undocumented API
-//
-
-// This function has a payload, which is sent to the server.
-static OPS_FN_PROTO(__CudaRegisterFatBinary)
-{
-	int err, exit_errno;
-	void *cubin_marshaled = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t cubin_size = pkt->args[1].argll;
-
-	printd(DBG_DEBUG, "cubin_size=%lu\n", cubin_size);
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	// the other side needs to maintain a fatcubins list for the driver local on
-	// that machine
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_put(conn, cubin_marshaled, cubin_size);
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt)); // return value captured in pkt
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
-			sizeof(*pkt), cubin_size, sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has no payload.
-static OPS_FN_PROTO(__CudaUnregisterFatBinary)
-{
-	int err, exit_errno;
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu <%lu\n", sizeof(*pkt), sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has a payload, which is sent to the server.
-static OPS_FN_PROTO(__CudaRegisterFunction)
-{
-	int err, exit_errno;
-	void *func_marshaled = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t func_size = pkt->args[1].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_put(conn, func_marshaled, func_size);
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt)); // return value captured in pkt
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
-			sizeof(*pkt), func_size, sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-// This function has a payload, which is sent to the server.
-static OPS_FN_PROTO(__CudaRegisterVar)
-{
-	int err, exit_errno;
-	void *var_marshaled = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t var_size = pkt->args[1].arr_argi[0];
-
-	struct sockconn *conn;
-	GET_CONN_VALIST(conn,pkt);
-
-	err = conn_put(conn, pkt, sizeof(*pkt));
-	CONN_FAIL_ON_ERR(err);
-	err = conn_put(conn, var_marshaled, var_size);
-	CONN_FAIL_ON_ERR(err);
-	err = conn_get(conn, pkt, sizeof(*pkt)); // return value captured in pkt
-	CONN_FAIL_ON_ERR(err);
-
-	printd(DBG_DEBUG, ">%lu >%lu <%lu\n",
-			sizeof(*pkt), var_size, sizeof(*pkt));
-
-	return 0;
-fail:
-	return exit_errno;
-}
-
-#if 0
-static OPS_FN_PROTO(__CudaRegisterTexture)
-{
-#error __CudaRegisterTexture
-}
-#endif
 
 const struct cuda_ops rpc_ops =
 {
-	// Functions which take only a cuda_packet*
-	.configureCall = CudaConfigureCall,
-	.free = CudaFree,
-	.malloc = CudaMalloc,
-	.mallocPitch = CudaMallocPitch,
-	.memcpyD2D = CudaMemcpyD2D,
-	.memcpyD2H = CudaMemcpyD2H,
-	.memcpyH2D = CudaMemcpyH2D,
-	.setDevice = CudaSetDevice,
-	.setupArgument = CudaSetupArgument,
-	.threadExit = CudaThreadExit,
-	.threadSynchronize = CudaThreadSynchronize,
-	.unregisterFatBinary = __CudaUnregisterFatBinary,
-	.funcGetAttributes = CudaFuncGetAttributes,
-
-	// Functions which take a cuda_packet*, NULL then a sockconn*
-	.launch = CudaLaunch,
-	.memcpyFromSymbolD2H = CudaMemcpyFromSymbolD2H,
-	.memcpyToSymbolH2D = CudaMemcpyToSymbolH2D,
-	.registerFatBinary = __CudaRegisterFatBinary,
-	.registerFunction = __CudaRegisterFunction,
-	.registerVar = __CudaRegisterVar,
+	.configureCall			= CudaDoRPC,
+	.free					= CudaDoRPC,
+	.funcGetAttributes		= CudaDoRPC,
+	.launch					= CudaDoRPC,
+	.malloc					= CudaDoRPC,
+	.mallocPitch			= CudaDoRPC,
+	.memcpyD2D				= CudaDoRPC,
+	.memcpyD2H				= CudaDoRPC,
+	.memcpyFromSymbolD2H	= CudaDoRPC,
+	.memcpyH2D				= CudaDoRPC,
+	.memcpyToSymbolH2D		= CudaDoRPC,
+	.registerFatBinary		= CudaDoRPC,
+	.registerFunction		= CudaDoRPC,
+	.registerVar			= CudaDoRPC,
+	.setDevice				= CudaDoRPC,
+	.setupArgument			= CudaDoRPC,
+	.threadExit				= CudaDoRPC,
+	.threadSynchronize		= CudaDoRPC,
+	.unregisterFatBinary	= CudaDoRPC
 };

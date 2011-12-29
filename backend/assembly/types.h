@@ -15,6 +15,7 @@
 
 // Project includes
 #include <cuda/ops.h>
+#include <cuda/rpc.h>
 #include <util/list.h>
 
 /*-------------------------------------- TYPES -------------------------------*/
@@ -52,7 +53,7 @@ struct vgpu_mapping
 	struct cuda_ops ops;
 
 	//! Connection state for remote data/control paths
-	struct sockconn *rpc_conn;
+	struct cuda_rpc *rpc;
 };
 
 //! Maximum number of vgpu mappings in an assembly.
