@@ -45,7 +45,7 @@ int cuda_rpc_init(struct cuda_rpc *rpc)
 
 int cuda_rpc_connect(struct cuda_rpc *rpc, const char *ip, const char *port)
 {
-	return conn_connect(&rpc->sockconn, ip, port);
+	return conn_connect(&rpc->sockconn, ip, port, true);
 }
 
 int cuda_rpc_close(struct cuda_rpc *rpc)
@@ -127,6 +127,7 @@ batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 	batch->header.bytes_used += rpc_size;
 
 	if (pkt->is_sync || batch->header.num_pkts >= CUDA_BATCH_MAX) {
+	//if (true) {
 		printd(DBG_INFO, "\t--> flushing\n");
 		err = batch_deliver(rpc, pkt);
 		batch_clear(batch);

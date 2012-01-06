@@ -157,6 +157,7 @@ set_vgpu_mapping(const struct global *global,
 	while (nic < PARTICIPANT_MAX_NICS || nic < (node->num_nics)) {
 		if (strncmp(node->nic_name[nic], nic_str_cmp, strlen(nic_str_cmp)) == 0) {
 			strncpy(vgpu->ip, node->ip[nic], HOST_LEN);
+			printd(DBG_DEBUG, "using %s on %s\n", vgpu->ip, node->hostname);
 			break;
 		}
 		nic++;

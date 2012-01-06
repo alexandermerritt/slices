@@ -354,7 +354,7 @@ admission_thread(void *arg)
 	state->is_alive = true;
 
 	// Enable other nodes to connect to us
-	err = conn_localbind(conn, RPC_PORT_STR);
+	err = conn_localbind(conn, RPC_PORT_STR, false);
 	if (err < 0) {
 		state->exit_code = -ENETDOWN;
 		pthread_exit(NULL);
@@ -476,7 +476,7 @@ int rpc_tini_conn(struct rpc_connection *conn)
 int rpc_connect(struct rpc_connection *conn, const char *ip)
 {
 	int err, exit_errno;
-	err = conn_connect(&conn->sockconn, ip, RPC_PORT_STR);
+	err = conn_connect(&conn->sockconn, ip, RPC_PORT_STR, false);
 	if (err < 0) {
 		exit_errno = err;
 		goto fail;

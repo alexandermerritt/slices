@@ -387,7 +387,7 @@ admission_thread(void *arg)
 	pthread_cleanup_push(admission_cleanup, state);
 	state->is_alive = true;
 
-	err = conn_localbind(conn, REMOTE_CUDA_PORT);
+	err = conn_localbind(conn, REMOTE_CUDA_PORT, true);
 	if (err < 0) {
 		state->exit_code = -ENETDOWN;
 		pthread_exit(NULL);

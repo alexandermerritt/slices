@@ -72,6 +72,17 @@ typedef uuid_t assembly_key_uuid;
 
 /*-------------------------------------- FUNCTIONS ---------------------------*/
 
+static inline
+const char *node_type_str(enum node_type t)
+{
+	switch (t) {
+		case NODE_TYPE_MAIN: return "NODE_TYPE_MAIN";
+		case NODE_TYPE_MINION: return "NODE_TYPE_MINION";
+		case NODE_TYPE_MAPPER: return "NODE_TYPE_MAPPER";
+		default: return "NODE_TYPE Unknown or Invalid";
+	}
+}
+
 int assembly_runtime_init(enum node_type type, const char *main_ip);
 int assembly_runtime_shutdown(void);
 

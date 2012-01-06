@@ -15,12 +15,16 @@
 #include <debug.h>
 #include <io/sock.h>
 
-/*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
+/*-------------------------------------- INTERNAL DEFINITIONS ----------------*/
+
+#define AF_INET_SDP 27
 
 /*-------------------------------------- PUBLIC FUNCTIONS --------------------*/
 
-int conn_connect(struct sockconn *conn,
-		const char *host_ip, const char *host_port)
+int conn_connect(
+		struct sockconn *conn,
+		const char *host_ip, const char *host_port,
+		bool use_sdp)
 {
 	int err, exit_errno;
 
@@ -55,7 +59,10 @@ int conn_connect(struct sockconn *conn,
 	results = NULL;
 
 	// Obtain a new socket from the kernel.
-	conn->socket = socket(conn->address_family, conn->socktype, conn->protocol);
+	if (use_sdp)
+		conn->socket = socket(AF_INET_SDP, SOCK_STREAM, IPPROTO_IP);
+	else
+		conn->socket = socket(conn->address_family, conn->socktype, conn->protocol);
 	if(conn->socket < 0) {
 		exit_errno = -ENETDOWN;
 		goto fail;
@@ -90,7 +97,7 @@ int conn_close(struct sockconn *conn)
 	return 0;
 }
 
-int conn_localbind(struct sockconn *conn, const char *bind_port)
+int conn_localbind(struct sockconn *conn, const char *bind_port, bool use_sdp)
 {
 	int err, exit_errno;
 	int serverfd = -1; /* parent socket */
@@ -119,8 +126,11 @@ int conn_localbind(struct sockconn *conn, const char *bind_port)
 		exit_errno = -ENETDOWN;
 		goto fail;
 	}
-	serverfd = socket(servaddrinfo->ai_family,
-			servaddrinfo->ai_socktype, servaddrinfo->ai_protocol);
+	if (use_sdp)
+		serverfd = socket(AF_INET_SDP, SOCK_STREAM, IPPROTO_IP);
+	else
+		serverfd = socket(servaddrinfo->ai_family,
+				servaddrinfo->ai_socktype, servaddrinfo->ai_protocol);
 	if (serverfd < 0) {
 		exit_errno = -ENETDOWN;
 		goto fail;

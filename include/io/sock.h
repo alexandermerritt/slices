@@ -14,6 +14,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <stdbool.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 
@@ -26,10 +27,13 @@ struct sockconn
 };
 
 // client ----------------------------
-int conn_connect(struct sockconn *conn, const char *host_ip, const char *host_port);
+int conn_connect(
+		struct sockconn *conn,
+		const char *host_ip, const char *host_port,
+		bool use_sdp);
 
 // server ----------------------------
-int conn_localbind(struct sockconn *conn, const char *bind_port);
+int conn_localbind(struct sockconn *conn, const char *bind_port, bool use_sdp);
 int conn_accept(struct sockconn *conn, struct sockconn *new_conn);
 
 // common ----------------------------

@@ -932,6 +932,8 @@ add_participant(struct node_participant *p)
 		pthread_mutex_unlock(&internals->n.main.plock);
 		return -EEXIST;
 	}
+	printd(DBG_INFO, "%s type %s %d gpus\n",
+			p->hostname, node_type_str(p->type), p->num_gpus);
 	list_add(&p->link, &internals->n.main.participants);
 	pthread_mutex_unlock(&internals->n.main.plock);
 	return 0;

@@ -150,7 +150,7 @@ typedef struct cuda_packet {
 	ret_extra_t ret_ex_val; // return value from call filled in response packet
 } cuda_packet_t;
 
-#define CUDA_BATCH_MAX			512
+#define CUDA_BATCH_MAX			16384
 #define CUDA_BATCH_BUFFER_SZ	(128 << 20)
 
 struct cuda_pkt_batch {
