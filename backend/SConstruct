@@ -10,7 +10,7 @@ import os
 import commands
 import sys
 
-Import('CUDA_ROOT', 'DEBUG')
+Import('CUDA_ROOT', 'DEBUG', 'TIMING')
 
 def get_platform_characteristic_str():
     """
@@ -32,6 +32,9 @@ if int(DEBUG) == 1:
 	print 'Debugging code enabled for backend'
 else:
 	GLOBAL_CCFLAGS.append('-O3')
+
+if int(TIMING) == 1:
+	GLOBAL_CCFLAGS.append('-DTIMING')
 
 ########################################################333
 # here we define the environments for particular nodes

@@ -28,6 +28,7 @@
 #include <debug.h>
 #include <io/sock.h>
 #include <util/compiler.h>
+#include <util/timer.h>
 
 // Directory-immediate includes
 #include "remote.h"
@@ -610,6 +611,7 @@ do_cuda_rpc(
 {
 	int err, retval = 0;
 	struct cuda_packet *pkt = NULL;
+	TIMER_DECLARE1(t);
 
 	BUG(!batch->buffer);
 
@@ -624,6 +626,7 @@ do_cuda_rpc(
 	if (err < 0) return -1;
 
 	// execute them in-place
+	TIMER_START(t);
 	printd(DBG_INFO, "executing %d RPCs\n", batch->header.num_pkts);
 	int pkt_num;
 	for (pkt_num = 0; pkt_num < batch->header.num_pkts; pkt_num++) {
@@ -631,8 +634,11 @@ do_cuda_rpc(
 		err = demux(pkt, &(rcubin->cubins));
 		if (err < 0) return -1;
 	}
+	TIMER_END(t, pkt->lat.remote.batch_exec);
 
-	// Always return one packet. Some RPCs don't need anything else.
+	// Always return one packet. Some RPCs don't need anything else. pkt must
+	// point to last RPC in the batch, as all prior cannot require return data
+	// (else those would have caused earlier batch flushes).
 	has_payload = cudarpc_has_payload(pkt, &direction, &data_size);
 	if (has_payload && (direction & TO_HOST)) {
 		pkt->len = sizeof(*pkt) + data_size.to_host;

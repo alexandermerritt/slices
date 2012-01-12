@@ -23,6 +23,7 @@
 #include <debug.h>
 #include <io/sock.h>
 #include <util/compiler.h>
+#include <util/timer.h>
 
 /* NOTES
  *
@@ -75,17 +76,41 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 	int exit_errno;
 	struct cuda_pkt_batch *batch = &rpc->batch;
 
+	TIMER_DECLARE1(t);
+#ifdef TIMING
+	// Need separate variables for some measurements because a cuda packet isn't
+	// available for writing until we pull in the return packet.
+	uint64_t put_time; // time spent sending batch
+	uint64_t wait_time; // = (wait on return pkt) + (receipt of pkt)
+#endif	/* TIMING */
+
 	printd(DBG_INFO, "pkts = %d size = %lu\n",
 			batch->header.num_pkts, batch->header.bytes_used);
 
+	TIMER_START(t);
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, &batch->header, sizeof(batch->header)) );
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->buffer, batch->header.bytes_used) );
+	TIMER_END(t, put_time);
+
+	TIMER_START(t); // time execution of batch and receipt of return packet
 	FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt)) );
+	TIMER_END(t, wait_time);
+
 	size_t payload_len = return_pkt->len - sizeof(*return_pkt);
 	if (payload_len > 0) {
+		TIMER_START(t);
 		printd(DBG_INFO, "\treturn payload = %lu\n", payload_len);
 		FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len) );
+		TIMER_END(t, return_pkt->lat.rpc.recv);
 	}
+
+#ifdef TIMING
+	// Restore measurements. Can't save them initially to the return packet
+	// because it is overwritten upon actual receipt of the packet.
+	return_pkt->lat.rpc.send = put_time;
+	return_pkt->lat.rpc.wait = wait_time;
+#endif	/* TIMING */
+
 	return 0;
 fail:
 	return exit_errno;
@@ -101,6 +126,9 @@ batch_clear(struct cuda_pkt_batch *batch)
 static int
 batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 {
+	TIMER_DECLARE1(t);
+	TIMER_START(t);
+
 	// We append unless we do not have space or the packet holds state for a
 	// synchronous function call
 
@@ -125,6 +153,8 @@ batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 
 	memcpy((void*)buf_ptr, pkt, rpc_size);
 	batch->header.bytes_used += rpc_size;
+
+	TIMER_END(t, pkt->lat.rpc.append);
 
 	if (pkt->is_sync || batch->header.num_pkts >= CUDA_BATCH_MAX) {
 	//if (true) {

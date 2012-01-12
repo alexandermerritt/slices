@@ -21,6 +21,7 @@
 #include <debug.h>
 #include <util/compiler.h>
 #include <util/list.h>
+#include <util/timer.h>
 #include <util/x86_system.h>
 
 // Directory-immediate includes
@@ -100,6 +101,7 @@ proxy_thread(void *arg)
 	struct proxy_state *state = (struct proxy_state*)arg;
 	struct cuda_packet *shmpkt = state->region.addr;
 	int vgpu_id = 0; //! vgpu this thread maps to
+	//TIMER_DECLARE1(timer);
 
 	pthread_cleanup_push(proxy_cleanup, state);
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &old_thread_state);

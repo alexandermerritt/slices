@@ -47,17 +47,18 @@ applications across the cluster.
  
  2. BUILDING
  
- a. unpack sources
- b. run scons -Q (quiet - doesn't show scons information)
- 
- c. You should get
- interposer/libci.so    # the interposer library
- 
- To clean the build
- 
- a. scons -c
- 
- 
+To produce all binaries. All flags (below) default to zero if not specified.
+	scons
+
+Build with debug output and debug symbols in binaries
+	scons dbg=1
+
+Build with timing information
+	scons timing=1
+
+To clean
+	scons -c
+
 5. KNOWN ISSUES
 
 * Right now it doesn't support CUDA 4.0 (you can have a newer driver, but

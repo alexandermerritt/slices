@@ -26,9 +26,7 @@
 // Project includes
 #include <cuda/method_id.h>
 #include <util/list.h>
-
-typedef uint32_t grant_ref_t;
-typedef pthread_t tid_t;
+#include <util/timer.h>
 
 #define MAX_ARGS 6
 
@@ -139,19 +137,59 @@ typedef union ret_extra {
 	void **handle;	    // Used to return fatCubinHandle
 } ret_extra_t;
 
+#ifdef TIMING
+/**
+ * Measurements of time spent by a cuda_packet RPC within each component of the
+ * runtime. Only allocated/updated if macro TIMING is defined.
+ */
+struct rpc_latencies {
+	// If you measure the total time of the application, then subtract from it
+	// the attach and detach latencies (joining/departing the runtime) as well
+	// as lib.setup and lib.wait, you end up approx. with the time in the
+	// application spent NOT using CUDA.
+	struct {
+		uint64_t setup; //! Time spent marshaling and misc setup
+		//! Time spent polling for result. Composed of all costs in the assembly
+		//! runtime executing the call, locally or remote.
+		uint64_t wait;
+	} lib; // interposer overhead
+	struct {
+		uint64_t setup; //! Argument setup and symbol/cubin lookup time
+		uint64_t call; //! Latency in the CUDA runtime/driver
+	} exec; // cuda/execute.c either local- or remote-tip execution
+	struct {
+		uint64_t append; //! Time squandered doing memcpy to the batch buffer
+		uint64_t send; //! Time spent sending the batch
+		//! Time spent waiting for the return packet (and receipt of said
+		//! packet). Includes time spent at remote machine executing RPCs
+		//! (exec.setup + exec.call).
+		uint64_t wait;
+		uint64_t recv; //! Time spent receiving return data (if required)
+	} rpc; // cuda/rpc.c (all zeros if vgpu is not remote)
+	struct {
+		// rpc.{send|wait|recv} - batch_exec = time on network
+		// batch_exec - exec.{setup|call} = batch unpacking
+		uint64_t batch_exec; //! Executing all RPCs in a batch
+	} remote; // on remote machine (all zeros if vgpu is not remote)
+};
+#endif	/* TIMING */
+
 typedef struct cuda_packet {
 	method_id_t method_id;     // to identify which method
 	uint16_t req_id;        // to identify which request is the response for in case async
-	tid_t thr_id;           // thread sending request
+	pthread_t thr_id;           // thread sending request
 	uint8_t flags;          // if ever needed to indicate more data for the same call
 	args_t args[MAX_ARGS];  // arguments to be copied on ring
 	size_t len; //! total bytes of marshalled packet incl appended data
 	bool is_sync; //! whether this func must be interposed/invoked synchronously
 	ret_extra_t ret_ex_val; // return value from call filled in response packet
+#ifdef TIMING
+	struct rpc_latencies lat;
+#endif
 } cuda_packet_t;
 
 #define CUDA_BATCH_MAX			16384
-#define CUDA_BATCH_BUFFER_SZ	(128 << 20)
+#define CUDA_BATCH_BUFFER_SZ	(512 << 20)
 
 struct cuda_pkt_batch {
 	struct {

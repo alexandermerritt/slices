@@ -24,9 +24,10 @@
 #include <unistd.h>
 
 // Project includes
-#include <shmgrp.h>
-#include <debug.h>
 #include <assembly.h>
+#include <debug.h>
+#include <shmgrp.h>
+#include <util/timer.h>
 
 // Directory-immediate includes
 #include "sinks.h"
@@ -82,6 +83,10 @@ int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
 	 * forksink callstack.
 	 */
 
+	/* Time the work the new child performs before exec'ing into a localsink. */
+	TIMER_DECLARE1(sink);
+	TIMER_START(sink);
+
 	// Need separate strings for the environment variables we add, because
 	// putenv does NOT copy the strings, it merely sets pointers to these arrays
 	char env_uuid[ENV_MAX_LEN];
@@ -113,6 +118,12 @@ int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
 		_exit(-1);
 	}
 
+#ifdef TIMING
+	uint64_t sink_setup;
+   	TIMER_END(sink, sink_setup);
+	printf(TIMERMSG_PREFIX "sink-setup %lu\n", sink_setup);
+#endif
+
 	// Go!
 	err = execle("./localsink", SINK_EXEC_NAME, NULL, environ);
 	if (err < 0) {
@@ -128,23 +139,41 @@ static void runtime_entry(group_event e, pid_t pid)
 	int err;
 	asmid_t asmid;
 
+	TIMER_DECLARE1(timer);
+#ifdef TIMING
+	uint64_t timing;
+#endif	/* TIMING */
+
 	switch (e) {
 		case MEMBERSHIP_JOIN:
 		{
 			// TODO detect process groups (e.g. MPI)
 			pid_t childpid;
 			printf("Process %d is joining the runtime.\n", pid);
+
+			TIMER_START(timer);
 			asmid = assembly_request(&hint);
+			TIMER_END(timer, timing);
+#ifdef TIMING
+			printf(TIMERMSG_PREFIX "assm-request %lu\n", timing);
+#endif
+
 			if (!VALID_ASSEMBLY_ID(asmid)) {
 				printd(DBG_ERROR, "Error requesting assembly\n");
 				break;
 			}
 			assembly_print(asmid);
+
+			TIMER_START(timer);
 			err = forksink(asmid, pid, &childpid);
 			if (err < 0) {
 				printd(DBG_ERROR, "Could not fork\n");
 				break;
 			}
+			TIMER_END(timer, timing);
+#ifdef TIMING
+			printf(TIMERMSG_PREFIX "fork %lu\n", timing);
+#endif
 			sink.pid = childpid;
 			sink.type = SINK_EXEC_LOCAL;
 			sink.asmid = asmid;
@@ -153,6 +182,8 @@ static void runtime_entry(group_event e, pid_t pid)
 		case MEMBERSHIP_LEAVE:
 		{
 			printf("Process %d is leaving the runtime.\n", pid);
+
+			TIMER_START(timer);
 
 			// Tell it to stop, then wait for it to disappear.
 			int ret; // return val of child
@@ -179,6 +210,11 @@ static void runtime_entry(group_event e, pid_t pid)
 				printd(DBG_ERROR, "Could not destroy assembly %lu\n",
 						sink.asmid);
 			}
+
+			TIMER_END(timer, timing);
+#ifdef TIMING
+			printf(TIMERMSG_PREFIX "leave %lu\n", timing);
+#endif
 		}
 		break;
 		default:

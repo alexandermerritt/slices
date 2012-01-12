@@ -38,6 +38,7 @@
 #include <cuda/method_id.h>
 #include <debug.h>
 #include <util/list.h>
+#include <util/timer.h>
 
 // Directory-immediate includes
 #include "remote.h"
@@ -1090,8 +1091,11 @@ int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 {
 	int err;
 	struct assembly *assm = NULL;
+	TIMER_DECLARE1(t);
+
 	// doesn't involve main node
 	// data paths should already be configured and set up
+
 	err = pthread_mutex_lock(&internals->lock);
 	if (err < 0) {
 		printd(DBG_ERROR, "Could not lock internals\n");
@@ -1113,6 +1117,7 @@ int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 		printd(DBG_ERROR, "Could not unlock internals\n");
 		goto fail;
 	}
+
 	// Execute calls. Some return data specific to the assembly, others can go
 	// directly to NVIDIA's runtime.
 	switch (pkt->method_id) {
@@ -1121,6 +1126,7 @@ int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 
 		case CUDA_GET_DEVICE:
 		{
+			TIMER_START(t);
 			int *dev = (int*)((uintptr_t)pkt + pkt->args[0].argull);
 			struct vgpu_mapping *vgpu;
 			// A thread may or may not have previously called cudaSetDevice.
@@ -1132,19 +1138,23 @@ int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 				vgpu = set_thread_association(assm, pkt->thr_id, 0);
 			*dev = vgpu->vgpu_id;
 			printd(DBG_DEBUG, "getDev=%d\n", *dev);
+			TIMER_END(t, pkt->lat.exec.call);
 		}
 		break;
 
 		case CUDA_GET_DEVICE_COUNT:
 		{
+			TIMER_START(t);
 			int *devs = (int*)((uintptr_t)pkt + pkt->args[0].argull);
 			*devs = assm->num_gpus;
 			printd(DBG_DEBUG, "num devices=%d\n", *devs);
+			TIMER_END(t, pkt->lat.exec.call);
 		}
 		break;
 
 		case CUDA_GET_DEVICE_PROPERTIES:
 		{
+			TIMER_START(t);
 			struct cudaDeviceProp *prop;
 			int dev;
 			prop = (struct cudaDeviceProp*)
@@ -1158,27 +1168,36 @@ int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 			memcpy(prop, &assm->mappings[dev].cudaDevProp,
 					sizeof(struct cudaDeviceProp));
 			printd(DBG_DEBUG, "name=%s\n", prop->name);
+			TIMER_END(t, pkt->lat.exec.call);
 		}
 		break;
 
 		case CUDA_DRIVER_GET_VERSION:
 		{
+			TIMER_START(t);
 			int *ver = (int*)((uintptr_t)pkt + pkt->args[0].argull);
 			*ver = assm->driverVersion;
 			printd(DBG_DEBUG, "driver ver=%d\n", *ver);
+			TIMER_END(t, pkt->lat.exec.call);
 		}
 		break;
 
 		case CUDA_RUNTIME_GET_VERSION:
 		{
+			TIMER_START(t);
 			int *ver = (int*)((uintptr_t)pkt + pkt->args[0].argull);
 			*ver = assm->runtimeVersion;
 			printd(DBG_DEBUG, "runtime ver=%d\n", *ver);
+			TIMER_END(t, pkt->lat.exec.call);
 		}
 		break;
 
 		case CUDA_SET_DEVICE:
 		{
+			// NOTE: This function is actually intercepted in two locations.
+			// Here and again in either cuda/execute.c or cuda/rpc.c. Timing
+			// within this file will be omitted from the total time since it
+			// might get convoluted to do so.
 			int devid = pkt->args[0].argll;
 			struct vgpu_mapping *vgpu;
 			if (devid >= assm->num_gpus) { // failure at application

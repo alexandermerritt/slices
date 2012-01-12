@@ -113,10 +113,12 @@ build_variables_print()
 # Extract debug flag from command line.
 DEBUG = ARGUMENTS.get('dbg', 0)
 
-# export variables to other scripts
-Export('CUDA_ROOT', 'DEBUG')
+# Extract other flags from command line.
+TIMING = ARGUMENTS.get('timing',0)
 
-                      
+# export variables to other scripts
+Export('CUDA_ROOT', 'DEBUG', 'TIMING')
+
 # call all scripts
 SConscript([
 #        'cuda-app/SConstruct', # it doesn't depend on anything
