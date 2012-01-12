@@ -45,7 +45,7 @@ extern char **environ;
 static const struct assembly_hint hint =
 {
 	.num_gpus = 1,
-	.nic_type = HINT_USE_ETH
+	.nic_type = HINT_USE_IB
 };
 static struct sink sink;
 
