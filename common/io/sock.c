@@ -41,7 +41,6 @@ int conn_connect(
 	err = getaddrinfo(host_ip, host_port, &hints, &results);
 	if (err != 0 || !results) {
 		exit_errno = -ENETDOWN;
-		printd(DEBUG, "getaddrinfo() error: %d\n", exit_errno);
 		goto fail;
 	}
 
@@ -53,7 +52,6 @@ int conn_connect(
 	conn->address = calloc(1, results->ai_addrlen);
 	if(!conn->address) {
 		exit_errno = -ENOMEM;
-		printd(DEBUG, "calloc() exit_error: %d\n", exit_errno);
 		goto fail;
 	}
 	memcpy(conn->address, results->ai_addr, conn->address_len);
@@ -61,27 +59,19 @@ int conn_connect(
 	results = NULL;
 
 	// Obtain a new socket from the kernel.
-	if (use_sdp){
-		printd(DEBUG, "using sdp\n");
-		conn->socket = socket(AF_INET_SDP, SOCK_STREAM, 0);
-		//conn->socket = socket(AF_INET_SDP, SOCK_STREAM, IPPROTO_IP);
-	} else {
-		printd(DEBUG, "not using sdp\n");
+	if (use_sdp)
+		conn->socket = socket(AF_INET_SDP, SOCK_STREAM, IPPROTO_IP);
+	else
 		conn->socket = socket(conn->address_family, conn->socktype, conn->protocol);
-	}
 	if(conn->socket < 0) {
-		printd(DEBUG, "conn->socket (error) =  %d\n", conn->socket);
 		exit_errno = -ENETDOWN;
-		printd(DEBUG, "after: socket() exit_error: %d\n", exit_errno);
 		goto fail;
 	}
 
 	// Establish a TCP connection.
 	err = connect(conn->socket, (struct sockaddr *)conn->address, conn->address_len);
 	if (err != 0) {
-		printd(DEBUG, "connect() ret err=%d, errno=%d: %s\n", err, errno, strerror(errno));
 		exit_errno = -ENETDOWN;
-		printd(DEBUG, "connect() exit_error: %d\n", exit_errno);
 		goto fail;
 	}
 
@@ -136,18 +126,13 @@ int conn_localbind(struct sockconn *conn, const char *bind_port, bool use_sdp)
 		exit_errno = -ENETDOWN;
 		goto fail;
 	}
-	if (use_sdp){
-		printd(DEBUG, "using sdp\n");
+	if (use_sdp)
 		serverfd = socket(AF_INET_SDP, SOCK_STREAM, IPPROTO_IP);
-	} else {
-		printd(DEBUG, "not using sdp\n");
+	else
 		serverfd = socket(servaddrinfo->ai_family,
 				servaddrinfo->ai_socktype, servaddrinfo->ai_protocol);
-	}
 	if (serverfd < 0) {
-		printd(DEBUG, "serverfd = socket()= %d\n", serverfd);
 		exit_errno = -ENETDOWN;
-		printd(DEBUG, "after calling socket: exit_errno = %d\n", exit_errno);
 		goto fail;
 	}
 	optval = 1;

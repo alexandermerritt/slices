@@ -1325,7 +1325,6 @@ int assembly_map(asmid_t id)
 	assm = assembly_find(id);
 	if (!assm) {
 		exit_errno = -EINVAL;
-		printd(DEBUG, "assembly_find() error: %d\n", exit_errno );
 		goto fail;
 	}
 
@@ -1336,21 +1335,18 @@ int assembly_map(asmid_t id)
 			vgpu->rpc = calloc(1, sizeof(*(vgpu->rpc)));
 			if (!vgpu->rpc) {
 				exit_errno = -ENOMEM;
-				printd(DEBUG, "calloc() error: %d\n", exit_errno );
 				goto fail;
 			}
 			err = cuda_rpc_init(vgpu->rpc);
 			if (err < 0) {
 				free(vgpu->rpc);
 				exit_errno = -EIO;
-				printd(DEBUG, "cuda_rpc_init() error: %d\n", exit_errno );
 				goto fail;
 			}
 			err = cuda_rpc_connect(vgpu->rpc, vgpu->ip, REMOTE_CUDA_PORT);
 			if (err < 0) {
 				free(vgpu->rpc);
 				exit_errno = -EIO;
-				printd(DEBUG, "cuda_rpc_connect() error: %d\n", exit_errno );
 				goto fail;
 			}
 			vgpu->ops = rpc_ops;
@@ -1364,7 +1360,6 @@ int assembly_map(asmid_t id)
 				cuda_rpc_close(vgpu->rpc);
 				free(vgpu->rpc);
 				exit_errno = -EIO;
-				printd(DEBUG, "conn_put() error: %d\n", exit_errno );
 				goto fail;
 			}
 		}
