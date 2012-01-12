@@ -293,7 +293,7 @@ setup(void)
 	// Set up the function table and establish remote paths, if needed
 	err = assembly_map(asmid);
 	if (err < 0) {
-		printd(DBG_ERROR, "Could not map assembly %lu\n", asmid);
+		printd(DBG_ERROR, "Could not map assembly %lu, error = %d\n", asmid, err);
 		return -1;
 	}
 

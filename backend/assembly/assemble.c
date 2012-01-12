@@ -154,10 +154,12 @@ set_vgpu_mapping(const struct global *global,
 		nic_str_cmp = HINT_IB_STR;
 	else
 		BUG(1);
+
+	printd(DBG_DEBUG, "hint_nic_type = %d, HINT_USE_ETH=%d, HINT_USE_IB=%d\n", type, HINT_USE_ETH, HINT_USE_IB);
 	while (nic < PARTICIPANT_MAX_NICS || nic < (node->num_nics)) {
 		if (strncmp(node->nic_name[nic], nic_str_cmp, strlen(nic_str_cmp)) == 0) {
 			strncpy(vgpu->ip, node->ip[nic], HOST_LEN);
-			printd(DBG_DEBUG, "using %s on %s\n", vgpu->ip, node->hostname);
+			printd(DBG_DEBUG, "nic_str_cmp = %s, using %s on %s\n", nic_str_cmp, vgpu->ip, node->hostname);
 			break;
 		}
 		nic++;
