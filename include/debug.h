@@ -13,6 +13,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 //////////////////////////////////////
@@ -52,7 +53,9 @@
 #define printd(level, fmt, args...)                                     \
     do {                                                                \
         if((level) <= DBG_LEVEL) {                                      \
-            printf("<%d> (%d) %s::%s[%d]: ", (level), getpid(), __FILE__, __func__, __LINE__);   \
+            printf("<%d> (%d:%d) %s::%s[%d]: ",							\
+					(level), getpid(),(pid_t)syscall(SYS_gettid),		\
+					__FILE__, __func__, __LINE__);   					\
             printf(fmt, ##args);                                        \
             fflush(stdout);                                             \
         }                                                               \
