@@ -74,15 +74,13 @@ node_is_remote(const struct global *g, const struct node_participant *n)
 }
 
 /**
- * Locate the first remote node we find in the cluster, relative
- * to whom is requesting the assembly. We assume the node list is not empty, and
- * that each node in the list has at least one gpu.
- *
- * @return	true	A gpu was found
- * 			false	No gpus are remote with respect to the requester
+ * "First" is relative of course, it is the first in the list, most likely the
+ * first node that joined.
  */
 static bool
-find_first_remote_gpu(const struct global *global, struct gpu *gpu)
+find_first_remote_node(
+		const struct global *global,
+		const struct node_participant **remote_node)
 {
 	bool node_found = false;
 	const struct node_participant *node = NULL;
@@ -94,17 +92,60 @@ find_first_remote_gpu(const struct global *global, struct gpu *gpu)
 	}
 	if (!node_found)
 		return false;
+	*remote_node = node;
+	return true;
+}
+
+#if 0 // not used at the moment
+/**
+ * Locate the first remote node we find in the cluster, relative
+ * to whom is requesting the assembly. We assume the node list is not empty, and
+ * that each node in the list has at least one gpu.
+ *
+ * @return	true	A gpu was found
+ * 			false	No gpus are remote with respect to the requester
+ */
+static bool
+find_first_remote_gpu(const struct global *global, struct gpu *gpu)
+{
+	const struct node_participant *node = NULL;
+	if (!find_first_remote_node(global, &node))
+		return false;
 	gpu->id = 0; // first gpu in 'node'
 	gpu->node = node;
 	return true;
 }
+#endif
 
 /**
- * Get the first gpu on the local node. The 'local' node is always assumed to
- * exist and to contain 1+ gpus.
+ * Looks for N gpus on a single remote node. If the first remote node found does
+ * not have at least N gpus, request fails. Caller should decrease amount
+ * required and request again. Also fails if no remote node exists.
+ *
+ * N is found in the hint within the global state. 'gpus' must be an array of
+ * struct gpu able to store at least hint.num_gpus.
  */
+static bool
+find_first_N_remote_gpus(const struct global *global, struct gpu *gpus)
+{
+	int N = global->hint->num_gpus;
+	const struct node_participant *node;
+	if (!find_first_remote_node(global, &node))
+		return false;
+	if (node->num_gpus < N)
+		return false;
+	int vgpu_id = 0, gpu;
+	for (gpu = 0; gpu < N; gpu++) {
+		gpus[gpu].id = vgpu_id++;
+		gpus[gpu].node = node;
+	}
+	return true;
+}
+
 static void
-find_first_local_gpu(const struct global *global, struct gpu *gpu)
+find_local_node(
+		const struct global *global,
+		const struct node_participant **local_node)
 {
 	bool node_found = false;
 	const struct node_participant *node = NULL;
@@ -115,8 +156,37 @@ find_first_local_gpu(const struct global *global, struct gpu *gpu)
 		}
 	}
 	BUG(!node_found);
+	*local_node = node;
+}
+
+/**
+ * Get the first gpu on the local node. The 'local' node is always assumed to
+ * exist and to contain 1+ gpus.
+ */
+static void
+find_first_local_gpu(const struct global *global, struct gpu *gpu)
+{
+	const struct node_participant *node = NULL;
+	find_local_node(global, &node);
 	gpu->id = 0;
 	gpu->node = node;
+}
+
+/** May return false if request is too large. */
+static bool
+find_first_N_local_gpus(const struct global *global, struct gpu *gpus)
+{
+	int N = global->hint->num_gpus;
+	const struct node_participant *node;
+	find_local_node(global, &node);
+	if (node->num_gpus < N)
+		return false;
+	int vgpu_id = 0, gpu;
+	for (gpu = 0; gpu < N; gpu++) {
+		gpus[gpu].id = vgpu_id++;
+		gpus[gpu].node = node;
+	}
+	return true;
 }
 
 static inline int
@@ -179,7 +249,7 @@ __do_compose_assembly(
 {
 	struct global global;
 	struct assembly *assm = NULL;
-	struct gpu gpu;
+	struct gpu *gpus = NULL;
 
 	assm = calloc(1, sizeof(*assm));
 	if (!assm)
@@ -200,28 +270,43 @@ __do_compose_assembly(
 	global.hostname = hostname;
 	global.nlist = node_list;
 	global.alist = assembly_list;
-
-	// Determine assembly size
-	assm->num_gpus = 1;
-
-	// Locate GPUs to use. Look for a remote node, but return the local node if
-	// none was found.
-	if (!find_first_remote_gpu(&global, &gpu)) {
-		find_first_local_gpu(&global, &gpu);
-	}
+	int gpus_granted = hint->num_gpus;
 
 	// NOTE: If no GPU can be found remotely, this function should always
 	// default to returning local GPUs in their place.
 
-	BUG(!gpu.node);
+	gpus = calloc(hint->num_gpus, sizeof(*gpus));
+	if (!gpus) goto fail;
+
+	if (!find_first_N_remote_gpus(&global, gpus)) {
+		printd(DBG_INFO, "No remote nodes available, or requested too many\n");
+		if (!find_first_N_local_gpus(&global, gpus)) {
+			fprintf(stderr, "Request for %d GPUs too large,"
+					" downgrading to 1 local vGPU\n",
+					hint->num_gpus);
+			find_first_local_gpu(&global, &gpus[0]);
+			gpus_granted = 1;
+		}
+	}
+
+	// Determine assembly size
+	assm->num_gpus = gpus_granted;
+
+	// Should always have at least one GPU, its vgpu_id being zero.
+	BUG(!gpus[0].node);
 
 	// Install mappings
-	set_vgpu_mapping(&global, &gpu, &assm->mappings[0]);
-	assm->mappings[0].vgpu_id = 0;
+	int gpu_id;
+	for (gpu_id = 0; gpu_id < gpus_granted; gpu_id++) {
+		set_vgpu_mapping(&global, &gpus[gpu_id], &assm->mappings[gpu_id]);
+		assm->mappings[gpu_id].vgpu_id = gpu_id;
+	}
 
+	if (gpus) free(gpus);
 	return assm;
 
 fail:
 	if (assm) free(assm);
+	if (gpus) free(gpus);
 	return NULL;
 }

@@ -105,8 +105,24 @@ static struct rpc_thread *admin_thread = NULL;
 static struct list_head minions = LIST_HEAD_INIT(minions);
 static pthread_mutex_t minion_lock = PTHREAD_MUTEX_INITIALIZER;
 
+#define for_each_minion(list,minion)	\
+	list_for_each_entry(minion,list,link)
+
 static struct list_head rcubins = LIST_HEAD_INIT(rcubins); //! remote_cubin list
 static pthread_mutex_t rcubin_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/*-------------------------------------- INTERNAL MINION THREAD FUNCTIONS ----*/
+
+static inline bool
+minions_from_same_app(
+		const struct rpc_thread *a,
+		const struct rpc_thread *b)
+{
+	bool same_remote_pid = a->pid == b->pid;
+	bool same_remote_host = strncmp(a->hostname, b->hostname, HOST_LEN) == 0;
+	bool same_tid = pthread_equal(a->tid, b->tid) != 0;
+	return (same_remote_pid && same_remote_host && !same_tid);
+}
 
 /*-------------------------------------- CUDA CUBIN FUNCTIONS ----------------*/
 
@@ -207,6 +223,8 @@ minion_rm(struct rpc_thread *state)
 	list_del(&state->link);
 }
 
+/** this is meant to cancel the admin thread, not minion thread, because it
+ * calls join, but minion threads are detached and are thus not joinable. */
 static inline void
 halt_rpc_thread(struct rpc_thread *state)
 {
@@ -328,6 +346,19 @@ minion_thread(void *arg)
 		err = do_cuda_rpc(conn, &state->batch, state->rcubin);
 		if (unlikely(err < 0)) {
 			if (unlikely(err == -ECANCELED)) {
+				// cancel all other threads from the same remote process
+				struct rpc_thread *t = NULL;
+				pthread_mutex_lock(&minion_lock);
+				for_each_minion(&minions,t) {
+					if (minions_from_same_app(state, t)) {
+						printd(DBG_DEBUG, "Cancelling minion %lu\n", t->tid);
+						if(0 != pthread_cancel(t->tid)) {
+							printd(DBG_ERROR, "Could not cancel minion %lu\n",
+									t->tid);
+						}
+					}
+				}
+				pthread_mutex_unlock(&minion_lock);
 				break; // client app finished w/o error, we stop processing
 			}
 			// everything else is a real error
@@ -625,10 +656,12 @@ do_cuda_rpc(
 	err = conn_get(conn, batch->buffer, batch->header.bytes_used);
 	if (err < 0) return -1;
 
+	pthread_testcancel();
+
 	// execute them in-place
 	TIMER_START(t);
-	printd(DBG_INFO, "executing %d RPCs\n", batch->header.num_pkts);
-	int pkt_num;
+	printd(DBG_INFO, "executing %lu RPCs\n", batch->header.num_pkts);
+	size_t pkt_num;
 	for (pkt_num = 0; pkt_num < batch->header.num_pkts; pkt_num++) {
 		pkt = (struct cuda_packet*)(batch->buffer + batch->header.offsets[pkt_num]);
 		err = demux(pkt, &(rcubin->cubins));
@@ -659,8 +692,9 @@ do_cuda_rpc(
 		rcubin->reg_count++;
 	} else if (unlikely(pkt->method_id == __CUDA_UNREGISTER_FAT_BINARY)) {
 		rcubin->reg_count--;
-		if (rcubin->reg_count <= 0)
+		if (rcubin->reg_count <= 0) {
 			retval = -ECANCELED; // inform caller the CUDA call stream ended
+		}
 	}
 
 	return retval;
