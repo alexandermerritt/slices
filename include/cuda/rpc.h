@@ -23,7 +23,7 @@ struct cuda_rpc
 	struct sockconn sockconn;
 };
 
-int cuda_rpc_init(struct cuda_rpc *rpc);
+int cuda_rpc_init(struct cuda_rpc *rpc, size_t batch_size);
 int cuda_rpc_connect(struct cuda_rpc *rpc, const char *ip, const char *port);
 int cuda_rpc_close(struct cuda_rpc *rpc);
 

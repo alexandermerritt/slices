@@ -78,6 +78,8 @@ struct assembly
 	//! process which calls assembly_map (thus it will not be updated across
 	//! address spaces).
 	bool mapped;
+	//! The original hint used to compose this assembly.
+	struct assembly_hint hint;
 };
 
 #define PARTICIPANT_MAX_GPUS	4

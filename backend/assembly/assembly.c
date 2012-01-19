@@ -330,6 +330,7 @@ __compose_assembly(const struct assembly_hint *hint, const char *hostname)
 	cubins_init(assm->cubins);
 
 	assm->mapped = false;
+	memcpy(&assm->hint, hint, sizeof(*hint));
 
 	return assm;
 fail:
@@ -1329,6 +1330,7 @@ void assembly_print(asmid_t id)
 				assm->mappings[dev].pgpu_id,
 				assm->mappings[dev].hostname);
 	}
+	printf("  Batch size   %lu\n", assm->hint.batch_size);
 	printf("  Drv API      %d\n", assm->driverVersion);
 	printf("  Runtime API  %d\n", assm->runtimeVersion);
 }
@@ -1356,7 +1358,7 @@ int assembly_map(asmid_t id)
 				exit_errno = -ENOMEM;
 				goto fail;
 			}
-			err = cuda_rpc_init(vgpu->rpc);
+			err = cuda_rpc_init(vgpu->rpc, assm->hint.batch_size);
 			if (err < 0) {
 				free(vgpu->rpc);
 				exit_errno = -EIO;

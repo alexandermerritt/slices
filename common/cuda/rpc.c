@@ -32,7 +32,7 @@
 
 /*-------------------------------------- PUBLIC FUNCTIONS --------------------*/
 
-int cuda_rpc_init(struct cuda_rpc *rpc)
+int cuda_rpc_init(struct cuda_rpc *rpc, size_t batch_size)
 {
 	memset(rpc, 0, sizeof(*rpc));
 	rpc->batch.buffer = malloc(CUDA_BATCH_BUFFER_SZ);
@@ -41,6 +41,12 @@ int cuda_rpc_init(struct cuda_rpc *rpc)
 		fprintf(stderr, "Out of memory\n");
 		return -1;
 	}
+	if (batch_size > CUDA_BATCH_MAX) {
+		printd(DBG_ERROR, "Batch size %lu too large (max %lu)\n",
+				batch_size, CUDA_BATCH_MAX);
+		return -1;
+	}
+	rpc->batch.max = batch_size;
 	return 0;
 }
 
@@ -84,7 +90,7 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 	uint64_t wait_time; // = (wait on return pkt) + (receipt of pkt)
 #endif	/* TIMING */
 
-	printd(DBG_INFO, "pkts = %d size = %lu\n",
+	printd(DBG_INFO, "pkts = %lu size = %lu\n",
 			batch->header.num_pkts, batch->header.bytes_used);
 
 	TIMER_START(t);
@@ -137,7 +143,7 @@ batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 	size_t rpc_size = pkt->len; // len includes size of struct cuda_packet
 	uintptr_t buf_ptr = (uintptr_t)batch->buffer + batch->header.bytes_used;
 
-	printd(DBG_DEBUG, "pkt %d offset %lu len %lu\n",
+	printd(DBG_DEBUG, "pkt %lu offset %lu len %lu\n",
 			batch->header.num_pkts, batch->header.bytes_used, rpc_size);
 
 	batch->header.offsets[batch->header.num_pkts++] = batch->header.bytes_used;
@@ -156,8 +162,7 @@ batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 
 	TIMER_END(t, pkt->lat.rpc.append);
 
-	if (pkt->is_sync || batch->header.num_pkts >= CUDA_BATCH_MAX) {
-	//if (true) {
+	if (pkt->is_sync || (batch->header.num_pkts >= batch->max)) {
 		printd(DBG_INFO, "\t--> flushing\n");
 		err = batch_deliver(rpc, pkt);
 		batch_clear(batch);

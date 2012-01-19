@@ -54,6 +54,7 @@ struct assembly_hint
 {
 	int num_gpus;
 	enum hint_nic_type nic_type;
+	size_t batch_size;
 
 	// TODO
 

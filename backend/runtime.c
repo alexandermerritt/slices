@@ -32,6 +32,17 @@
 // Directory-immediate includes
 #include "sinks.h"
 
+//#define VARIABLE_BATCHING
+
+#ifdef VARIABLE_BATCHING
+// Temporary code for varying the batch size. The idea is to allow
+// an application to run multiple iterations, over time varying the
+// batch size to observe the performance impact.
+static size_t bsize = 1;
+static size_t count = 0; //! Number of application entries.
+static size_t incr_on_mod = 1;
+#endif	/* VARIABLE_BATCHING */
+
 /*-------------------------------------- EXTERNAL VARIABLES ------------------*/
 
 // Current process' environment variables (POSIX). Modified with putenv.
@@ -42,10 +53,11 @@ extern char **environ;
 
 // XXX We assume a single-process single-threaded CUDA application for now. Thus
 // one assembly, one hint and one sink child.
-static const struct assembly_hint hint =
+static struct assembly_hint hint =
 {
 	.num_gpus = 1,
-	.nic_type = HINT_USE_IB
+	.nic_type = HINT_USE_IB,
+	.batch_size = CUDA_BATCH_MAX
 };
 static struct sink sink;
 
@@ -151,17 +163,16 @@ static void runtime_entry(group_event e, pid_t pid)
 			pid_t childpid;
 			printf("Process %d is joining the runtime.\n", pid);
 
+#ifdef VARIABLE_BATCHING
+			hint.batch_size = bsize;
+#endif	/* VARIABLE_BATCHING */
+
 			TIMER_START(timer);
 			asmid = assembly_request(&hint);
 			TIMER_END(timer, timing);
 #ifdef TIMING
 			printf(TIMERMSG_PREFIX "assm-request %lu\n", timing);
 #endif
-
-			if (!VALID_ASSEMBLY_ID(asmid)) {
-				printd(DBG_ERROR, "Error requesting assembly\n");
-				break;
-			}
 			assembly_print(asmid);
 
 			TIMER_START(timer);
@@ -177,6 +188,18 @@ static void runtime_entry(group_event e, pid_t pid)
 			sink.pid = childpid;
 			sink.type = SINK_EXEC_LOCAL;
 			sink.asmid = asmid;
+
+#ifdef VARIABLE_BATCHING
+			if ((++count % incr_on_mod) == 0)
+				bsize <<= 1;
+			if (bsize > CUDA_BATCH_MAX)
+				bsize = 1;
+#endif	/* VARIABLE_BATCHING */
+
+			if (!VALID_ASSEMBLY_ID(asmid)) {
+				printd(DBG_ERROR, "Error requesting assembly\n");
+				break;
+			}
 		}
 		break;
 		case MEMBERSHIP_LEAVE:
