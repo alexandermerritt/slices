@@ -492,6 +492,9 @@ demux(struct cuda_packet *pkt, struct fatcubins *cubins)
 		case CUDA_MEMCPY_H2D:
 			exec_ops.memcpyH2D(pkt);
 			break;
+		case CUDA_MEMSET:
+			exec_ops.memset(pkt);
+			break;
 		case CUDA_SET_DEVICE:
 			exec_ops.setDevice(pkt);
 			break;

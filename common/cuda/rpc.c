@@ -239,6 +239,7 @@ const struct cuda_ops rpc_ops =
 	.memcpyFromSymbolD2H	= CudaDoRPC,
 	.memcpyH2D				= CudaDoRPC,
 	.memcpyToSymbolH2D		= CudaDoRPC,
+	.memset					= CudaDoRPC,
 	.registerFatBinary		= CudaDoRPC,
 	.registerFunction		= CudaDoRPC,
 	.registerVar			= CudaDoRPC,
