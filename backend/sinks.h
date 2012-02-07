@@ -39,8 +39,8 @@
 struct sink
 {
 	struct list_head link;
+	pid_t app_pid;
 	pid_t pid;
-	enum {SINK_EXEC_LOCAL = 1, SINK_EXEC_REMOTE} type;
 	asmid_t asmid;
 };
 

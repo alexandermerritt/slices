@@ -59,7 +59,14 @@ static struct assembly_hint hint =
 	.nic_type = HINT_USE_IB,
 	.batch_size = CUDA_BATCH_MAX
 };
-static struct sink sink;
+
+/**
+ * List of application processes currently executing. No need to provide a lock
+ * for the list, as only one single thread is associated with the shmgrp we
+ * open for applications to join; joining and departing are actions that are
+ * serialized by shmgrp.
+ */
+static LIST_HEAD(sink_list);
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
@@ -96,8 +103,8 @@ int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
 	 */
 
 	/* Time the work the new child performs before exec'ing into a localsink. */
-	TIMER_DECLARE1(sink);
-	TIMER_START(sink);
+	TIMER_DECLARE1(sink-setup);
+	TIMER_START(sink-setup);
 
 	// Need separate strings for the environment variables we add, because
 	// putenv does NOT copy the strings, it merely sets pointers to these arrays
@@ -132,7 +139,7 @@ int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
 
 #ifdef TIMING
 	uint64_t sink_setup;
-   	TIMER_END(sink, sink_setup);
+   	TIMER_END(sink-setup, sink_setup);
 	printf(TIMERMSG_PREFIX "sink-setup %lu\n", sink_setup);
 #endif
 
@@ -185,9 +192,6 @@ static void runtime_entry(group_event e, pid_t pid)
 #ifdef TIMING
 			printf(TIMERMSG_PREFIX "fork %lu\n", timing);
 #endif
-			sink.pid = childpid;
-			sink.type = SINK_EXEC_LOCAL;
-			sink.asmid = asmid;
 
 #ifdef VARIABLE_BATCHING
 			if ((++count % incr_on_mod) == 0)
@@ -200,25 +204,50 @@ static void runtime_entry(group_event e, pid_t pid)
 				printd(DBG_ERROR, "Error requesting assembly\n");
 				break;
 			}
+
+			/* Add the sink to the list. */
+			struct sink *sink = calloc(1, sizeof(*sink));
+			if (!sink) {
+				printd(DBG_ERROR, "Out of memory\n");
+				fprintf(stderr, "Out of memory\n");
+				break;
+			}
+			INIT_LIST_HEAD(&sink->link);
+			sink->app_pid = pid;
+			sink->pid = childpid;
+			sink->asmid = asmid;
+			list_add(&sink->link, &sink_list);
 		}
 		break;
 		case MEMBERSHIP_LEAVE:
 		{
+			TIMER_START(timer);
+
 			printf("Process %d is leaving the runtime.\n", pid);
 
-			TIMER_START(timer);
+			/* Remove the sink from the list. */
+			struct sink *sink;
+			bool found = false;
+			list_for_each_entry(sink, &sink_list, link) {
+				if (sink->app_pid == pid) {
+					found = true;
+					break;
+				}
+			}
+			BUG(!found);
+			list_del(&sink->link);
 
 			// Tell it to stop, then wait for it to disappear.
 			int ret; // return val of child
-			err = kill(sink.pid, SINK_TERM_SIG);
+			err = kill(sink->pid, SINK_TERM_SIG);
 			if (err < 0) {
 				printd(DBG_ERROR, "Could not send signal %d to child %d\n",
-						SINK_TERM_SIG, sink.pid);
+						SINK_TERM_SIG, sink->pid);
 			}
-			err = waitpid(sink.pid, &ret, 0);
+			err = waitpid(sink->pid, &ret, 0);
 			if (err < 0) {
 				printd(DBG_ERROR, "Could not wait on child %d\n",
-						sink.pid);
+						sink->pid);
 			}
 			printd(DBG_DEBUG, "Child exited with code %d\n", ret);
 
@@ -228,16 +257,19 @@ static void runtime_entry(group_event e, pid_t pid)
 			// its application group using the assembly! Not sure how to verify
 			// this.
 			// XXX XXX XXX
-			err = assembly_teardown(sink.asmid);
+			err = assembly_teardown(sink->asmid);
 			if (err < 0) {
 				printd(DBG_ERROR, "Could not destroy assembly %lu\n",
-						sink.asmid);
+						sink->asmid);
 			}
 
 			TIMER_END(timer, timing);
 #ifdef TIMING
 			printf(TIMERMSG_PREFIX "leave %lu\n", timing);
 #endif
+
+			free(sink);
+			sink = NULL;
 		}
 		break;
 		default:
@@ -270,8 +302,6 @@ static int start_runtime(enum node_type type, const char *main_ip)
 		printd(DBG_ERROR, "Could not initialize assembly runtime\n");
 		return -1;
 	}
-	// FIXME Initialize a list of sinks instead of one child.
-	memset(&sink, 0, sizeof(sink));
 	return 0;
 }
 
