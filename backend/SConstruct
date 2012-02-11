@@ -10,9 +10,7 @@ import os
 import commands
 import sys
 
-Import('CUDA_ROOT', 
-       'GLIB20')
-
+Import('CUDA_ROOT', 'DEBUG', 'TIMING')
 
 def get_platform_characteristic_str():
     """
@@ -26,74 +24,42 @@ def get_platform_characteristic_str():
     """    
     nodename = commands.getoutput('uname -n') # doesn't work on keeneland
     return nodename
-    
+
+GLOBAL_CCFLAGS=['-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter']
+if int(DEBUG) == 1:
+	GLOBAL_CCFLAGS.append('-ggdb')
+	GLOBAL_CCFLAGS.append('-DDEBUG')
+	print 'Debugging code enabled for backend'
+else:
+	GLOBAL_CCFLAGS.append('-O3')
+
+if int(TIMING) == 1:
+	GLOBAL_CCFLAGS.append('-DTIMING')
 
 ########################################################333
 # here we define the environments for particular nodes
 #######################################################3
 # environment for the Keeneland and prost
 envBackendKeeneland = Environment(
-      LIBS=['pthread', 
-            'rt', 
-            'dl', 
-            'cudart', 
-            'glib-2.0' ],
-      LIBPATH=[CUDA_ROOT + 'lib64',
-               GLIB20 + 'lib'],
-      CPPPATH=['.',
-      '../remote',
-      '../include',
-      '../interposer',
-      '../backend',
-      CUDA_ROOT + 'include',
-      GLIB20 + 'include/glib-2.0',
-      GLIB20 + 'include/gio-unix-2.0',
-      GLIB20 + 'lib/glib-2.0/include'
-      ],
-      CCFLAGS='-g -Wall -Wextra')
+      LIBS=['pthread', 'rt', 'dl', 'uuid', 'cudart', 'cuda', 'shmgrp' ],
+      LIBPATH=[CUDA_ROOT + '/lib64', '/nics/b/home/merritt/local/lib'],
+      CPPPATH=['.', '../include', CUDA_ROOT + '/include', '/nics/b/home/merritt/local/include'],
+	  CCFLAGS=GLOBAL_CCFLAGS
+	  )
 
 # env for Prost, GT machine
 envBackendProst = envBackendKeeneland
 
 # Shiva, GT machine
 envBackendShiva = Environment(
-      LIBS=['pthread', 
-            'rt', 
-            'dl', 
-            'cudart', 
-            'glib-2.0' ],
+      CC='/usr/local/bin/gcc4.4.4',
+      LIBS=['pthread', 'rt', 'dl', 'uuid', 'cudart', 'cuda', 'shmgrp'],
       LIBPATH=[CUDA_ROOT + 'lib64'],
-      CPPPATH=['.',
-      '../remote',
-      '../include',
-      '../interposer',
-      '../backend',
-      CUDA_ROOT + 'include',
-      '/usr/include/glib-2.0',
-      '/usr/include/gio-unix-2.0',
-      '/usr/lib/glib-2.0/include'
-      ],
-      CCFLAGS='-g -Wall -Wextra')
+      CPPPATH=['.', '../include', CUDA_ROOT + 'include', ],
+	  CCFLAGS=GLOBAL_CCFLAGS)
 
 # Ifrit, GT machine
-envBackendIfrit = Environment(
-      LIBS=['pthread', 
-            'rt', 
-            'dl', 
-            'cudart', 
-            'glib-2.0' ],
-      LIBPATH=[CUDA_ROOT + 'lib64'],
-      CPPPATH=['.',
-      '../remote',
-      '../include',
-      '../interposer',
-      '../backend',
-      CUDA_ROOT + 'include',
-      '/usr/include/glib-2.0',
-      '/usr/include/gio-unix-2.0',
-      '/usr/lib/glib-2.0/include'
-      ],
-      CCFLAGS='-g -Wall -Wextra')
+envBackendIfrit = envBackendShiva
 
 #############################################
 # end of environment definitions
@@ -101,22 +67,15 @@ envBackendIfrit = Environment(
 
 
 def build_backend(env):
-    """
-        @param env: The environment that will be used to build a backend 
-    """
-    env.Program('backend', [
-            'backend.c',
-            '../interposer/libciutils.c',
-            '../remote/connection.c',
-            '../remote/remote_packet.c',
-            '../remote/remote_api_wrapper.c',
-            '../include/kidron_common_f.c'])
+    srclist = ['assembly/assembly.c', 'assembly/assemble.c', 'assembly/rpc.c',
+			'assembly/export.c', '../common/io/sock.c', '../common/cuda/execute.c',
+			'../common/cuda/rpc.c', '../common/cuda/marshal.c']
+    env.Program('runtime', ['runtime.c', srclist])
+    env.Program('localsink', ['localsink.c', srclist])
+    env.Program('assembly/remotesink', ['assembly/remotesink.c', srclist])
 
 
 def build_program():
-    """
-       builds the program depending on the characteristics
-    """
     global envBackendKeeneland
     global envBackendProst
     global envBackendShiva

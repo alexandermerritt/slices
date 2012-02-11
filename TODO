@@ -1,16 +1,112 @@
-- 2011-10-03
-  1. clean up README - currently it is a total mess
-  2. add kidron.ini as a file option
-  
-- 2011-05-03, done
-  add GLIB variable in the build system; right now it is hard coded
-  
-- 2011-04-12; 2011-05-02 done
-  remove double INIPARSER from the build systems
+IMPLEMENTATION AND FEATURES
+--------------------------------------------------------------------------------
+Legend
+[ ]		not started
+[L]		works, but some limitations (noted with feature)
+[C]		complete
 
-    You need to update two SConstruct files:
-    
-    @todo this must be a smarter way to do that
-    interposer/SConstruct
-    backend/SConstruct
-    
+Updated 2011-11-12
+
+Assembly Runtime
+================
+	[C] design assembly interface
+	[L] implement framework
+		[C] starting runtime does self-discovery
+		[C] node adds self to participants
+		[C] start assembly composition
+	- shared memory library
+		[C] "libregistration" - now obsolete
+		[C] multi-process-aware
+		[C] multi-threading-aware
+		[C] self-contained library
+		[C] verify with multiple simultaneous members joining/leaving
+		[ ] verify with one multi-threaded member making/destroying regions
+
+	[C] support multiple fat binaries
+
+	- network API (Magda)
+		[L] IB
+			some bugs at the moment
+		[L] sockets
+			accept() callable only once
+		[ ] single library
+
+	- distributed assembly (Alex)
+		[C] assembly RPC thread
+		[ ] [support executing apps on nodes w/o GPUs]
+		[C] implement separation of local/remote assembly interfaces
+		[ ] add use of monitoring API to assembly composition
+		[C] duplicate register calls across nodes in assembly
+
+	- remote data paths (Alex w/ network API)
+		[ ] what is local:remote sink process configuration?
+
+	[ ] incorporate notion of groups in assemblies, for MPI apps (Alex)
+
+	[L] multi-threaded backend processes (Alex)
+		(not tested with a multi-threaded app)
+		[ ] need to perform scheduling, and to support multi-threaded apps
+
+	[ ] scheduling interface (Dipanjan)
+
+Monitoring
+==========
+	[C] Design data structure(s) for exporting Lynx data (Naila)
+	[C] glue Lynx and local monitor with MQs (Naila)
+	[C] push Lynx data from local->global monitor (Alex + Magda)
+	[C] design API to access all of monitoring data (Naila + Alex)
+	[ ] build library code to expose this API (Alex + Naila)
+	[ ] glue global monitor and library with shmgrp (Alex + Naila)
+	[ ] Assembly can add a Lynx instrumentor pattern to implement during the
+		import/export protocol. State will need to be added somewhere, and
+		configured before the export happens.
+
+Build Environment
+=================
+	[ ] remove build dependences of backend/ on interposer/ etc
+		[ ] move pack/unpack functions outside of interposer/
+	[ ] perhaps create an SConstruct for each machine this may be built on
+		instead of having globals inside one file
+
+Other details
+=============
+	[ ]	registered variables (the symbols) are assumed at the moment to be
+		memory addresses; the runtime says they may also be strings: remove this
+		assumption
+			libci.c : cudaMemcpy[To|From]Symbol
+			localsink.c : nv_exec_pkt
+	[C] move cuda_app/ to test/
+	[ ] enable the interposer to void using assemblies, and simply instrument
+		what an application is doing
+			- e.g. what calls are made and what are their arguments?
+		This would be useful to determine various characteristics of the
+		application:
+			- how much memory does it allocate?
+			- how frequently does it move data and how large are the chunks?
+			- how frequently does it call into the API?
+			- etc
+
+
+KNOWN BUGS
+==========
+	[ ] Executing multiple processes on same node (returning the same assembly
+		configurations) is not entirely safe somewhere. runtime complains
+		about not being able to send a signal to the localsink, and upon exit
+		some assemblies apparently still exist
+			update: localsink assumes one app at a time, make a list instead
+
+	[C] remotesink experiences a segfault executing binomialOptions when it
+		calls __cudaUnregisterFatBinary
+			fix: remote thread kept invoking do_cuda_rpc on the previous packet
+			(unregister) even when the remote application terminated; now
+			maintain a reference count on remote end
+
+	[ ] segv in runtime when Ctrl+c'ing it after a node exits uncleanly (SIGKILL)
+
+POTENTIAL BUGS
+==============
+
+	[ ] Executing the same application process on different nodes, mapping 1+
+	vgpus to the same remote node. CUDA state registration functions may be
+	initializing similar state (function, variable, cubin names, etc). If that's
+	true, we'll need to make the remote end (remotesink.c) multi-process...
