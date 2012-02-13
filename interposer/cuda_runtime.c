@@ -65,11 +65,13 @@
 // System includes
 #include <assert.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 
 // CUDA includes
 #include <__cudaFatFormat.h>
@@ -272,6 +274,8 @@ static int attach_assembly_runtime(void)
 	attach = timer_end(&attach_timer, TIMER_ACCURACY);
 	printf(USERMSG_PREFIX TIMERMSG_PREFIX "attach %lu\n", attach);
 #endif
+	// TODO Install a SIGINT handler so we can disconnect from the group/remove
+	// any MQs we created.
 	return 0;
 }
 
@@ -507,14 +511,7 @@ cudaError_t cudaGetDevice(int *device)
 
 cudaError_t cudaGetDeviceCount(int *count)
 {
-	int err;
 	struct cuda_packet *shmpkt;
-
-	err = attach_assembly_runtime();
-	if (err < 0) {
-		fprintf(stderr, "Error attaching to assembly runtime\n");
-		assert(0);
-	}
 
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
@@ -959,6 +956,11 @@ cudaError_t cudaFreeArray(struct cudaArray * array)
 
 cudaError_t cudaFreeHost(void * ptr)
 {
+	if (ptr)
+		free(ptr);
+	return cudaSuccess;
+
+#if 0 // Working code that forwards the RPC to the assembly runtime.
 	struct cuda_packet *shmpkt;
 	printd(DBG_DEBUG, "ptr=%p\n", ptr);
 
@@ -982,10 +984,54 @@ cudaError_t cudaFreeHost(void * ptr)
 
 	update_latencies(&shmpkt->lat);
 	return shmpkt->ret_ex_val.err;
+#endif
 }
 
+/**
+ * This function, according to the NVIDIA CUDA API specifications, seems to just
+ * be a combined malloc+mlock that is additionally made visible to the CUDA
+ * runtime and NVIDIA driver to optimize memory movements carried out in
+ * subsequent calls to cudaMemcpy. Since we currently assume another process
+ * carries out our RPC requests (local- or remotesink), there's no point in
+ * forwarding this function: cudaHostAlloc returns an application virtual
+ * address, it is useless here.
+ *
+ * We ignore flags for now, it only specifies performance not correctness.
+ */
 cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
 {
+	void *pinned_mem = NULL;
+	int err = 0;
+
+	TIMER_DECLARE1(t);
+	TIMER_START(t);
+#if TIMING
+	struct rpc_latencies lat;
+	memset(&lat, 0, sizeof(lat));
+#endif
+
+	pinned_mem = malloc(size);
+	if (!pinned_mem) {
+		printd(DBG_ERROR, "out of memory\n");
+		fprintf(stderr, "out of memory\n");
+		return cudaErrorMemoryAllocation;
+	}
+
+	// if this fails, nothing will break
+	err = mlock(pinned_mem, size);
+	if (err < 0) {
+		printd(DBG_WARNING, "memory pinning failed: %s\n", strerror(errno));
+	}
+
+	TIMER_END(t, pkt.lat.lib.setup);
+	update_latencies(&pkt.lat);
+
+	*pHost = pinned_mem;
+	printd(DBG_DEBUG, "host=%p size=%lu flags=0x%x (ignored)\n", *pHost, size, flags);
+
+	return cudaSuccess;
+
+#if 0 // Working code that forwards the RPC to the assembly runtime.
 	struct cuda_packet *shmpkt;
 
 	TIMER_DECLARE1(t);
@@ -1012,6 +1058,7 @@ cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
 	printd(DBG_DEBUG, "host=%p size=%lu flags=0x%x\n", *pHost, size, flags);
 	update_latencies(&shmpkt->lat);
 	return shmpkt->ret_ex_val.err;
+#endif
 }
 
 cudaError_t cudaMalloc(void **devPtr, size_t size)
@@ -1145,6 +1192,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
 			memcpy(shm_ptr, src, count);
 			shmpkt->len = sizeof(*shmpkt) + count;
+			shmpkt->is_sync = false;
 		}
 		break;
 		case cudaMemcpyDeviceToHost:
@@ -1155,6 +1203,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 			// We will expect to read 'count' bytes at this ^ offset into dst
 			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
 			shmpkt->len = sizeof(*shmpkt);
+			shmpkt->is_sync = true;
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
@@ -1163,6 +1212,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
 			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
 			shmpkt->len = sizeof(*shmpkt);
+			shmpkt->is_sync = false;
 		}
 		break;
 		default:
@@ -1171,6 +1221,9 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 	shmpkt->args[2].arr_argi[0] = count;
 	shmpkt->is_sync = true;
 	TIMER_PAUSE(tsetup);
+
+	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d\n",
+			dst, src, count, kind);
 
 	TIMER_START(twait);
 	shmpkt->flags = CUDA_PKT_REQUEST;
@@ -1283,7 +1336,7 @@ cudaError_t cudaMemcpyFromSymbol(
 	struct cuda_packet *shmpkt;
 	void *shm_ptr;
 
-	printd(DBG_DEBUG, "symb %p\n", symbol);
+	printd(DBG_DEBUG, "dst=%p symb=%p, count=%lu\n", dst, symbol, count);
 
 	TIMER_DECLARE2(tsetup, twait);
 	TIMER_START(tsetup);
@@ -1418,7 +1471,7 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 	struct cuda_packet *shmpkt;
 	void *shm_ptr;
 
-	printd(DBG_DEBUG, "symb %p\n", symbol);
+	printd(DBG_DEBUG, "symb=%p src=%p count=%lu\n", symbol, src, count);
 
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
@@ -1691,7 +1744,7 @@ struct cudaChannelFormatDesc
 cudaCreateChannelDesc(int x, int y, int z, int w,
 		enum cudaChannelFormatKind format)
 {
-#if 0
+#if 1
 	// Doesn't need to be forwarded anywhere. Call the function in the NVIDIA
 	// runtime, as this function just takes multiple variables and assigns them
 	// to a struct. Why?
