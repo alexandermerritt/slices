@@ -38,9 +38,9 @@
 // Temporary code for varying the batch size. The idea is to allow
 // an application to run multiple iterations, over time varying the
 // batch size to observe the performance impact.
-static size_t bsize = 1;
-static size_t count = 0; //! Number of application entries.
-static size_t incr_on_mod = 1;
+static size_t bsize = 1; //! Current batch size.
+static size_t incr_on_mod = 1; //! # app entries between batch size increments
+static size_t count = 0; //! internal counter of app entries for use with incr
 #endif	/* VARIABLE_BATCHING */
 
 /*-------------------------------------- EXTERNAL VARIABLES ------------------*/
