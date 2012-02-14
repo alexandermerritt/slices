@@ -23,7 +23,7 @@
 
 #define TIMERMSG_PREFIX	"[TIMER] "
 
-#define TIMER_ACCURACY NANOSECONDS
+#define TIMER_ACCURACY MICROSECONDS
 
 /*-------------------------------------- DATA TYPES --------------------------*/
 
