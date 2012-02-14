@@ -34,7 +34,7 @@ def get_platform_characteristic_str():
     return nodename
 
 
-GLOBAL_CCFLAGS=['-fPIC', '-Wall', '-Wextra', '-Werror']
+GLOBAL_CCFLAGS=['-fPIC', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter']
 if int(DEBUG) == 1:
 	GLOBAL_CCFLAGS.append('-ggdb')
 	GLOBAL_CCFLAGS.append('-DDEBUG')

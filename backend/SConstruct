@@ -25,7 +25,7 @@ def get_platform_characteristic_str():
     nodename = commands.getoutput('uname -n') # doesn't work on keeneland
     return nodename
 
-GLOBAL_CCFLAGS=['-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter']
+GLOBAL_CCFLAGS=['-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-Wno-unused-function']
 if int(DEBUG) == 1:
 	GLOBAL_CCFLAGS.append('-ggdb')
 	GLOBAL_CCFLAGS.append('-DDEBUG')
@@ -69,7 +69,8 @@ envBackendIfrit = envBackendShiva
 def build_backend(env):
     srclist = ['assembly/assembly.c', 'assembly/assemble.c', 'assembly/rpc.c',
 			'assembly/export.c', '../common/io/sock.c', '../common/cuda/execute.c',
-			'../common/cuda/rpc.c', '../common/cuda/marshal.c']
+			'../common/cuda/rpc.c', '../common/cuda/marshal.c',
+			'../common/util/rbtree.c']
     env.Program('runtime', ['runtime.c', srclist])
     env.Program('localsink', ['localsink.c', srclist])
     env.Program('assembly/remotesink', ['assembly/remotesink.c', srclist])

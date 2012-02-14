@@ -9,24 +9,10 @@
 // I stole this from the Linux kernel sources. Modified of course so it will compile in this
 // project. The commented out headers I fixed here by directly replacing the macros.
 
-#include <stddef.h>
+#include <util/kernel.h>
 //#include <prefetch.h>
 //#include <poison.h>
 //#include <asm/system.h>
-
-/**
- * container_of - cast a member of a structure out to the containing structure
- * @ptr:    the pointer to the member.
- * @type:  the type of the container struct this is embedded in.
- * @member:   the name of the member within the struct.
- *
- * Stolen from the linux source code, file include/linux/kernel.h
- * TODO Move this into another file. Someone might want to use container_of without the list
- * constructs in this file.
- */
-#define container_of(ptr, type, member) ({          \
-          const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
-          (type *)( (char *)__mptr - offsetof(type,member) );})
 
 /*
  * Simple doubly linked list implementation.
