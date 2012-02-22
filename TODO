@@ -9,11 +9,15 @@ Updated 2011-11-12
 
 Assembly Runtime
 ================
+	[ ] convert the assembly code into a library that the sinks link against,
+		instead of compiling the code directly into them
+
 	[C] design assembly interface
 	[L] implement framework
 		[C] starting runtime does self-discovery
 		[C] node adds self to participants
 		[C] start assembly composition
+
 	- shared memory library
 		[C] "libregistration" - now obsolete
 		[C] multi-process-aware
@@ -21,22 +25,18 @@ Assembly Runtime
 		[C] self-contained library
 		[C] verify with multiple simultaneous members joining/leaving
 		[ ] verify with one multi-threaded member making/destroying regions
+		[ ] change shmgrp to use message queues for registering with a group instead
+			of inotify. redesign that communication substrate, in fact...
 
 	[C] support multiple fat binaries
-
-	- network API (Magda)
-		[L] IB
-			some bugs at the moment
-		[L] sockets
-			accept() callable only once
-		[ ] single library
 
 	- distributed assembly (Alex)
 		[C] assembly RPC thread
 		[ ] [support executing apps on nodes w/o GPUs]
 		[C] implement separation of local/remote assembly interfaces
 		[ ] add use of monitoring API to assembly composition
-		[C] duplicate register calls across nodes in assembly
+		[L] duplicate register calls across nodes in assembly
+			i think the algorithm is broken
 
 	- remote data paths (Alex w/ network API)
 		[ ] what is local:remote sink process configuration?
@@ -63,14 +63,14 @@ Monitoring
 
 Build Environment
 =================
-	[ ] remove build dependences of backend/ on interposer/ etc
-		[ ] move pack/unpack functions outside of interposer/
+	[C] remove build dependences of backend/ on interposer/ etc
+		[C] move pack/unpack functions outside of interposer/
 	[ ] perhaps create an SConstruct for each machine this may be built on
 		instead of having globals inside one file
 
 Other details
 =============
-	[ ]	registered variables (the symbols) are assumed at the moment to be
+	[C]	registered variables (the symbols) are assumed at the moment to be
 		memory addresses; the runtime says they may also be strings: remove this
 		assumption
 			libci.c : cudaMemcpy[To|From]Symbol
@@ -102,6 +102,14 @@ KNOWN BUGS
 			maintain a reference count on remote end
 
 	[ ] segv in runtime when Ctrl+c'ing it after a node exits uncleanly (SIGKILL)
+
+	[ ] BUG seems to not be used correctly everywhere.
+
+	[ ] provide a means for safe failure if the application performs setDevice
+		on an ID that doesn't exist.
+
+	[ ] provide more robust runtime, for cleaning up all sinks, even when the
+		application segfaults (runtime will need to monitor)
 
 POTENTIAL BUGS
 ==============
