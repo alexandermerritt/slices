@@ -70,6 +70,27 @@ static LIST_HEAD(sink_list);
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
+static void configure_hint(void)
+{
+	/**
+	 * File that may be used to specify a hint for assembly creation. Contains a
+	 * single integer specifying how many vGPUs are wanted. XXX This should be
+	 * removed when shmgrp enables passing generic messages between member and
+	 * leader, such that we can pass assembly requests from within the
+	 * interposer.
+	 */
+#define HINT_FILE_NAME "hint.assm"
+	// Look for a hint file. If none found, fall back to the default.
+	if (0 == access(HINT_FILE_NAME, R_OK)) {
+		FILE *hint_file = fopen(HINT_FILE_NAME, "r");
+		if (!hint_file)
+			return;
+		fscanf(hint_file, "%d", &hint.num_gpus);
+		fclose(hint_file);
+		printf("read in %s: %d gpus\n", HINT_FILE_NAME, hint.num_gpus);
+	}
+}
+
 int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
 {
 	int err;
@@ -176,6 +197,7 @@ static void runtime_entry(group_event e, pid_t pid)
 #endif	/* VARIABLE_BATCHING */
 
 			TIMER_START(timer);
+			configure_hint();
 			asmid = assembly_request(&hint);
 			TIMER_END(timer, timing);
 #ifdef TIMING
