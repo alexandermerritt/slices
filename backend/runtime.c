@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -53,6 +54,12 @@ static size_t count = 0; //! internal counter of app entries for use with incr
 extern char **environ;
 
 /*-------------------------------------- INTERNAL STATE ----------------------*/
+
+// Daemon state
+static pid_t sid;
+static const char log[] = "runtime.log";
+static FILE *logf = NULL;
+static const char wd[] = "/tmp";
 
 // XXX We assume a single-process single-threaded CUDA application for now. Thus
 // one assembly, one hint and one sink child.
@@ -464,17 +471,48 @@ static void print_usage(void)
 	fprintf(stderr, usage_str);
 }
 
+static int daemonize(void)
+{
+	struct sigaction action;
+	int logfd = -1;
+
+	pid_t pid = fork();
+	if (pid < 0)
+		return -(errno);
+	if (pid > 0)
+		_exit(0);
+
+	umask(0);
+	chdir(wd);
+
+	if (0 > (logf = fopen(log, "w")))
+		return -(errno);
+	logfd = fileno(logf);
+	if (0 > dup2(logfd, 0))
+		return -(errno);
+	if (0 > dup2(logfd, 1))
+		return -(errno);
+
+	if (0 > (sid = setsid()))
+		return -(errno);
+
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = sigint_handler;
+	sigemptyset(&action.sa_mask);
+	if (0 > sigaction(SIGINT, &action, NULL))
+		return -(errno);
+	printf("Send SIGINT to pid %d to terminate daemon.\n", getpid());
+
+	return 0;
+}
+
 /*-------------------------------------- ENTRY -------------------------------*/
 
 int main(int argc, char *argv[])
 {
 	int err = 0;
 	sigset_t mask;
-	struct sigaction action;
-	enum node_type type;
-	const char start_msg[] =
-		"Assembly runtime up. Start other participants and/or CUDA applications.\n"
-		"Type [Ctrl+c] or issue [kill -s SIGINT] to pid %d to shutdown.\n";
+	enum node_type type = NODE_TYPE_INVALID;
 
 #ifdef DEBUG
 	printf("(Built with debug symbols)\n");
@@ -485,6 +523,10 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+	printf(">:[ daemonizing ... log file at %s/%s\n", wd, log);
+	if (0 > daemonize())
+		return -1;
+
 	if (argc == 2)
 		err = start_runtime(type, NULL);
 	else if (argc == 3)
@@ -493,19 +535,6 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Could not initialize. Check your arguments.\n");
 		return -1;
 	}
-
-	// Install a new handler for SIGINT.
-	memset(&action, 0, sizeof(action));
-	action.sa_handler = sigint_handler;
-	sigemptyset(&action.sa_mask);
-	err = sigaction(SIGINT, &action, NULL);
-	if (err < 0) {
-		printd(DBG_ERROR, "Error installing signal handler for SIGINT.\n");
-		shutdown_runtime();
-		return -1;
-	}
-
-	printf(start_msg, getpid());
 
 	// Wait for any signal.
 	sigemptyset(&mask);
