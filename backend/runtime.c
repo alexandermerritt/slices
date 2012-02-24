@@ -73,6 +73,13 @@ static LIST_HEAD(sink_list);
 int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
 {
 	int err;
+	assembly_key_uuid key;
+
+	err = assembly_export(asmid, key);
+	if (err < 0) {
+		printd(DBG_ERROR, "Could not export assembly %lu\n", asmid);
+		_exit(-1);
+	}
 
 	*sink_pid = fork();
 
@@ -115,12 +122,6 @@ int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
 
 	// Export the assembly to get the UUID
 	char uuid_str[64];
-	assembly_key_uuid key;
-	err = assembly_export(asmid, key);
-	if (err < 0) {
-		printd(DBG_ERROR, "Could not export assembly %lu\n", asmid);
-		_exit(-1);
-	}
 	uuid_unparse(key, uuid_str);
 	snprintf(env_uuid, ENV_MAX_LEN, "%s=%s", SINK_ASSM_EXPORT_KEY_ENV, uuid_str);
 	err = putenv(env_uuid);
