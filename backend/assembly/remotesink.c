@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/mman.h>
 
 // Project includes
 #include <assembly.h>
@@ -341,6 +342,13 @@ minion_thread(void *arg)
 		state->exit_code = -ENOMEM;
 		pthread_exit(NULL);
 	}
+#if 0
+	err = mlock(state->batch.buffer, CUDA_BATCH_BUFFER_SZ);
+	if (err < 0) {
+		printd(DBG_WARNING, "Could not pin batch buffer: %s\n",
+				strerror(errno));
+	}
+#endif
 
 	while (1) {
 		err = do_cuda_rpc(conn, &state->batch, state->rcubin);

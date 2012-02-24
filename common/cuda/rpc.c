@@ -12,6 +12,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sys/mman.h>
 
 // Project includes
 #include <cuda/fatcubininfo.h>
@@ -47,6 +48,13 @@ int cuda_rpc_init(struct cuda_rpc *rpc, size_t batch_size)
 		return -1;
 	}
 	rpc->batch.max = batch_size;
+#if 0
+	int err = mlock(rpc->batch.buffer, CUDA_BATCH_BUFFER_SZ);
+	if (err < 0) {
+		printd(DBG_WARNING, "Could not pin batch buffer: %s\n",
+				strerror(errno));
+	}
+#endif
 	return 0;
 }
 
