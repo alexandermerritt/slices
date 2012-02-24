@@ -671,7 +671,7 @@ static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
 		symbol = var->dom0HostAddr;
 	}
 
-	printd(DBG_DEBUG, "memcpyFromSymb symb=%p count=%lu\n", symbol, count);
+	printd(DBG_DEBUG, "memcpyToSymb symb=%p count=%lu\n", symbol, count);
 	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING) {
 		printd(DBG_DEBUG, "\tsymbol is string: %s\n", symbol);
 	}
