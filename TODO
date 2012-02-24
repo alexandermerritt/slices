@@ -27,6 +27,7 @@ Assembly Runtime
 		[ ] verify with one multi-threaded member making/destroying regions
 		[ ] change shmgrp to use message queues for registering with a group instead
 			of inotify. redesign that communication substrate, in fact...
+			doing this will allow us to remove use of those annoying directories
 
 	[C] support multiple fat binaries
 
