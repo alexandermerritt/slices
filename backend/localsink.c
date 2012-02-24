@@ -249,7 +249,7 @@ setup(void)
 	assembly_key_uuid uuid;
 	pid_t pid;
 	asmid_t asmid;
-	
+
 	//
 	// Extract environment variables we're configured with.
 	//
@@ -383,11 +383,11 @@ teardown(void)
 	}
 	err = assembly_runtime_shutdown();
 	if (err < 0) {
-		printd(DBG_WARNING, "__shmgrp_dump_group failed\n");
+		printd(DBG_WARNING, "assembly_runtime_shutdown failed\n");
 	}
 	err = shmgrp_tini();
 	if (err < 0) {
-		printd(DBG_WARNING, "__shmgrp_dump_group failed\n");
+		printd(DBG_WARNING, "shmgrp_tini failed\n");
 	}
 	if (!list_empty(&internals->proxy_list)) {
 		printd(DBG_WARNING, "proxy threads still exist\n");
