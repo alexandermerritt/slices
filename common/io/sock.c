@@ -116,6 +116,11 @@ int conn_localbind(struct sockconn *conn, const char *bind_port, bool use_sdp)
 	memset(servername, 0, 255 * sizeof(char));
 	gethostname(servername, 255);
 
+	// FIXME This code needs to change to support binding to a specific IP
+	// address, instead of all IP addresses this host associates with. That way
+	// we can have separate sockets listening to the same port but on different
+	// externally visible IP addresses (e.g. one for SDP, one for Ethernet).
+
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
