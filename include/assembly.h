@@ -91,8 +91,6 @@ asmid_t assembly_request(const struct assembly_hint *hint);
 int assembly_teardown(asmid_t id);
 
 int assembly_num_vgpus(asmid_t id);
-int assembly_vgpu_is_remote(asmid_t id, int vgpu);
-int assembly_set_batch_size(asmid_t id, int vgpu, unsigned int size);
 
 /**
  * Implement an assembly on the cluster (construct the data paths). Must be
