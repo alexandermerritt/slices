@@ -11,6 +11,9 @@
  * spawns. And find a reasonable way to specify assembly hint structures/files.
  */
 
+#define _GNU_SOURCE
+#include <sched.h>
+
 // System includes
 #include <assert.h>
 #include <errno.h>
@@ -60,6 +63,23 @@ static struct assembly_hint hint =
 	.batch_size = CUDA_BATCH_MAX
 };
 
+struct pin_pair
+{
+	bool used;
+	int sink_cpu, app_cpu;
+	pid_t app_pid;
+};
+static struct pin_pair pin_pairs[] =
+{
+	{ .used = false, .sink_cpu = 0, .app_cpu = 1, .app_pid = 0 },
+	{ .used = false, .sink_cpu = 3, .app_cpu = 2, .app_pid = 0 },
+	{ .used = false, .sink_cpu = 5, .app_cpu = 4, .app_pid = 0 },
+	{ .used = false, .sink_cpu = 6, .app_cpu = 7, .app_pid = 0 },
+	{ .used = false, .sink_cpu = 9, .app_cpu = 8, .app_pid = 0 },
+	{ .used = false, .sink_cpu = 11, .app_cpu = 10, .app_pid = 0 }
+};
+pthread_mutex_t pin_lock = PTHREAD_MUTEX_INITIALIZER;
+
 /**
  * List of application processes currently executing. No need to provide a lock
  * for the list, as only one single thread is associated with the shmgrp we
@@ -89,6 +109,72 @@ static void configure_hint(void)
 		fclose(hint_file);
 		printf("read in %s: %d gpus\n", HINT_FILE_NAME, hint.num_gpus);
 	}
+}
+
+static void pin_next(pid_t sink_pid, pid_t app_pid)
+{
+	int idx, num;
+	int err;
+	struct pin_pair *pair;
+
+	pthread_mutex_lock(&pin_lock);
+
+	// Grap the pair of CPU cores to use.
+	num = (sizeof(pin_pairs) / sizeof(*pin_pairs));
+	for (idx = 0; idx < num; idx++)
+		if (!pin_pairs[idx].used)
+			break;
+	if (idx >= num) {
+		pthread_mutex_unlock(&pin_lock);
+		fprintf(stderr, "No pin pairs slots left\n");
+		return; // ignore...
+	}
+	pair = &pin_pairs[idx];
+	pair->used = true;
+
+	pthread_mutex_unlock(&pin_lock);
+
+	pair->app_pid = app_pid;
+
+	// Construct the masks, then install them.
+	cpu_set_t mask;
+	CPU_ZERO(&mask);
+	CPU_SET(pair->sink_cpu, &mask);
+	err = sched_setaffinity(sink_pid, sizeof(mask), &mask);
+	if (err < 0)
+		fprintf(stderr, "Error installing sink cpu mask\n");
+	CPU_ZERO(&mask);
+	CPU_SET(pair->app_cpu, &mask);
+	err = sched_setaffinity(app_pid, sizeof(mask), &mask);
+	if (err < 0)
+		fprintf(stderr, "Error installing app cpu mask\n");
+
+	printf("idx %d pinning app %d to cpu %d, sink %d to cpu %d\n",
+			idx, app_pid, pair->app_cpu, sink_pid, pair->sink_cpu);
+}
+
+static void pin_free(pid_t app_pid)
+{
+	int idx, num;
+	struct pin_pair *pair;
+	num = (sizeof(pin_pairs) / sizeof(*pin_pairs));
+
+	pthread_mutex_lock(&pin_lock);
+
+	for (idx = 0; idx < num; idx++)
+		if (pin_pairs[idx].app_pid == app_pid)
+			break;
+	if (idx >= num) {
+		fprintf(stderr, "could not find app %d in pin slots\n", app_pid);
+		pthread_mutex_unlock(&pin_lock);
+		return; // ignore...
+	}
+	printf("idx %d freeing pin slot with app %d\n", idx, app_pid);
+	pair = &pin_pairs[idx];
+	pair->used = false;
+	pair->app_pid = 0;
+
+	pthread_mutex_unlock(&pin_lock);
 }
 
 int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
@@ -211,6 +297,7 @@ static void runtime_entry(group_event e, pid_t pid)
 				printd(DBG_ERROR, "Could not fork\n");
 				break;
 			}
+			//pin_next(childpid, pid);
 			TIMER_END(timer, timing);
 #ifdef TIMING
 			printf(TIMERMSG_PREFIX "fork %lu\n", timing);
@@ -290,6 +377,7 @@ static void runtime_entry(group_event e, pid_t pid)
 #ifdef TIMING
 			printf(TIMERMSG_PREFIX "leave %lu\n", timing);
 #endif
+			//pin_free(pid);
 
 			free(sink);
 			sink = NULL;
