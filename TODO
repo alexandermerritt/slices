@@ -50,6 +50,10 @@ Assembly Runtime
 
 	[ ] scheduling interface (Dipanjan)
 
+	[ ] perhaps convert the interface between localsink and interposer to use a
+	mutex instead of spinning on flags, wasting CPU cycles. how would this
+	affect the latency of each call?
+
 Monitoring
 ==========
 	[C] Design data structure(s) for exporting Lynx data (Naila)
