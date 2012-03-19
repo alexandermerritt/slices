@@ -30,12 +30,20 @@ fi
 RUNTIME_PIDS=`ps aux | grep runtime | grep -v grep | awk '{print $2}' | tr "\n" " "`
 for RUNTIME_PID in $RUNTIME_PIDS
 do
-	echo Killing runtime $RUNTIME_PID
+	echo Signaling runtime $RUNTIME_PID to halt
 	kill -s SIGINT $RUNTIME_PID
 	sleep 1 # Give the process time to cleanup.
 done
 
-# TODO Verify these processes no longer exist. If they do, send SIGKILL
+echo ...
+sleep 1
+
+RUNTIME_PIDS=`ps aux | grep runtime | grep -v grep | awk '{print $2}' | tr "\n" " "`
+for RUNTIME_PID in $RUNTIME_PIDS
+do
+	echo Killing runtime $RUNTIME_PID
+	kill -s SIGKILL $RUNTIME_PID
+done
 
 # Kill all sink processes.
 # SIGTERM is the signal these processes explicitly listen for.
