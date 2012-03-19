@@ -23,6 +23,7 @@
 #include <signal.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -370,7 +371,7 @@ remote_enable(void)
 	}
 
 	// We're the child. Exec the remote sink.
-	err = execl("assembly/remotesink", REMOTE_EXEC_NAME, NULL);
+	err = execl("remotesink", REMOTE_EXEC_NAME, NULL);
 	_exit(-1); // execl only returns on error
 }
 
@@ -448,10 +449,12 @@ node_main_init(void)
 		goto fail;
 
 	// enable (remote) vgpus to connect to us
+#if 0
 	err = remote_enable();
 	if (err < 0) {
 		goto fail;
 	}
+#endif
 
 	return 0;
 
@@ -739,16 +742,15 @@ demux(
 {
 	int err;
 
-	// just test one call exists, and assume ops was set correctly
 	BUG(!mapping->ops.registerFatBinary);
 
 	switch (pkt->method_id) {
 
 		// Functions which either take only a cuda_packet* (VGPU_LOCAL) or also
 		// take an additional parameter for remote connections (VGPU_REMOTE).
-		// rpc_conn is a pointer; if the mapping is local, it will be NULL and
-		// is ignored. The second argument is reserved for fatcubin* which is
-		// not used for these functions.
+		// rpc is a pointer; if the mapping is local, it will be NULL and is
+		// ignored. The second argument is reserved for fatcubin* which is not
+		// used for these functions.
 		case CUDA_CONFIGURE_CALL:
 			mapping->ops.configureCall(pkt, NULL, mapping->rpc);
 			break;
@@ -1447,6 +1449,7 @@ int assembly_export(asmid_t id, assembly_key_uuid key_uuid)
 	return 0;
 
 fail:
+	printd(DBG_ERROR, "failed\n");
 	return exit_errno;
 }
 
@@ -1493,6 +1496,7 @@ int assembly_import(asmid_t *id, const assembly_key_uuid uuid)
 	*id = assm->id;
 	return 0;
 fail:
+	printd(DBG_ERROR, "failed\n");
 	if (assm)
 		free(assm);
 	return exit_errno;
