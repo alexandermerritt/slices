@@ -449,12 +449,10 @@ node_main_init(void)
 		goto fail;
 
 	// enable (remote) vgpus to connect to us
-#if 0
 	err = remote_enable();
 	if (err < 0) {
 		goto fail;
 	}
-#endif
 
 	return 0;
 
