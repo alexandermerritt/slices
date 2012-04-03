@@ -19,6 +19,6 @@ for src in files:
 	if '.c' == ext.lower():
 		sources.append(src)
 
-sources.append('../common/cuda/marshal.c')
+sources.append('../common/cuda/marshal_hidden.c')
 
 env.SharedLibrary('libci.so', sources)
