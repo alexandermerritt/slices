@@ -52,6 +52,7 @@ args['timing'] = ARGUMENTS.get('timing',0)
 # Configure environment
 #
 ccflags = ['-Wall', '-Wextra', '-Werror']
+ccflags.append('-Winline')
 ccflags.extend(['-Wno-unused-parameter', '-Wno-unused-function'])
 
 if int(args['debug']) == 1:
