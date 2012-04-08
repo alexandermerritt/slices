@@ -60,7 +60,13 @@ int cuda_rpc_init(struct cuda_rpc *rpc, size_t batch_size)
 
 int cuda_rpc_connect(struct cuda_rpc *rpc, const char *ip, const char *port)
 {
+#if defined(NIC_SDP)
 	return conn_connect(&rpc->sockconn, ip, port, true);
+#elif defined(NIC_ETHERNET)
+	return conn_connect(&rpc->sockconn, ip, port, false);
+#else
+#error NIC_* not defined
+#endif
 }
 
 int cuda_rpc_close(struct cuda_rpc *rpc)

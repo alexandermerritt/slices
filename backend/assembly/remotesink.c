@@ -427,7 +427,13 @@ admission_thread(void *arg)
 	pthread_cleanup_push(admission_cleanup, state);
 	state->is_alive = true;
 
+#if defined(NIC_SDP)
 	err = conn_localbind(conn, REMOTE_CUDA_PORT, true);
+#elif defined(NIC_ETHERNET)
+	err = conn_localbind(conn, REMOTE_CUDA_PORT, false);
+#else
+#error NIC_* not defined
+#endif
 	if (err < 0) {
 		state->exit_code = -ENETDOWN;
 		pthread_exit(NULL);

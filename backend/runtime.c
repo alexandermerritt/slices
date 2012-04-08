@@ -66,8 +66,15 @@ static const char wd[] = "."; //! working dir of runtime once exec'd
 static struct assembly_hint hint =
 {
 	.num_gpus = 1,
-	.nic_type = HINT_USE_IB,
-	.batch_size = CUDA_BATCH_MAX
+	.batch_size = CUDA_BATCH_MAX,
+	// Configure network based on build flag
+#if defined(NIC_SDP)
+	.nic_type = HINT_USE_IB
+#elif defined(NIC_ETHERNET)
+	.nic_type = HINT_USE_ETH
+#else
+#error NIC_* not defined
+#endif
 };
 
 struct pin_pair

@@ -45,8 +45,9 @@ else:
 # Extract arguments
 #
 args = {}
-args['debug'] = ARGUMENTS.get('dbg', 0)
-args['timing'] = ARGUMENTS.get('timing',0)
+args['debug'] = ARGUMENTS.get('debug', 0)
+args['timing'] = ARGUMENTS.get('timing', 0)
+args['network'] = ARGUMENTS.get('network', 'eth')
 
 #
 # Configure environment
@@ -55,14 +56,22 @@ ccflags = ['-Wall', '-Wextra', '-Werror']
 ccflags.append('-Winline')
 ccflags.extend(['-Wno-unused-parameter', '-Wno-unused-function'])
 
-if int(args['debug']) == 1:
+if int(args['debug']):
 	ccflags.append('-ggdb')
 	ccflags.append('-DDEBUG')
 else:
 	ccflags.append('-O3')
 
-if int(args['timing']) == 1:
+if int(args['timing']):
 	ccflags.append('-DTIMING')
+
+if args['network'] == 'eth':
+	ccflags.append('-DNIC_ETHERNET')
+elif args['network'] == 'sdp':
+	ccflags.append('-DNIC_SDP')
+else:
+	print('--> network flag invalid')
+	sys.exit(1)
 
 # for anything you install locally, add/modify them here
 home = os.environ['HOME']
