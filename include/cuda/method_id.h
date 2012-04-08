@@ -12,6 +12,7 @@
 
 // Method IDs we assign to API functions.
 typedef enum METHOD_ID {
+	CUDA_INVALID_METHOD = 0,
     CUDA_MALLOC = 1, // don't set this to zero to catch indicies set to zero then not modified
 	CUDA_HOST_ALLOC,
 	CUDA_MALLOC_PITCH,
@@ -70,6 +71,7 @@ typedef enum METHOD_ID {
 	CUDA_STREAM_CREATE,
 	CUDA_STREAM_SYNCHRONIZE,
 	CUDA_CREATE_CHANNEL_DESC,
+	CUDA_METHOD_LIMIT
 } method_id_t;
 
 #endif
