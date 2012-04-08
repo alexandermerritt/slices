@@ -59,7 +59,7 @@ extern char **environ;
 static pid_t sid;
 static const char log[] = "runtime.log";
 static FILE *logf = NULL;
-static const char wd[] = "/tmp";
+static const char wd[] = "."; //! working dir of runtime once exec'd
 
 // XXX We assume a single-process single-threaded CUDA application for now. Thus
 // one assembly, one hint and one sink child.
@@ -224,8 +224,8 @@ int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
 	 */
 
 	/* Time the work the new child performs before exec'ing into a localsink. */
-	TIMER_DECLARE1(sink-setup);
-	TIMER_START(sink-setup);
+	TIMER_DECLARE1(sinksetup);
+	TIMER_START(sinksetup);
 
 	// Need separate strings for the environment variables we add, because
 	// putenv does NOT copy the strings, it merely sets pointers to these arrays
@@ -254,8 +254,8 @@ int forksink(asmid_t asmid, pid_t memb_pid, pid_t *sink_pid)
 
 #ifdef TIMING
 	uint64_t sink_setup;
-   	TIMER_END(sink-setup, sink_setup);
-	printf(TIMERMSG_PREFIX "sink-setup %lu\n", sink_setup);
+   	TIMER_END(sinksetup, sink_setup);
+	printf(TIMERMSG_PREFIX "sinksetup %lu\n", sink_setup);
 #endif
 
 	// Go!
