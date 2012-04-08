@@ -7,7 +7,7 @@ import os
 __author__ = 'Alex Merritt'
 __email__ = 'merritt.alex@gatech.edu'
 
-Import('NODE_NAME', 'ENV')
+Import('NODE_NAME', 'ENV', 'INSTALL_DIR')
 
 env = ENV[NODE_NAME]
 
@@ -21,4 +21,5 @@ for src in files:
 
 sources.append('../common/cuda/marshal_hidden.c')
 
-env.SharedLibrary('libci.so', sources)
+lib = env.SharedLibrary('libci.so', sources)
+env.Install(INSTALL_DIR + '/lib', lib)

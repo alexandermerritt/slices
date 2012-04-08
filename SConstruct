@@ -22,6 +22,7 @@ __email__ = "merritt.alex@gatech.edu"
 #
 NODE_NAME = commands.getoutput('uname -n').split('.')[0]
 ENV = {}
+INSTALL_DIR = os.getcwd() + '/build'
 
 #
 # Configure CUDA location
@@ -88,5 +89,5 @@ ENV['ifrit'] = ENV['shiva']
 #
 # Execute the build
 #
-Export('NODE_NAME', 'ENV')
+Export('NODE_NAME', 'ENV', 'INSTALL_DIR')
 SConscript(['interposer/SConstruct', 'backend/SConstruct'])

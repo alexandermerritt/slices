@@ -9,7 +9,7 @@ import sys
 __author__ = 'Alex Merritt'
 __email__ = 'merritt.alex@gatech.edu'
 
-Import('NODE_NAME', 'ENV')
+Import('NODE_NAME', 'ENV', 'INSTALL_DIR')
 
 env = ENV[NODE_NAME]
 env.Append(LIBS = ['pthread', 'uuid', 'cudart', 'cuda'])
@@ -38,6 +38,11 @@ sources.append('../common/cuda/rpc.c')
 sources.append('../common/io/sock.c')
 sources.append('../common/util/rbtree.c')
 
-env.Program('runtime', ['runtime.c', sources])
-env.Program('localsink', ['localsink.c', sources])
-env.Program('remotesink', ['assembly/remotesink.c', sources])
+biny = env.Program('runtime', ['runtime.c', sources])
+env.Install(INSTALL_DIR + '/bin', biny)
+
+biny = env.Program('localsink', ['localsink.c', sources])
+env.Install(INSTALL_DIR + '/bin', biny)
+
+biny = env.Program('remotesink', ['assembly/remotesink.c', sources])
+env.Install(INSTALL_DIR + '/bin', biny)
