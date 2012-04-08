@@ -36,6 +36,7 @@
 // Project includes
 #include <assembly.h>
 #include <cuda/fatcubininfo.h>
+#include <cuda/marshal.h>
 #include <cuda/method_id.h>
 #include <debug.h>
 #include <util/list.h>
@@ -1128,17 +1129,15 @@ int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 		case CUDA_GET_DEVICE:
 		{
 			TIMER_START(t);
-			int *dev = (int*)((uintptr_t)pkt + pkt->args[0].argull);
 			struct vgpu_mapping *vgpu;
 			// A thread may or may not have previously called cudaSetDevice.
 			// If it has not, assign it to vgpu 0 and return that (this
 			// models the behavior of the CUDA runtime). If it has, then
 			// simply return what that association is.
 			vgpu = get_thread_association(assm, pkt->thr_id, NULL);
-			if (!vgpu)
-				vgpu = set_thread_association(assm, pkt->thr_id, 0);
-			*dev = vgpu->vgpu_id;
-			printd(DBG_DEBUG, "getDev=%d\n", *dev);
+			if (!vgpu) vgpu = set_thread_association(assm, pkt->thr_id, 0);
+			insert_cudaGetDevice(pkt, vgpu->vgpu_id);
+			printd(DBG_DEBUG, "getDev=%d\n", vgpu->vgpu_id);
 			TIMER_END(t, pkt->lat.exec.call);
 		}
 		break;
@@ -1146,9 +1145,8 @@ int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 		case CUDA_GET_DEVICE_COUNT:
 		{
 			TIMER_START(t);
-			int *devs = (int*)((uintptr_t)pkt + pkt->args[0].argull);
-			*devs = assm->num_gpus;
-			printd(DBG_DEBUG, "num devices=%d\n", *devs);
+			insert_cudaGetDeviceCount(pkt, assm->num_gpus);
+			printd(DBG_DEBUG, "num devices=%d\n", assm->num_gpus);
 			TIMER_END(t, pkt->lat.exec.call);
 		}
 		break;
@@ -1156,19 +1154,17 @@ int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 		case CUDA_GET_DEVICE_PROPERTIES:
 		{
 			TIMER_START(t);
-			struct cudaDeviceProp *prop;
 			int dev;
-			prop = (struct cudaDeviceProp*)
-				((uintptr_t)pkt + pkt->args[0].argull);
-			dev = pkt->args[1].argll;
+			unpack_cudaGetDeviceProperties(pkt, &dev);
 			if (dev < 0 || dev >= assm->num_gpus) {
 				printd(DBG_WARNING, "invalid dev id %d\n", dev);
 				pkt->ret_ex_val.err = cudaErrorInvalidDevice;
 				break;
 			}
-			memcpy(prop, &assm->mappings[dev].cudaDevProp,
-					sizeof(struct cudaDeviceProp));
-			printd(DBG_DEBUG, "name=%s\n", prop->name);
+			insert_cudaGetDeviceProperties(pkt, (pkt + sizeof(*pkt)),
+					&assm->mappings[dev].cudaDevProp);
+			printd(DBG_DEBUG, "name=%s\n",
+					assm->mappings[dev].cudaDevProp.name);
 			TIMER_END(t, pkt->lat.exec.call);
 		}
 		break;

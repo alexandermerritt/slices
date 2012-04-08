@@ -133,7 +133,8 @@ static OPS_FN_PROTO(CudaThreadSynchronize)
 static OPS_FN_PROTO(CudaSetDevice)
 {
 	TIMER_DECLARE1(timer);
-	int dev = pkt->args[0].argll;
+	int dev;
+	unpack_cudaSetDevice(pkt, &dev);
 	printd(DBG_DEBUG, "setDev %d\n", dev);
 
 	TIMER_START(timer);
@@ -147,7 +148,8 @@ static OPS_FN_PROTO(CudaSetDevice)
 static OPS_FN_PROTO(CudaSetDeviceFlags)
 {
 	TIMER_DECLARE1(timer);
-	unsigned int flags = (unsigned int)pkt->args[0].argull;
+	unsigned int flags;
+	unpack_cudaSetDeviceFlags(pkt, &flags);
 	printd(DBG_DEBUG, "flags=0x%x\n", flags);
 
 	TIMER_START(timer);
@@ -161,8 +163,9 @@ static OPS_FN_PROTO(CudaSetDeviceFlags)
 static OPS_FN_PROTO(CudaSetValidDevices)
 {
 	TIMER_DECLARE1(timer);
-	int *device_arr = (int*)((uintptr_t)pkt + pkt->args[0].argll);
-	int len = pkt->args[1].argll;
+	int *device_arr;
+	int len;
+	unpack_cudaSetValidDevices(pkt, (pkt + sizeof(*pkt)), &device_arr, &len);
 	printd(DBG_DEBUG, "len=%d\n", len);
 
 	TIMER_START(timer);
@@ -218,10 +221,10 @@ static OPS_FN_PROTO(CudaConfigureCall)
 	TIMER_DECLARE1(timer);
 
 	TIMER_START(timer);
-	dim3 gridDim = pkt->args[0].arg_dim;
-	dim3 blockDim = pkt->args[1].arg_dim;
-	size_t sharedMem = pkt->args[2].arr_argi[0];
-	cudaStream_t stream = (cudaStream_t)pkt->args[3].argull;
+	dim3 gridDim, blockDim;
+	size_t sharedMem;
+	cudaStream_t stream;
+	unpack_cudaConfigureCall(pkt, &gridDim, &blockDim, &sharedMem, &stream);
 
 	printd(DBG_DEBUG, "grid={%u,%u,%u} block={%u,%u,%u}"
 			" shmem=%lu strm=%p\n",
@@ -269,7 +272,8 @@ static OPS_FN_PROTO(CudaLaunch)
 	GET_CUBIN_VALIST(cubin_list, pkt);
 
 	// 'entry' is some hostFun symbol pointer
-	const char *entry = (const char *)pkt->args[0].argull;
+	const char *entry;
+	unpack_cudaLaunch(pkt, &entry);
 	printd(DBG_DEBUG, "launch(%p)\n", entry);
 
 	// Locate the func structure; we assume func names are unique across cubins.
@@ -297,9 +301,10 @@ static OPS_FN_PROTO(CudaSetupArgument)
 	TIMER_DECLARE1(timer);
 
 	TIMER_START(timer);
-	const void *arg = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t size = pkt->args[1].arr_argi[0];
-	size_t offset = pkt->args[1].arr_argi[1];
+	const void *arg;
+	size_t size;
+	size_t offset;
+	unpack_cudaSetupArgument(pkt, (pkt + sizeof(*pkt)), &arg, &size, &offset);
 	printd(DBG_DEBUG, "setupArg arg=%p size=%lu offset=%lu\n",
 			arg, size, offset);
 	TIMER_END(timer, pkt->lat.exec.setup);
@@ -320,7 +325,8 @@ static OPS_FN_PROTO(CudaFree)
 {
 	TIMER_DECLARE1(timer);
 
-	void *ptr = pkt->args[0].argp;
+	void *ptr;
+	unpack_cudaFree(pkt, &ptr);
 	printd(DBG_DEBUG, "free %p\n", ptr);
 
 	TIMER_START(timer);
@@ -335,7 +341,8 @@ static OPS_FN_PROTO(CudaFreeArray)
 {
 	TIMER_DECLARE1(timer);
 
-	struct cudaArray *array = pkt->args[0].cudaArray;
+	struct cudaArray *array;
+	unpack_cudaFreeArray(pkt, &array);
 	printd(DBG_DEBUG, "freeArray %p\n", array);
 
 	TIMER_START(timer);
@@ -388,11 +395,12 @@ static OPS_FN_PROTO(CudaMalloc)
 
 	// We are to write the value of devPtr to args[0].argull
 	void *devPtr = NULL;
-	size_t size = pkt->args[1].arr_argi[0];
+	size_t size;
+	unpack_cudaMalloc(pkt, &size);
 
 	TIMER_START(timer);
 	pkt->ret_ex_val.err = cudaMalloc(&devPtr, size);
-	pkt->args[0].argull = (unsigned long long)devPtr;
+	insert_cudaMalloc(pkt, devPtr);
 	printd(DBG_DEBUG, "cudaMalloc devPtr=%p size=%lu ret:%u\n",
 			devPtr, size, pkt->ret_ex_val.err);
 	TIMER_END(timer, pkt->lat.exec.call);
@@ -407,17 +415,16 @@ static OPS_FN_PROTO(CudaMallocArray)
 
 	TIMER_START(timer);
 	struct cudaArray *array; // a handle for an array
-	const struct cudaChannelFormatDesc *desc =
-		(const struct cudaChannelFormatDesc*)
-				((uintptr_t)pkt + pkt->args[0].argull);
-	size_t width = pkt->args[1].arr_argi[0];
-	size_t height = pkt->args[1].arr_argi[1];
-	unsigned int flags = pkt->args[2].argull;
+	struct cudaChannelFormatDesc *desc;
+	size_t width;
+	size_t height;
+	unsigned int flags;
+	unpack_cudaMallocArray(pkt, &desc, &width, &height, &flags);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
 	pkt->ret_ex_val.err = cudaMallocArray(&array, desc, width, height, flags);
-	pkt->args[0].cudaArray = array; // return value
+	insert_cudaMallocArray(pkt, array);
 	printd(DBG_DEBUG, "array=%p width=%lu height=%lu flags=0x%x\n",
 			array, width, height, flags);
 	TIMER_END(timer, pkt->lat.exec.call);
@@ -435,14 +442,14 @@ static OPS_FN_PROTO(CudaMallocPitch)
 	// pitch to args[1].arr_argi[0].
 	void *devPtr;
 	size_t pitch;
-	size_t width = pkt->args[2].arr_argi[0];
-	size_t height = pkt->args[2].arr_argi[1];
+	size_t width;
+	size_t height;
+	unpack_cudaMallocPitch(pkt, &width, &height);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
 	pkt->ret_ex_val.err = cudaMallocPitch(&devPtr, &pitch, width, height);
-	pkt->args[0].argull = (unsigned long long)devPtr;
-	pkt->args[1].arr_argi[0] = pitch;
+	insert_cudaMallocPitch(pkt, devPtr, pitch);
 	TIMER_END(timer, pkt->lat.exec.call);
 
 	printd(DBG_DEBUG, "cudaMallocPitch devPtr=%p pitch=%lu"
@@ -457,10 +464,11 @@ static OPS_FN_PROTO(CudaMemcpyH2D)
 	TIMER_DECLARE1(timer);
 
 	TIMER_START(timer);
-	void *dst = (void*)pkt->args[0].argull; // gpu ptr
-	const void *src = (const void*)((uintptr_t)pkt + pkt->args[1].argull);
-	size_t count = pkt->args[2].arr_argi[0];
+	void *dst;
+	const void *src;
+	size_t count;
 	enum cudaMemcpyKind kind = cudaMemcpyHostToDevice;
+	unpack_cudaMemcpy(pkt, (pkt + sizeof(*pkt)), &dst, &src, &count, kind);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
@@ -478,10 +486,11 @@ static OPS_FN_PROTO(CudaMemcpyD2H)
 	TIMER_DECLARE1(timer);
 
 	TIMER_START(timer);
-	void *dst = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	void *src = (void*)pkt->args[1].argull; // gpu ptr
-	size_t count = pkt->args[2].arr_argi[0];
+	void *dst;
+	const void *src;
+	size_t count;
 	enum cudaMemcpyKind kind = cudaMemcpyDeviceToHost;
+	unpack_cudaMemcpy(pkt, (pkt + sizeof(*pkt)), &dst, &src, &count, kind);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
@@ -499,10 +508,11 @@ static OPS_FN_PROTO(CudaMemcpyD2D)
 	TIMER_DECLARE1(timer);
 
 	TIMER_START(timer);
-	void *dst = (void*)pkt->args[0].argull;
-	void *src = (void*)pkt->args[1].argull;
-	size_t count = pkt->args[2].arr_argi[0];
+	void *dst;
+	const void *src;
+	size_t count;
 	enum cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
+	unpack_cudaMemcpy(pkt, (pkt + sizeof(*pkt)), &dst, &src, &count, kind);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
@@ -541,9 +551,8 @@ static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
 	TIMER_DECLARE1(timer);
 
 	TIMER_START(timer);
-	void *dst = (void*)((uintptr_t)pkt + pkt->args[0].argull);
-	size_t count = pkt->args[2].arr_argi[0];
-	size_t offset = pkt->args[2].arr_argi[1];
+	void *dst;
+	size_t count, offset;
 
 	struct cuda_fatcubin_info *fatcubin;
 	struct fatcubins *cubins = NULL;
@@ -553,32 +562,26 @@ static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
 	// the name of the variable, OR the address directly. Thus 'symbol' will
 	// either point to a string (within the shm region) or contain an address
 	// representing the variable (which should not be dereferenced!).
-	char *symbol = NULL;
+	const char *symbol = NULL;
 
-	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING) {
-		symbol = (char*)((uintptr_t)pkt + pkt->args[1].argull);
-	} else {
-		reg_var_args_t *var;
-		symbol = (char*)(pkt->args[1].argull);
-		// Locate the var structure; symbols are unique across cubins.
-		// See quote from A. Kerr in libci.c
-		// XXX TODO Move this code to a common function or something.
-		bool found = false;
-		cubins_for_each_cubin(cubins, fatcubin) {
-			cubin_for_each_variable(fatcubin, var) {
-				if (var->hostVar == symbol) found = true;
-				if (found) break;
-			}
+	unpack_cudaMemcpyFromSymbol(pkt, (pkt + sizeof(*pkt)),
+			&dst, &symbol, &count, &offset, cudaMemcpyDeviceToHost);
+
+	// Locate the var structure; symbols are unique across cubins.
+	// See quote from A. Kerr in libci.c
+	// XXX TODO Move this code to a common function or something.
+	bool found = false;
+	reg_var_args_t *var;
+	cubins_for_each_cubin(cubins, fatcubin) {
+		cubin_for_each_variable(fatcubin, var) {
+			if (var->hostVar == symbol) found = true;
 			if (found) break;
 		}
-		BUG(!found);
-		symbol = var->dom0HostAddr;
+		if (found) break;
 	}
+	BUG(!found);
+	symbol = var->dom0HostAddr;
 
-	printd(DBG_DEBUG, "memcpyFromSymb symb=%p count=%lu\n", symbol, count);
-	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING) {
-		printd(DBG_DEBUG, "\tsymbol is string: %s\n", symbol);
-	}
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
@@ -596,11 +599,13 @@ static OPS_FN_PROTO(CudaMemcpyToArrayH2D)
 	TIMER_DECLARE1(timer);
 
 	TIMER_START(timer);
-	struct cudaArray *dst = pkt->args[0].cudaArray;
-	size_t wOffset = pkt->args[1].arr_argi[0];
-	size_t hOffset = pkt->args[1].arr_argi[1];
-	const void *src = (const void*)((uintptr_t)pkt + pkt->args[2].argull);
-	size_t count = pkt->args[3].arr_argi[0];
+	struct cudaArray *dst;
+	size_t wOffset;
+	size_t hOffset;
+	const void *src;
+	size_t count;
+	unpack_cudaMemcpyToArray(pkt, (pkt + sizeof(*pkt)),
+			&dst, &wOffset, &hOffset, &src, &count, cudaMemcpyHostToDevice);
 	printd(DBG_DEBUG, "called\n");
 	TIMER_END(timer, pkt->lat.exec.setup);
 
@@ -619,11 +624,13 @@ static OPS_FN_PROTO(CudaMemcpyToArrayD2D)
 	TIMER_DECLARE1(timer);
 
 	TIMER_START(timer);
-	struct cudaArray *dst = pkt->args[0].cudaArray;
-	size_t wOffset = pkt->args[1].arr_argi[0];
-	size_t hOffset = pkt->args[1].arr_argi[1];
-	const void *src = pkt->args[2].argp; // gpu ptr?
-	size_t count = pkt->args[3].arr_argi[0];
+	struct cudaArray *dst;
+	size_t wOffset;
+	size_t hOffset;
+	const void *src;
+	size_t count;
+	unpack_cudaMemcpyToArray(pkt, (pkt + sizeof(*pkt)),
+			&dst, &wOffset, &hOffset, &src, &count, cudaMemcpyHostToDevice);
 	printd(DBG_DEBUG, "called\n");
 	TIMER_END(timer, pkt->lat.exec.setup);
 
@@ -641,24 +648,21 @@ static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
 {
 	TIMER_DECLARE1(timer);
 
-	TIMER_START(timer);
-	const void *src = (void*)((uintptr_t)pkt + pkt->args[1].argull);
-	size_t count = pkt->args[2].arr_argi[0];
-	size_t offset = pkt->args[2].arr_argi[1];
-
+	const void *src;
+	size_t count, offset;
+	const char *symbol = NULL;
+	reg_var_args_t *var = NULL;
 	struct cuda_fatcubin_info *fatcubin = NULL;
 	struct fatcubins *cubins = NULL;
 	GET_CUBIN_VALIST(cubins, pkt);
 
+	TIMER_START(timer);
+	unpack_cudaMemcpyToSymbol(pkt, (pkt + sizeof(*pkt)),
+			&symbol, &src, &count, &offset, cudaMemcpyHostToDevice);
 	// See comments in CudaMemcpyFromSymbolD2H.
-
-	char *symbol = NULL;
-
-	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING) {
-		symbol = (char*)((uintptr_t)pkt + pkt->args[0].argull);
-	} else {
-		reg_var_args_t *var = NULL;
-		symbol = (char*)(pkt->args[0].argull);
+	// Symbols which have not been registered via cudaRegisterVar are strings,
+	// and don't require the below 'lookup'.
+	if (!(pkt->flags & CUDA_PKT_SYMB_IS_STRING)) {
 		bool found = false;
 		cubins_for_each_cubin(cubins, fatcubin) {
 			cubin_for_each_variable(fatcubin, var) {
@@ -669,11 +673,6 @@ static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
 		}
 		BUG(!found);
 		symbol = var->dom0HostAddr;
-	}
-
-	printd(DBG_DEBUG, "memcpyToSymb symb=%p count=%lu\n", symbol, count);
-	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING) {
-		printd(DBG_DEBUG, "\tsymbol is string: %s\n", symbol);
 	}
 	TIMER_END(timer, pkt->lat.exec.setup);
 
@@ -717,10 +716,12 @@ static OPS_FN_PROTO(CudaMemset)
 {
 	TIMER_DECLARE1(timer);
 
+	void *devPtr;
+	int value;
+	size_t count;
+
 	TIMER_START(timer);
-	void *devPtr = (void*)pkt->args[0].argull;
-	int value = pkt->args[1].argll;
-	size_t count = pkt->args[2].arr_argi[0];
+	unpack_cudaMemset(pkt, &devPtr, &value, &count);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
@@ -741,18 +742,20 @@ static OPS_FN_PROTO(CudaBindTexture)
 {
 	TIMER_DECLARE1(timer);
 
-	TIMER_START(timer);
-	struct textureReference *texRef = pkt->args[0].argp; // symbol addr
-	struct textureReference *new_tex = &pkt->args[1].texRef; // data at symbol
-	void *devPtr = pkt->args[2].argp;
-	struct cudaChannelFormatDesc *desc = &pkt->args[3].desc;
-	size_t size = pkt->args[4].arr_argi[0];
+	const struct textureReference *texRef; // symbol addr
+	const struct textureReference *new_tex; // data at symbol
+	const void *devPtr;
+	const struct cudaChannelFormatDesc *desc;
+	size_t size;
 	size_t offset;
 	reg_tex_args_t *tex;
-
 	struct cuda_fatcubin_info *fatcubin = NULL;
 	struct fatcubins *cubins = NULL;
+
+	TIMER_START(timer);
 	GET_CUBIN_VALIST(cubins, pkt);
+
+	unpack_cudaBindTexture(pkt, &texRef, &new_tex, &devPtr, &desc, &size);
 
 	// Look for the texture. Associate the application reference with the one
 	// registered in the sink address space.
@@ -774,7 +777,7 @@ static OPS_FN_PROTO(CudaBindTexture)
 
 	TIMER_START(timer);
 	pkt->ret_ex_val.err = cudaBindTexture(&offset, &tex->tex, devPtr, desc, size);
-	pkt->args[0].arr_argi[0] = offset;
+	insert_cudaBindTexture(pkt, offset);
 	TIMER_END(timer, pkt->lat.exec.call);
 	return 0;
 }
@@ -783,20 +786,22 @@ static OPS_FN_PROTO(CudaBindTextureToArray)
 {
 	TIMER_DECLARE1(timer);
 
-	TIMER_START(timer);
 	//! address of texture variable in application; use for lookup
-	struct textureReference *texRef = pkt->args[0].argp;
+	const struct textureReference *texRef;
 	//! new state of texture app has provided
-	struct textureReference *new_tex = &pkt->args[1].texRef;
-	struct cudaArray *array = pkt->args[2].cudaArray;
+	const struct textureReference *new_tex;
+	const struct cudaArray *array;
 	//! data describing channel format
-	struct cudaChannelFormatDesc *desc = &pkt->args[3].desc;
+	const struct cudaChannelFormatDesc *desc;
 	reg_tex_args_t *tex;
 
 	printd(DBG_DEBUG, "called\n");
 
 	struct cuda_fatcubin_info *fatcubin = NULL;
 	struct fatcubins *cubins = NULL;
+
+	TIMER_START(timer);
+	unpack_cudaBindTextureToArray(pkt, &texRef, &new_tex, &array, &desc);
 	GET_CUBIN_VALIST(cubins, pkt);
 
 	// Look for the texture. Associate the application reference with the one
@@ -866,26 +871,19 @@ static OPS_FN_PROTO(__CudaRegisterFatBinary)
 	TIMER_DECLARE1(timer);
 
 	TIMER_START(timer);
-	int err;
 	void *handle;
-	void *cubin_shm = (void*)((uintptr_t)pkt + pkt->args[0].argull);
 
 	struct fatcubins *cubin_list = NULL;
 	GET_CUBIN_VALIST(cubin_list, pkt);
 
 	// Allocate space to store the new CUBIN and unmarshal it.
-	__cudaFatCudaBinary *cuda_cubin =
-		calloc(1, sizeof(__cudaFatCudaBinary));
+	__cudaFatCudaBinary *cuda_cubin = calloc(1, sizeof(__cudaFatCudaBinary));
 	if (!cuda_cubin) {
 		printd(DBG_ERROR, "out of memory\n");
 		fprintf(stderr, "out of memory\n");
 		goto fail;
 	}
-	err = unpackFatBinary(cuda_cubin, cubin_shm);
-	if (err < 0) {
-		printd(DBG_ERROR, "error unpacking fat cubin\n");
-		goto fail;
-	}
+	unpack_cudaRegisterFatBinary(pkt, (pkt + sizeof(*pkt)), cuda_cubin);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
@@ -907,9 +905,10 @@ static OPS_FN_PROTO(__CudaUnregisterFatBinary)
 {
 	TIMER_DECLARE1(timer);
 
-	void **handle = pkt->args[0].argdp;
+	void **handle;
 
 	TIMER_START(timer);
+	unpack_cudaUnregisterFatBinary(pkt, &handle);
 	__cudaUnregisterFatBinary(handle);
 	// FIXME Deallocate the fat binary data structures.
 	pkt->ret_ex_val.err = cudaSuccess;
@@ -923,27 +922,19 @@ static OPS_FN_PROTO(__CudaUnregisterFatBinary)
 static OPS_FN_PROTO(__CudaRegisterFunction)
 {
 	TIMER_DECLARE1(timer);
-	int err, exit_errno;
+	int exit_errno;
+	struct fatcubins *cubin_list = NULL;
 
 	TIMER_START(timer);
-	struct fatcubins *cubin_list = NULL;
 	GET_CUBIN_VALIST(cubin_list, pkt);
 
 	// unpack the serialized arguments from shared mem
-	reg_func_args_t *pargs =  // packed
-		(reg_func_args_t*)((uintptr_t)pkt + pkt->args[0].argull);
-	reg_func_args_t *uargs = // unpacked
-		calloc(1, sizeof(reg_func_args_t));
+	reg_func_args_t *uargs = calloc(1, sizeof(reg_func_args_t));
 	if (!uargs) {
 		exit_errno = -ENOMEM;
 		goto fail;
 	}
-	err = unpackRegFuncArgs(uargs, (char *)pargs); // FIXME don't use char*
-	if (err < 0) {
-		printd(DBG_ERROR, "error unpacking regfunc args\n");
-		exit_errno = -EPROTO;
-		goto fail;
-	}
+	unpack_cudaRegisterFunction(pkt, (pkt + sizeof(*pkt)), uargs);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
@@ -966,19 +957,19 @@ fail:
 	return exit_errno;
 }
 
+// This registers user-level addresses of application global variables. If a
+// symbol passed into a function that accepts a symbol is not found
 static OPS_FN_PROTO(__CudaRegisterVar)
 {
 	TIMER_DECLARE1(timer);
 
 	TIMER_START(timer);
-	int err, exit_errno;
+	int exit_errno;
 
 	struct fatcubins *cubin_list = NULL;
 	GET_CUBIN_VALIST(cubin_list, pkt);
 
 	// unpack the serialized arguments from shared mem
-	reg_var_args_t *pargs = // packed
-		(reg_var_args_t*)((uintptr_t)pkt + pkt->args[0].argull);
 	reg_var_args_t *uargs = // unpacked
 		calloc(1, sizeof(reg_var_args_t));
 	if (!uargs) {
@@ -986,12 +977,7 @@ static OPS_FN_PROTO(__CudaRegisterVar)
 		exit_errno = -ENOMEM;
 		goto fail;
 	}
-	err = unpackRegVar(uargs, (char *)pargs);
-	if (err < 0) {
-		printd(DBG_ERROR, "error unpacking regvar args\n");
-		exit_errno = -EPROTO;
-		goto fail;
-	}
+	unpack_cudaRegisterVar(pkt, (pkt + sizeof(*pkt)), uargs);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
