@@ -303,9 +303,82 @@ unpack_cudaSetValidDevices(struct cuda_packet *pkt, void *buf,
 // Stream Management API
 //
 
-// TODO
-// 		cudaStreamCreate
-// 		cudaStreamSynchronize
+static inline void
+pack_cudaStreamCreate(struct cuda_packet *pkt)
+{
+	pkt->method_id = CUDA_STREAM_CREATE;
+	pkt->thr_id = pthread_self();
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = true;
+}
+
+static inline void
+insert_cudaStreamCreate(struct cuda_packet *pkt,
+		cudaStream_t stream)
+{
+	pkt->args[0].stream = stream;
+}
+
+static inline void
+extract_cudaStreamCreate(struct cuda_packet *pkt,
+		cudaStream_t *pStream)
+{
+	*pStream = pkt->args[0].stream;
+}
+
+static inline void
+pack_cudaStreamDestroy(struct cuda_packet *pkt,
+		cudaStream_t stream)
+{
+	pkt->method_id = CUDA_STREAM_DESTROY;
+	pkt->thr_id = pthread_self();
+	pkt->args[0].stream = stream;
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = false;
+}
+
+static inline void
+unpack_cudaStreamDestroy(struct cuda_packet *pkt,
+		cudaStream_t *pStream)
+{
+	*pStream = pkt->args[0].stream;
+}
+
+static inline void
+pack_cudaStreamQuery(struct cuda_packet *pkt,
+		cudaStream_t stream)
+{
+	pkt->method_id = CUDA_STREAM_DESTROY;
+	pkt->thr_id = pthread_self();
+	pkt->args[0].stream = stream;
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = true;
+}
+
+static inline void
+unpack_cudaStreamQuery(struct cuda_packet *pkt,
+		cudaStream_t *pStream)
+{
+	*pStream = pkt->args[0].stream;
+}
+
+static inline void
+pack_cudaStreamSynchronize(struct cuda_packet *pkt,
+		cudaStream_t stream)
+{
+	pkt->method_id = CUDA_STREAM_SYNCHRONIZE;
+	pkt->thr_id = pthread_self();
+	pkt->args[0].stream = stream;
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = true;
+}
+
+static inline void
+unpack_cudaStreamSynchronize(struct cuda_packet *pkt,
+		cudaStream_t *pStream)
+{
+	*pStream = pkt->args[0].stream;
+}
 
 //
 // Execution Control API
@@ -320,7 +393,7 @@ pack_cudaConfigureCall(struct cuda_packet *pkt,
 	pkt->args[0].arg_dim = gridDim; // = on structs works :)
 	pkt->args[1].arg_dim = blockDim;
 	pkt->args[2].arr_argi[0] = sharedMem;
-	pkt->args[3].argull = (uint64_t)stream;
+	pkt->args[3].stream = stream;
 	pkt->len = sizeof(*pkt);
 	pkt->is_sync = false;
 }
@@ -333,7 +406,7 @@ unpack_cudaConfigureCall(struct cuda_packet *pkt,
 	*gridDim = pkt->args[0].arg_dim;
 	*blockDim = pkt->args[1].arg_dim;
 	*sharedMem = pkt->args[2].arr_argi[0];
-	*stream = (cudaStream_t)pkt->args[3].argull;
+	*stream = pkt->args[3].stream;
 }
 
 // TODO
@@ -894,14 +967,14 @@ pack_cudaMemcpyToSymbolAsync(struct cuda_packet *pkt, void *buf,
 	pkt->len = sizeof(*pkt);
 
 	if (__func_symb_param_is_string(symbol)) {
-		pkt->args[1].argull = buf_offset; // of symbol string
+		pkt->args[0].argull = buf_offset; // of symbol string
 		memcpy(buf + buf_offset, symbol, strlen(symbol) + 1);
 		pkt->flags |= CUDA_PKT_SYMB_IS_STRING;
 		printd(DBG_DEBUG, "\tsymb is string: %s\n", symbol);
 		buf_offset += strlen(symbol) + 1;
 		pkt->len += strlen(symbol) + 1;
 	} else {
-		pkt->args[1].argull = (uintptr_t)symbol;
+		pkt->args[0].argull = (uintptr_t)symbol;
 	}
 
 	switch (kind) {

@@ -183,15 +183,48 @@ static OPS_FN_PROTO(CudaSetValidDevices)
 static OPS_FN_PROTO(CudaStreamCreate)
 {
 	TIMER_DECLARE1(timer);
-	static unsigned long unique_bogus_stream_id = 0xdead00000000;
-	printd(DBG_WARNING, "streams ignored in current implementation\n");
+	cudaStream_t stream;
 
 	TIMER_START(timer);
-	// Until we do something meaningful with streams, just return a bogus value.
-	// It's an opaque type to the caller, they won't care what the value is.
-	pkt->args[0].stream = (cudaStream_t)unique_bogus_stream_id++;
-	pkt->ret_ex_val.err = cudaSuccess;
+	pkt->ret_ex_val.err = cudaStreamCreate(&stream);
 	TIMER_END(timer, pkt->lat.exec.call);
+	insert_cudaStreamCreate(pkt, stream);
+
+	printd(DBG_DEBUG, "stream=%p ret=%u\n", stream, pkt->ret_ex_val.err);
+
+	EXAMINE_CUDAERROR(pkt); // not necessary at the moment
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaStreamDestroy)
+{
+	TIMER_DECLARE1(timer);
+	cudaStream_t stream;
+
+	unpack_cudaStreamDestroy(pkt, &stream);
+
+	TIMER_START(timer);
+	pkt->ret_ex_val.err = cudaStreamDestroy(stream);
+	TIMER_END(timer, pkt->lat.exec.call);
+
+	printd(DBG_DEBUG, "stream=%p ret=%u\n", stream, pkt->ret_ex_val.err);
+
+	EXAMINE_CUDAERROR(pkt); // not necessary at the moment
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaStreamQuery)
+{
+	TIMER_DECLARE1(timer);
+	cudaStream_t stream;
+
+	unpack_cudaStreamQuery(pkt, &stream);
+
+	TIMER_START(timer);
+	pkt->ret_ex_val.err = cudaStreamQuery(stream);
+	TIMER_END(timer, pkt->lat.exec.call);
+
+	printd(DBG_DEBUG, "stream=%p ret=%u\n", stream, pkt->ret_ex_val.err);
 
 	EXAMINE_CUDAERROR(pkt); // not necessary at the moment
 	return 0;
@@ -199,14 +232,16 @@ static OPS_FN_PROTO(CudaStreamCreate)
 
 static OPS_FN_PROTO(CudaStreamSynchronize)
 {
+	cudaStream_t stream;
 	TIMER_DECLARE1(timer);
-	printd(DBG_WARNING, "streams ignored in current implementation\n");
+
+	unpack_cudaStreamSynchronize(pkt, &stream);
 
 	TIMER_START(timer);
-	// ignore args[0].stream
-	// call threadsync (does this simulate the behavior?)
-	pkt->ret_ex_val.err = cudaThreadSynchronize();
+	pkt->ret_ex_val.err = cudaStreamSynchronize(stream);
 	TIMER_END(timer, pkt->lat.exec.call);
+
+	printd(DBG_DEBUG, "stream=%p ret=%u\n", stream, pkt->ret_ex_val.err);
 
 	EXAMINE_CUDAERROR(pkt);
 	return 0;
@@ -1084,6 +1119,8 @@ const struct cuda_ops exec_ops =
 	.setupArgument = CudaSetupArgument,
 	.setValidDevices = CudaSetValidDevices,
 	.streamCreate = CudaStreamCreate,
+	.streamDestroy = CudaStreamDestroy,
+	.streamQuery = CudaStreamQuery,
 	.streamSynchronize = CudaStreamSynchronize,
 	.threadExit = CudaThreadExit,
 	.threadSynchronize = CudaThreadSynchronize,

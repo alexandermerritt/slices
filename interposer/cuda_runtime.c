@@ -512,24 +512,60 @@ cudaError_t cudaSetValidDevices(int *device_arr, int len)
 cudaError_t cudaStreamCreate(cudaStream_t *pStream)
 {
 	struct cuda_packet *shmpkt;
-
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_STREAM_CREATE;
-	shmpkt->thr_id = pthread_self();
-	// We'll expect the value of *pStream to exist in args[0]
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaStreamCreate(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
 	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
-	*pStream = shmpkt->args[0].stream;
+	extract_cudaStreamCreate(shmpkt, pStream);
 	printd(DBG_DEBUG, "stream=%p\n", *pStream);
+
+	update_latencies(&shmpkt->lat);
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaStreamDestroy(cudaStream_t stream)
+{
+	struct cuda_packet *shmpkt;
+	TIMER_DECLARE1(t);
+
+	printd(DBG_DEBUG, "stream=%p\n", *pStream);
+
+	TIMER_START(t);
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaStreamDestroy(shmpkt, stream);
+	TIMER_END(t, shmpkt->lat.lib.setup);
+
+	TIMER_START(t);
+	HANDOFF_AND_SPIN(shmpkt);
+	TIMER_END(t, shmpkt->lat.lib.wait);
+
+	update_latencies(&shmpkt->lat);
+	return shmpkt->ret_ex_val.err;
+}
+
+cudaError_t cudaStreamQuery(cudaStream_t stream)
+{
+	struct cuda_packet *shmpkt;
+	TIMER_DECLARE1(t);
+
+	printd(DBG_DEBUG, "stream=%p\n", *pStream);
+
+	TIMER_START(t);
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaStreamQuery(shmpkt, stream);
+	TIMER_END(t, shmpkt->lat.lib.setup);
+
+	TIMER_START(t);
+	HANDOFF_AND_SPIN(shmpkt);
+	TIMER_END(t, shmpkt->lat.lib.wait);
+
 	update_latencies(&shmpkt->lat);
 	return shmpkt->ret_ex_val.err;
 }
@@ -537,17 +573,13 @@ cudaError_t cudaStreamCreate(cudaStream_t *pStream)
 cudaError_t cudaStreamSynchronize(cudaStream_t stream)
 {
 	struct cuda_packet *shmpkt;
+	TIMER_DECLARE1(t);
+
 	printd(DBG_DEBUG, "stream=%p\n", stream);
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_STREAM_SYNCHRONIZE;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].stream = stream;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaStreamSynchronize(shmpkt, stream);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);

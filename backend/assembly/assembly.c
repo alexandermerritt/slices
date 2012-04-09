@@ -834,6 +834,12 @@ demux(
 		case CUDA_STREAM_CREATE:
 			mapping->ops.streamCreate(pkt, NULL, mapping->rpc);
 			break;
+		case CUDA_STREAM_DESTROY:
+			mapping->ops.streamDestroy(pkt, NULL, mapping->rpc);
+			break;
+		case CUDA_STREAM_QUERY:
+			mapping->ops.streamQuery(pkt, NULL, mapping->rpc);
+			break;
 		case CUDA_STREAM_SYNCHRONIZE:
 			mapping->ops.streamSynchronize(pkt, NULL, mapping->rpc);
 			break;
