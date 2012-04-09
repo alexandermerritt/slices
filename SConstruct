@@ -45,7 +45,7 @@ else:
 # Extract arguments
 #
 args = {}
-args['debug'] = ARGUMENTS.get('debug', 0)
+args['debug'] = ARGUMENTS.get('dbg', 0)
 args['timing'] = ARGUMENTS.get('timing', 0)
 args['network'] = ARGUMENTS.get('network', 'eth')
 
