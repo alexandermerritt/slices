@@ -535,7 +535,7 @@ cudaError_t cudaStreamDestroy(cudaStream_t stream)
 	struct cuda_packet *shmpkt;
 	TIMER_DECLARE1(t);
 
-	printd(DBG_DEBUG, "stream=%p\n", *pStream);
+	printd(DBG_DEBUG, "stream=%p\n", stream);
 
 	TIMER_START(t);
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
@@ -555,7 +555,7 @@ cudaError_t cudaStreamQuery(cudaStream_t stream)
 	struct cuda_packet *shmpkt;
 	TIMER_DECLARE1(t);
 
-	printd(DBG_DEBUG, "stream=%p\n", *pStream);
+	printd(DBG_DEBUG, "stream=%p\n", stream);
 
 	TIMER_START(t);
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
