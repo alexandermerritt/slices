@@ -13,8 +13,15 @@
 
 #ifdef TIMING
 
+struct call
+{
+	method_id_t id;
+	unsigned long lat; // ency
+	size_t bytes; // cuda_packet.len
+};
+
 void timers_init(void);
-void update_latencies(const struct rpc_latencies *l);
+void update_latencies(const struct rpc_latencies *l, method_id_t id, size_t call_size);
 void print_latencies(void);
 
 void timers_start_attach(void);
@@ -25,7 +32,7 @@ void timers_stop_detach(void);
 #else	/* !TIMING */
 
 #define timers_init()
-#define update_latencies(lat)
+#define update_latencies(lat,id,sz)
 #define print_latencies()
 
 #define timers_start_attach

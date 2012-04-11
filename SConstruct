@@ -46,7 +46,11 @@ else:
 #
 args = {}
 args['debug'] = ARGUMENTS.get('dbg', 0)
+# Perform latency measurements of the code.
 args['timing'] = ARGUMENTS.get('timing', 0)
+# Timing, but without use of the backend; native passthrough only.
+# XXX DO NOT run multi-threaded codes with timing_native
+args['timing_native'] = ARGUMENTS.get('timing_native', 0)
 args['network'] = ARGUMENTS.get('network', 'eth')
 
 #
@@ -64,6 +68,12 @@ else:
 
 if int(args['timing']):
 	ccflags.append('-DTIMING')
+
+if int(args['timing_native']):
+	if not int(args['timing']):
+		print('--> timing_native only valid with timing')
+		sys.exit(1)
+	ccflags.append('-DTIMING_NATIVE')
 
 if args['network'] == 'eth':
 	ccflags.append('-DNIC_ETHERNET')
