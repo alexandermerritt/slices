@@ -87,8 +87,10 @@ extern void* get_region(pthread_t tid);
 //! to indicate the error with the dynamic loaded library
 //static cudaError_t cudaErrorDL = cudaErrorUnknown;
 
+#if !(defined(TIMING) && defined(TIMING_NATIVE))
 //! State machine for cudaGetLastError()
 static cudaError_t cuda_err = cudaSuccess;
+#endif
 
 //! Reference count for register and unregister fatbinary invocations.
 static unsigned int num_registered_cubins = 0;
@@ -190,12 +192,78 @@ cudaError_t cudaThreadSynchronize(void)
 
 const char* cudaGetErrorString(cudaError_t error)
 {
+#if defined(TIMING) && defined(TIMING_NATIVE)
 	return bypass.cudaGetErrorString(error);
+#else
+	const char* (*f)(cudaError_t error) =
+		dlsym(RTLD_NEXT, __func__);
+	if (f) return f(error);
+	switch (error) {
+		case cudaSuccess: return "cudaSuccess";
+		case cudaErrorMissingConfiguration: return "cudaErrorMissingConfiguration";
+		case cudaErrorMemoryAllocation: return "cudaErrorMemoryAllocation";
+		case cudaErrorInitializationError: return "cudaErrorInitializationError";
+		case cudaErrorLaunchFailure: return "cudaErrorLaunchFailure";
+		case cudaErrorPriorLaunchFailure: return "cudaErrorPriorLaunchFailure";
+		case cudaErrorLaunchTimeout: return "cudaErrorLaunchTimeout";
+		case cudaErrorLaunchOutOfResources: return "cudaErrorLaunchOutOfResources";
+		case cudaErrorInvalidDeviceFunction: return "cudaErrorInvalidDeviceFunction";
+		case cudaErrorInvalidConfiguration: return "cudaErrorInvalidConfiguration";
+		case cudaErrorInvalidDevice: return "cudaErrorInvalidDevice";
+		case cudaErrorInvalidValue: return "cudaErrorInvalidValue";
+		case cudaErrorInvalidPitchValue: return "cudaErrorInvalidPitchValue";
+		case cudaErrorInvalidSymbol: return "cudaErrorInvalidSymbol";
+		case cudaErrorMapBufferObjectFailed: return "cudaErrorMapBufferObjectFailed";
+		case cudaErrorUnmapBufferObjectFailed: return "cudaErrorUnmapBufferObjectFailed";
+		case cudaErrorInvalidHostPointer: return "cudaErrorInvalidHostPointer";
+		case cudaErrorInvalidDevicePointer: return "cudaErrorInvalidDevicePointer";
+		case cudaErrorInvalidTexture: return "cudaErrorInvalidTexture";
+		case cudaErrorInvalidTextureBinding: return "cudaErrorInvalidTextureBinding";
+		case cudaErrorInvalidChannelDescriptor: return "cudaErrorInvalidChannelDescriptor";
+		case cudaErrorInvalidMemcpyDirection: return "cudaErrorInvalidMemcpyDirection";
+		case cudaErrorAddressOfConstant: return "cudaErrorAddressOfConstant";
+		case cudaErrorTextureFetchFailed: return "cudaErrorTextureFetchFailed";
+		case cudaErrorTextureNotBound: return "cudaErrorTextureNotBound";
+		case cudaErrorSynchronizationError: return "cudaErrorSynchronizationError";
+		case cudaErrorInvalidFilterSetting: return "cudaErrorInvalidFilterSetting";
+		case cudaErrorInvalidNormSetting: return "cudaErrorInvalidNormSetting";
+		case cudaErrorMixedDeviceExecution: return "cudaErrorMixedDeviceExecution";
+		case cudaErrorCudartUnloading: return "cudaErrorCudartUnloading";
+		case cudaErrorNotYetImplemented: return "cudaErrorNotYetImplemented";
+		case cudaErrorMemoryValueTooLarge: return "cudaErrorMemoryValueTooLarge";
+		case cudaErrorInvalidResourceHandle: return "cudaErrorInvalidResourceHandle";
+		case cudaErrorNotReady: return "cudaErrorNotReady";
+		case cudaErrorInsufficientDriver: return "cudaErrorInsufficientDriver";
+		case cudaErrorSetOnActiveProcess: return "cudaErrorSetOnActiveProcess";
+		case cudaErrorInvalidSurface: return "cudaErrorInvalidSurface";
+		case cudaErrorNoDevice: return "cudaErrorNoDevice";
+		case cudaErrorECCUncorrectable: return "cudaErrorECCUncorrectable";
+		case cudaErrorSharedObjectSymbolNotFound: return "cudaErrorSharedObjectSymbolNotFound";
+		case cudaErrorSharedObjectInitFailed: return "cudaErrorSharedObjectInitFailed";
+		case cudaErrorUnsupportedLimit: return "cudaErrorUnsupportedLimit";
+		case cudaErrorDuplicateVariableName: return "cudaErrorDuplicateVariableName";
+		case cudaErrorDuplicateTextureName: return "cudaErrorDuplicateTextureName";
+		case cudaErrorDuplicateSurfaceName: return "cudaErrorDuplicateSurfaceName";
+		case cudaErrorDevicesUnavailable: return "cudaErrorDevicesUnavailable";
+		case cudaErrorInvalidKernelImage: return "cudaErrorInvalidKernelImage";
+		case cudaErrorNoKernelImageForDevice: return "cudaErrorNoKernelImageForDevice";
+		case cudaErrorIncompatibleDriverContext: return "cudaErrorIncompatibleDriverContext";
+		case cudaErrorStartupFailure: return "cudaErrorStartupFailure";
+		case cudaErrorApiFailureBase: return "cudaErrorApiFailureBase";
+		case cudaErrorUnknown:
+		default:
+			return "cudaErrorUnknown";
+	}
+#endif
 }
 
 cudaError_t cudaGetLastError(void)
 {
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	return bypass.cudaGetLastError();
+#else
 	return cuda_err; // ??
+#endif
 }
 
 //
@@ -758,31 +826,27 @@ cudaError_t cudaFreeArray(struct cudaArray * array)
 
 cudaError_t cudaFreeHost(void * ptr)
 {
-	if (ptr) free(ptr);
-	return cudaSuccess;
-
-#if 0 // Working code that forwards the RPC to the assembly runtime.
-	struct cuda_packet *shmpkt;
-	printd(DBG_DEBUG, "ptr=%p\n", ptr);
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
-	TIMER_START(t);
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_FREE_HOST;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argp = ptr;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
-	TIMER_END(t, shmpkt->lat.lib.setup);
 
-	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
-	TIMER_END(t, shmpkt->lat.lib.wait);
-
-	update_latencies(&shmpkt->lat, shmpkt->len);
-	return shmpkt->ret_ex_val.err;
+#if defined(TIMING)
+	struct rpc_latencies lat;
+	memset(&lat, 0, sizeof(lat));
 #endif
+
+	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	cerr = bypass.cudaFreeHost(ptr);
+	TIMER_END(t, lat.exec.call);
+#else
+	if (ptr)
+		free(ptr);
+	cerr = cudaSuccess;
+	TIMER_END(t, lat.lib.setup);
+#endif
+
+	update_latencies(&lat, CUDA_FREE_HOST, 0UL);
+	return cerr;
 }
 
 /**
