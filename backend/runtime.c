@@ -65,7 +65,7 @@ static const char wd[] = "."; //! working dir of runtime once exec'd
 // one assembly, one hint and one sink child.
 static struct assembly_hint hint =
 {
-	.num_gpus = 2,
+	.num_gpus = 1,
 	.batch_size = CUDA_BATCH_MAX,
 	// Configure network based on build flag
 #if defined(NIC_SDP)
