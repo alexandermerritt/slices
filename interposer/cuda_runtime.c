@@ -443,7 +443,7 @@ cudaError_t cudaSetValidDevices(int *device_arr, int len)
 	shmpkt = &tpkt;
 #else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaSetValidDevices(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	pack_cudaSetValidDevices(shmpkt, (shmpkt + 1),
 			device_arr, len);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
@@ -673,7 +673,7 @@ cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *f
 	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
 	shmpkt->args[1].argull = (shmpkt->args[0].argull + sizeof(*attr)); // offset
 	shmpkt->args[2].arr_argi[0] = func_len;
-	func_shm = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
+	func_shm = (void*)((void*)shmpkt + shmpkt->args[1].argull);
 	memcpy(func_shm, func, func_len);
 	shmpkt->len = sizeof(*shmpkt) + func_len;
 	shmpkt->is_sync = true;
@@ -686,7 +686,7 @@ cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *f
 	TIMER_RESUME(tsetup);
 	// Copy out the structure into the user argument
 	attr_shm = (struct cudaFuncAttributes*)
-		((uintptr_t)shmpkt + shmpkt->args[0].argull);
+		((void*)shmpkt + shmpkt->args[0].argull);
 	memcpy(attr, attr_shm, sizeof(*attr));
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
 
@@ -746,7 +746,7 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset)
 	shmpkt = &tpkt;
 #else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaSetupArgument(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	pack_cudaSetupArgument(shmpkt, (shmpkt + 1),
 			arg, size, offset);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
@@ -1051,7 +1051,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 #else
 	TIMER_DECLARE1(twait);
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaMemcpy(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	pack_cudaMemcpy(shmpkt, (shmpkt + 1),
 			dst, src, count, kind);
 	TIMER_PAUSE(tsetup);
 
@@ -1063,7 +1063,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
 	TIMER_RESUME(tsetup);
-	extract_cudaMemcpy(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	extract_cudaMemcpy(shmpkt, ((void*)shmpkt + sizeof(*shmpkt)),
 			dst, src, count, kind);
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
 	cerr = shmpkt->ret_ex_val.err;
@@ -1100,7 +1100,7 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 #else
 	TIMER_DECLARE1(twait);
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaMemcpyAsync(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	pack_cudaMemcpyAsync(shmpkt, (shmpkt + 1),
 			dst, src, count, kind, stream);
 	TIMER_PAUSE(tsetup);
 
@@ -1109,7 +1109,7 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
 	TIMER_RESUME(tsetup);
-	extract_cudaMemcpyAsync(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	extract_cudaMemcpyAsync(shmpkt, ((void*)shmpkt + sizeof(*shmpkt)),
 			dst, src, count, kind, stream);
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
 	cerr = shmpkt->ret_ex_val.err;
@@ -1147,7 +1147,7 @@ cudaError_t cudaMemcpyFromSymbol(
 #else
 	TIMER_DECLARE1(twait);
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaMemcpyFromSymbol(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	pack_cudaMemcpyFromSymbol(shmpkt, (shmpkt + 1),
 			dst, symbol, count, offset, kind);
 	TIMER_PAUSE(tsetup);
 
@@ -1156,7 +1156,7 @@ cudaError_t cudaMemcpyFromSymbol(
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
 	TIMER_RESUME(tsetup);
-	extract_cudaMemcpyFromSymbol(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	extract_cudaMemcpyFromSymbol(shmpkt, ((void*)shmpkt + sizeof(*shmpkt)),
 			dst, symbol, count, offset, kind);
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
 	cerr = shmpkt->ret_ex_val.err;
@@ -1194,7 +1194,7 @@ cudaError_t cudaMemcpyToArray(
 	shmpkt = &tpkt;
 #else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaMemcpyToArray(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	pack_cudaMemcpyToArray(shmpkt, (shmpkt + 1),
 			dst, wOffset, hOffset, src, count, kind);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
@@ -1234,7 +1234,7 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 	shmpkt = &tpkt;
 #else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaMemcpyToSymbol(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	pack_cudaMemcpyToSymbol(shmpkt, (shmpkt + 1),
 			symbol, src, count, offset, kind);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
@@ -1273,7 +1273,7 @@ cudaError_t cudaMemcpyToSymbolAsync(
 	shmpkt = &tpkt;
 #else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaMemcpyToSymbolAsync(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	pack_cudaMemcpyToSymbolAsync(shmpkt, (shmpkt + 1),
 			symbol, src, count, offset, kind, stream);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
@@ -1609,7 +1609,7 @@ void** __cudaRegisterFatBinary(void* cubin)
 	shmpkt = &tpkt;
 #else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaRegisterFatBinary(shmpkt, (shmpkt + sizeof(*shmpkt)), cubin);
+	pack_cudaRegisterFatBinary(shmpkt, (shmpkt + 1), cubin);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
@@ -1686,7 +1686,7 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	shmpkt = &tpkt;
 #else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaRegisterFunction(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	pack_cudaRegisterFunction(shmpkt, (shmpkt + 1),
 			fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit, tid,
 			bid, bDim, gDim, wSize);
 	TIMER_END(t, shmpkt->lat.lib.setup);
@@ -1724,7 +1724,7 @@ void __cudaRegisterVar(
 	shmpkt = &tpkt;
 #else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaRegisterVar(shmpkt, (shmpkt + sizeof(*shmpkt)),
+	pack_cudaRegisterVar(shmpkt, (shmpkt + 1),
 			fatCubinHandle, hostVar, deviceAddress, deviceName, ext, vsize,
 			constant, global);
 	TIMER_END(t, shmpkt->lat.lib.setup);

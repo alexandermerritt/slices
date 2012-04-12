@@ -165,7 +165,7 @@ static OPS_FN_PROTO(CudaSetValidDevices)
 	TIMER_DECLARE1(timer);
 	int *device_arr;
 	int len;
-	unpack_cudaSetValidDevices(pkt, (pkt + sizeof(*pkt)), &device_arr, &len);
+	unpack_cudaSetValidDevices(pkt, (pkt + 1), &device_arr, &len);
 	printd(DBG_DEBUG, "len=%d\n", len);
 
 	TIMER_START(timer);
@@ -339,7 +339,7 @@ static OPS_FN_PROTO(CudaSetupArgument)
 	const void *arg;
 	size_t size;
 	size_t offset;
-	unpack_cudaSetupArgument(pkt, (pkt + sizeof(*pkt)), &arg, &size, &offset);
+	unpack_cudaSetupArgument(pkt, (pkt + 1), &arg, &size, &offset);
 	printd(DBG_DEBUG, "setupArg arg=%p size=%lu offset=%lu\n",
 			arg, size, offset);
 	TIMER_END(timer, pkt->lat.exec.setup);
@@ -503,7 +503,7 @@ static OPS_FN_PROTO(CudaMemcpyH2D)
 	const void *src;
 	size_t count;
 	enum cudaMemcpyKind kind = cudaMemcpyHostToDevice;
-	unpack_cudaMemcpy(pkt, (pkt + sizeof(*pkt)), &dst, &src, &count, kind);
+	unpack_cudaMemcpy(pkt, (pkt + 1), &dst, &src, &count, kind);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
@@ -525,7 +525,7 @@ static OPS_FN_PROTO(CudaMemcpyD2H)
 	const void *src;
 	size_t count;
 	enum cudaMemcpyKind kind = cudaMemcpyDeviceToHost;
-	unpack_cudaMemcpy(pkt, (pkt + sizeof(*pkt)), &dst, &src, &count, kind);
+	unpack_cudaMemcpy(pkt, (pkt + 1), &dst, &src, &count, kind);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
@@ -547,7 +547,7 @@ static OPS_FN_PROTO(CudaMemcpyD2D)
 	const void *src;
 	size_t count;
 	enum cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
-	unpack_cudaMemcpy(pkt, (pkt + sizeof(*pkt)), &dst, &src, &count, kind);
+	unpack_cudaMemcpy(pkt, (pkt + 1), &dst, &src, &count, kind);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
@@ -599,7 +599,7 @@ static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
 	// representing the variable (which should not be dereferenced!).
 	const char *symbol = NULL;
 
-	unpack_cudaMemcpyFromSymbol(pkt, (pkt + sizeof(*pkt)),
+	unpack_cudaMemcpyFromSymbol(pkt, (pkt + 1),
 			&dst, &symbol, &count, &offset, cudaMemcpyDeviceToHost);
 
 	// Locate the var structure; symbols are unique across cubins.
@@ -639,7 +639,7 @@ static OPS_FN_PROTO(CudaMemcpyToArrayH2D)
 	size_t hOffset;
 	const void *src;
 	size_t count;
-	unpack_cudaMemcpyToArray(pkt, (pkt + sizeof(*pkt)),
+	unpack_cudaMemcpyToArray(pkt, (pkt + 1),
 			&dst, &wOffset, &hOffset, &src, &count, cudaMemcpyHostToDevice);
 	printd(DBG_DEBUG, "called\n");
 	TIMER_END(timer, pkt->lat.exec.setup);
@@ -664,7 +664,7 @@ static OPS_FN_PROTO(CudaMemcpyToArrayD2D)
 	size_t hOffset;
 	const void *src;
 	size_t count;
-	unpack_cudaMemcpyToArray(pkt, (pkt + sizeof(*pkt)),
+	unpack_cudaMemcpyToArray(pkt, (pkt + 1),
 			&dst, &wOffset, &hOffset, &src, &count, cudaMemcpyHostToDevice);
 	printd(DBG_DEBUG, "called\n");
 	TIMER_END(timer, pkt->lat.exec.setup);
@@ -692,7 +692,7 @@ static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
 	GET_CUBIN_VALIST(cubins, pkt);
 
 	TIMER_START(timer);
-	unpack_cudaMemcpyToSymbol(pkt, (pkt + sizeof(*pkt)),
+	unpack_cudaMemcpyToSymbol(pkt, (pkt + 1),
 			&symbol, &src, &count, &offset, cudaMemcpyHostToDevice);
 	// See comments in CudaMemcpyFromSymbolD2H.
 	// Symbols which have not been registered via cudaRegisterVar are strings,
@@ -918,7 +918,7 @@ static OPS_FN_PROTO(__CudaRegisterFatBinary)
 		fprintf(stderr, "out of memory\n");
 		goto fail;
 	}
-	unpack_cudaRegisterFatBinary(pkt, (pkt + sizeof(*pkt)), cuda_cubin);
+	unpack_cudaRegisterFatBinary(pkt, (pkt + 1), cuda_cubin);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
@@ -969,8 +969,11 @@ static OPS_FN_PROTO(__CudaRegisterFunction)
 		exit_errno = -ENOMEM;
 		goto fail;
 	}
-	unpack_cudaRegisterFunction(pkt, (pkt + sizeof(*pkt)), uargs);
+	unpack_cudaRegisterFunction(pkt, (pkt + 1), uargs);
 	TIMER_END(timer, pkt->lat.exec.setup);
+
+	printd(DBG_DEBUG, "handle=%p hostFun=%p deviceFun=%s deviceName=%s\n",
+			uargs->fatCubinHandle, uargs->hostFun, uargs->deviceFun, uargs->deviceName);
 
 	TIMER_START(timer);
 	// Make the call
@@ -1012,7 +1015,7 @@ static OPS_FN_PROTO(__CudaRegisterVar)
 		exit_errno = -ENOMEM;
 		goto fail;
 	}
-	unpack_cudaRegisterVar(pkt, (pkt + sizeof(*pkt)), uargs);
+	unpack_cudaRegisterVar(pkt, (pkt + 1), uargs);
 	TIMER_END(timer, pkt->lat.exec.setup);
 
 	TIMER_START(timer);
