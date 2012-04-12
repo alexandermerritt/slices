@@ -60,7 +60,13 @@ int cuda_rpc_init(struct cuda_rpc *rpc, size_t batch_size)
 
 int cuda_rpc_connect(struct cuda_rpc *rpc, const char *ip, const char *port)
 {
+#if defined(NIC_SDP)
 	return conn_connect(&rpc->sockconn, ip, port, true);
+#elif defined(NIC_ETHERNET)
+	return conn_connect(&rpc->sockconn, ip, port, false);
+#else
+#error NIC_* not defined
+#endif
 }
 
 int cuda_rpc_close(struct cuda_rpc *rpc)
@@ -247,12 +253,20 @@ const struct cuda_ops rpc_ops =
 	.memcpyFromSymbolD2H	= CudaDoRPC,
 	.memcpyH2D				= CudaDoRPC,
 	.memcpyToSymbolH2D		= CudaDoRPC,
+	.memcpyToSymbolAsyncH2D	= CudaDoRPC,
 	.memset					= CudaDoRPC,
+	.memGetInfo				= CudaDoRPC,
 	.registerFatBinary		= CudaDoRPC,
 	.registerFunction		= CudaDoRPC,
 	.registerVar			= CudaDoRPC,
 	.setDevice				= CudaDoRPC,
+	.setDeviceFlags			= CudaDoRPC,
+	.setValidDevices		= CudaDoRPC,
 	.setupArgument			= CudaDoRPC,
+	.streamCreate			= CudaDoRPC,
+	.streamDestroy			= CudaDoRPC,
+	.streamQuery			= CudaDoRPC,
+	.streamSynchronize		= CudaDoRPC,
 	.threadExit				= CudaDoRPC,
 	.threadSynchronize		= CudaDoRPC,
 	.unregisterFatBinary	= CudaDoRPC

@@ -427,7 +427,13 @@ admission_thread(void *arg)
 	pthread_cleanup_push(admission_cleanup, state);
 	state->is_alive = true;
 
+#if defined(NIC_SDP)
 	err = conn_localbind(conn, REMOTE_CUDA_PORT, true);
+#elif defined(NIC_ETHERNET)
+	err = conn_localbind(conn, REMOTE_CUDA_PORT, false);
+#else
+#error NIC_* not defined
+#endif
 	if (err < 0) {
 		state->exit_code = -ENETDOWN;
 		pthread_exit(NULL);
@@ -503,8 +509,17 @@ demux(struct cuda_packet *pkt, struct fatcubins *cubins)
 		case CUDA_MEMSET:
 			exec_ops.memset(pkt);
 			break;
+		case CUDA_MEM_GET_INFO:
+			exec_ops.memGetInfo(pkt);
+			break;
 		case CUDA_SET_DEVICE:
 			exec_ops.setDevice(pkt);
+			break;
+		case CUDA_SET_DEVICE_FLAGS:
+			exec_ops.setDeviceFlags(pkt);
+			break;
+		case CUDA_SET_VALID_DEVICES:
+			exec_ops.setValidDevices(pkt);
 			break;
 		case CUDA_SETUP_ARGUMENT:
 			exec_ops.setupArgument(pkt);
@@ -521,6 +536,18 @@ demux(struct cuda_packet *pkt, struct fatcubins *cubins)
 		case CUDA_FUNC_GET_ATTR:
 			exec_ops.funcGetAttributes(pkt);
 			break;
+		case CUDA_STREAM_CREATE:
+			exec_ops.streamCreate(pkt);
+			break;
+		case CUDA_STREAM_DESTROY:
+			exec_ops.streamDestroy(pkt);
+			break;
+		case CUDA_STREAM_QUERY:
+			exec_ops.streamQuery(pkt);
+			break;
+		case CUDA_STREAM_SYNCHRONIZE:
+			exec_ops.streamSynchronize(pkt);
+			break;
 
 			// Functions which take a cuda_packet* and fatcubins*
 		case CUDA_LAUNCH:
@@ -531,6 +558,9 @@ demux(struct cuda_packet *pkt, struct fatcubins *cubins)
 			break;
 		case CUDA_MEMCPY_TO_SYMBOL_H2D:
 			exec_ops.memcpyToSymbolH2D(pkt, cubins);
+			break;
+		case CUDA_MEMCPY_TO_SYMBOL_ASYNC_H2D:
+			exec_ops.memcpyToSymbolAsyncH2D(pkt, cubins);
 			break;
 		case __CUDA_REGISTER_FAT_BINARY:
 			exec_ops.registerFatBinary(pkt, cubins);
@@ -599,31 +629,22 @@ cudarpc_has_payload(
 			*direction = TO_HOST;
 			size->to_host = sizeof(struct cudaDeviceProp);
 			break;
-		case CUDA_SETUP_ARGUMENT:
-			*direction = FROM_HOST;
-			break;
 		case CUDA_MEMCPY_H2D:
+		case CUDA_MEMCPY_TO_SYMBOL_ASYNC_H2D:
+		case CUDA_MEMCPY_TO_SYMBOL_H2D:
+		case CUDA_SETUP_ARGUMENT:
+		case __CUDA_REGISTER_FAT_BINARY:
+		case __CUDA_REGISTER_FUNCTION:
+		case __CUDA_REGISTER_VARIABLE:
 			*direction = FROM_HOST;
 			break;
 		case CUDA_MEMCPY_D2H:
 			*direction = TO_HOST;
 			size->to_host = pkt->args[2].arr_argi[0];
 			break;
-		case CUDA_MEMCPY_TO_SYMBOL_H2D:
-			*direction = FROM_HOST;
-			break;
 		case CUDA_MEMCPY_FROM_SYMBOL_D2H:
 			*direction = TO_HOST;
 			size->to_host = pkt->args[2].arr_argi[0];
-			break;
-		case  __CUDA_REGISTER_FAT_BINARY:
-			*direction = FROM_HOST;
-			break;
-		case __CUDA_REGISTER_FUNCTION:
-			*direction = FROM_HOST;
-			break;
-		case __CUDA_REGISTER_VARIABLE:
-			*direction = FROM_HOST;
 			break;
 		case CUDA_FUNC_GET_ATTR:
 			*direction = (FROM_HOST | TO_HOST);

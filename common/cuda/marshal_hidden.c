@@ -1,5 +1,5 @@
 /**
- * @file marshal.c
+ * @file marshal_hidden.c
  * @brief Marshaling utilities for functions in common/cuda/hidden.h
  *
  * @date Mar 1, 2011
@@ -28,41 +28,6 @@
 #include <cuda/marshal.h>
 #include <cuda/method_id.h>
 #include <debug.h>
-
-#if 0
-/**
- * cleans the structure, frees the allocated memory, sets values to zeros,
- * nulls, etc; intended to be used in __unregisterCudaFatBinary
- */
-int cleanFatCubinInfo(fatcubin_info_t * pFatCInfo){
-	int i;
-
-	// we assume that the pFatCInfo is not a null pointer
-	assert(NULL != pFatCInfo);
-	for (i = 0; i < pFatCInfo->num_reg_vars; ++i)
-		freeRegVar(pFatCInfo->variables[i]);
-	/*	for (i = 0; i < dfi->num_reg_texs; ++i)
-					freeRegTex(dfi->textures[i]); */
-	for (i = 0; i < pFatCInfo->num_reg_fns; ++i)
-		freeRegFunc(pFatCInfo->reg_fns[i]);
-		/*for (i = 0; i < dfi->num_reg_shared; ++i) {
-		   if (dfi->shared_vars[i] != NULL)
-			   free(dfi->shared_vars[i]);
-		   else
-			   break;
-		} */
-	freeFatBinary(pFatCInfo->fatCubin);
-
-	pFatCInfo->num_reg_fns = 0;
-	pFatCInfo->num_reg_vars = 0;
-	pFatCInfo->num_reg_texs = 0;
-	pFatCInfo->num_reg_shared = 0;
-	pFatCInfo->fatCubinHandle = NULL;
-	pFatCInfo->fatCubin = NULL;
-
-	return OK;
-}
-#endif
 
 /**
  * returns the size of the packet for the string
@@ -1107,31 +1072,6 @@ static int l_packDep(char * pDst, __cudaFatCudaBinary * pEntry, int n){
 		// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 		return ERROR;
 	}
-
-#if 0
-	int offset;
-	__cudaFatCudaBinary * p;
-	// for iterations
-	int i = 0;
-	// now write the entries
-	p = pEntry;
-	while( p ){
-		// @todo actually you have to have an array of caches for
-		// each dependend otherwise you need to do it differently here
-		// so let's assume that there is no dependendants right now
-		cache_num_entries_t cache = { 0, 0, 0, 0, 0, 0, 0 };
-		offset = l_packFatBinary(pDst,  p, &cache);
-		if( ERROR == offset )
-			return ERROR;
-		pDst += offset;
-		p = p->dependends;
-		i++;
-	}
-
-	assert( i == n );
-
-	return pDst - pDstOrig;
-#endif
 }
 
 /**

@@ -1,35 +1,7 @@
 /**
- * @file libci.c
- *
+ * @file cuda_runtime.c
  * @date Feb 27, 2011
- * @author Magda Slawinska, magg@gatech.edu
  * @author Alex Merritt, merritt.alex@gatech.edu
- *
- * @brief Interposes the cuda calls and prints arguments of the call. It
- * supports the 3.2 CUDA Toolkit, specifically
- *   CUDA Runtime API Version 3.2
- *   #define CUDART_VERSION  3020
- *
- * To prepare the file I processed the
- * /opt/cuda/include/cuda_runtime_api_no_comments.h and removed the comments. I
- * also removed CUDARTAPI and __host__ modifiers.  Then I have a list of
- * function signatures that I need to interpose.  You can see the script in
- * cuda_rt_api.
- *
- * 2011-02-09 It looks that  in my library currently is  95 calls plus 6 calls
- * undocumented.
- * @todo Write a script that checks if the number or api are identical in
- * cuda_runtime_api.h
- * and in our file.
- *
- *
- * @todo There is one thing: the prototypes or signatures of CUDA functions have
- * modifiers CUDARTAPI which is __stdcall and __host__ which is
- * __location__(host) as defined in file /opt/cuda/include/host_defines.h The
- * question is if this has any impact on the interposed calls. I guess not.  But
- * I might be wrong.
- *
- * FIXME Make this library thread-safe.
  *
  * As of right now, the format of the shared memory regions with the backend is
  * as follows:
@@ -93,277 +65,35 @@
 #include <util/compiler.h>
 #include <util/x86_system.h>
 
+// Directory-immediate includes
+#include "timing.h"
+#include "bypass.h"
+
 /* preprocess out debug statements */
 //#undef printd
 //#define printd(level, fmt, args...)
 
 #define USERMSG_PREFIX "=== INTERPOSER === "
 
+/*-------------------------------------- EXTERNAL DEFINITIONS ----------------*/
+
+// Functions from ./shm.c
+extern int attach_assembly_runtime(void);
+extern void detach_assembly_runtime(void);
+extern void* get_region(pthread_t tid);
+
 /*-------------------------------------- INTERNAL STATE ----------------------*/
 
 //! to indicate the error with the dynamic loaded library
 //static cudaError_t cudaErrorDL = cudaErrorUnknown;
 
+#if !(defined(TIMING) && defined(TIMING_NATIVE))
 //! State machine for cudaGetLastError()
 static cudaError_t cuda_err = cudaSuccess;
-
-static struct shm_regions *cuda_regions;
+#endif
 
 //! Reference count for register and unregister fatbinary invocations.
 static unsigned int num_registered_cubins = 0;
-
-#define MAX_REGISTERED_VARS 5210
-//! Symbol addresses from __cudaRegisterVar. Used to determine if the symbol
-//! parameter in certain functions is actually the address of a variable, or
-//! the string name of one of the variables in functions which accept symbols.
-//! TODO Make this cleaner code.
-static uintptr_t registered_vars[MAX_REGISTERED_VARS];
-static unsigned int num_registered_vars = 0;
-
-/*-------------------------------------- TIMER DEFINITIONS -------------------*/
-#ifdef TIMING
-
-// Timer resolution set by TIMER_ACCURACY in util/timer.h
-
-static struct timer attach_timer; //! Timer used to measure joining the runtime
-static uint64_t attach = 0UL; //! Time spent joining the runtime
-
-static struct timer detach_timer; //! Timer used to measure departing the runtime
-static uint64_t detach = 0UL; //! Time spent departing the runtime
-
-static struct rpc_latencies lat; //! Aggregate latencies over all RPCs
-
-/** Initialize global timers above. */
-static void
-timers_init(void)
-{
-	timer_init(CLOCK_REALTIME, &attach_timer);
-	timer_init(CLOCK_REALTIME, &detach_timer);
-}
-
-static inline void
-update_latencies(const struct rpc_latencies *l)
-{
-	lat.lib.setup += l->lib.setup;
-	lat.lib.wait += l->lib.wait;
-
-	lat.exec.setup += l->exec.setup;
-	lat.exec.call += l->exec.call;
-
-	lat.rpc.append += l->rpc.append;
-	lat.rpc.send += l->rpc.send;
-	lat.rpc.wait += l->rpc.wait;
-	lat.rpc.recv += l->rpc.recv;
-
-	lat.remote.batch_exec += l->remote.batch_exec;
-}
-
-static inline void
-print_latencies(void)
-{
-	printf(USERMSG_PREFIX TIMERMSG_PREFIX
-			"lib.setup %lu lib.wait %lu "
-			"exec.setup %lu exec.call %lu "
-			"rpc.append %lu rpc.send %lu rpc.wait %lu rpc.recv %lu "
-			"remote.batch_exec %lu"
-			"\n",
-			lat.lib.setup, lat.lib.wait,
-			lat.exec.setup, lat.exec.call,
-			lat.rpc.append, lat.rpc.send, lat.rpc.wait, lat.rpc.recv,
-			lat.remote.batch_exec);
-}
-
-#else	/* !TIMING */
-
-#define update_latencies(lat)
-#define print_latencies()
-
-#endif	/* TIMING */
-
-/*-------------------------------------- SHMGRP DEFINITIONS ------------------*/
-
-//! Amount of memory to allocate for each CUDA thread, in bytes.
-//! XXX FIXME Put in checks to make sure the usercode isn't trying to copy more
-//! than we allocate.
-#define THREAD_SHM_SIZE					(512 << 20)
-
-/**
- * Region of memory we've mapped in with the runtime. Each region is assigned to
- * a unique thread in the CUDA application.
- */
-struct shm_region {
-	struct list_head link;
-	struct shmgrp_region shmgrp_region;
-	pthread_t tid;	//! Application thread assigned this region
-};
-
-//! List of shm regions maintained with the assembly runtime.
-struct shm_regions {
-	struct list_head list;
-	pthread_mutex_t lock; //! two-fold lock: this structure and the shmgrp API
-};
-
-//! Iterator loop for shm regions.
-#define __shm_for_each_region(regions, region)	\
-	list_for_each_entry(region, &((regions)->list), link)
-
-//! Iterator loop for shm regions, allowing us to remove regions as we iterate.
-#define __shm_for_each_region_safe(regions, region, tmp)	\
-	list_for_each_entry_safe(region, tmp, &((regions)->list), link)
-
-// All the __shm* functions should not be called directly. They should only be
-// called by the other functions just below them, as any locking that needs to
-// happen is handled correctly within those.
-
-static inline struct shm_region *
-__shm_get_region(struct shm_regions *regions, pthread_t tid)
-{
-	struct shm_region *region;
-	__shm_for_each_region(regions, region)
-		if (pthread_equal(region->tid, tid) != 0)
-			return region;
-	return NULL;
-}
-
-static inline void
-__shm_add_region(struct shm_regions *regions, struct shm_region *region)
-{
-	list_add(&region->link, &regions->list);
-}
-
-static inline void
-__shm_rm_region(struct shm_region *region)
-{
-	list_del(&region->link);
-}
-
-static inline bool
-__shm_has_regions(struct shm_regions *regions)
-{
-	return !(list_empty(&regions->list));
-}
-
-// Should be called within the first CUDA call interposed. It is okay to call
-// this function more than once, it will only have an effect the first time.
-static int attach_assembly_runtime(void)
-{
-	int err;
-	if (cuda_regions)
-		return 0;
-#ifdef TIMING
-	timers_init();
-	timer_start(&attach_timer);
-#endif
-	cuda_regions = calloc(1, sizeof(*cuda_regions));
-	if (!cuda_regions) {
-		fprintf(stderr, "Out of memory\n");
-		return -1;
-	}
-	INIT_LIST_HEAD(&cuda_regions->list);
-	err = shmgrp_init();
-	if (err < 0) {
-		fprintf(stderr, "Error initializing shmgrp state\n");
-		return -1;
-	}
-	err = shmgrp_join(ASSEMBLY_SHMGRP_KEY);
-	if (err < 0) {
-		fprintf(stderr, "Error attaching to assembly runtime\n");
-		return -1;
-	}
-#ifdef TIMING
-	attach = timer_end(&attach_timer, TIMER_ACCURACY);
-	printf(USERMSG_PREFIX TIMERMSG_PREFIX "attach %lu\n", attach);
-#endif
-	// TODO Install a SIGINT handler so we can disconnect from the group/remove
-	// any MQs we created.
-	return 0;
-}
-
-// Should be called within the last CUDA call interposed. It is okay to call
-// this function more than once, it will only have an effect the first time.
-static void detach_assembly_runtime(void)
-{
-	int err;
-	struct shm_region *region, *tmp;
-	if (!cuda_regions)
-		return;
-#ifdef TIMING
-	timer_start(&detach_timer);
-#endif
-	if (__shm_has_regions(cuda_regions)) {
-		__shm_for_each_region_safe(cuda_regions, region, tmp) {
-			__shm_rm_region(region);
-			err = shmgrp_rmreg(ASSEMBLY_SHMGRP_KEY, region->shmgrp_region.id);
-			if (err < 0) {
-				printd(DBG_ERROR, "Error destroying region %d\n",
-						region->shmgrp_region.id);
-			}
-			free(region);
-		}
-	}
-	free(cuda_regions);
-	err = shmgrp_leave(ASSEMBLY_SHMGRP_KEY);
-	if (err < 0)
-		fprintf(stderr, "Error detaching from assembly runtime\n");
-	err = shmgrp_tini();
-	if (err < 0)
-		fprintf(stderr, "Error uninitializing shmgrp state\n");
-#ifdef TIMING
-	detach = timer_end(&detach_timer, TIMER_ACCURACY);
-	printf(USERMSG_PREFIX TIMERMSG_PREFIX "detach %lu\n", detach);
-#endif
-}
-
-// Create a new shared memory region with the runtime, and add a new entry to
-// the region list for us. This function must be thread-safe (newly detected
-// threads will ask for a new region, and will call this). If the tid has
-// already been allocated a memory region, we simply return that mapping.
-static void * __add_shm(size_t size, pthread_t tid)
-{
-	int err;
-	struct shm_region *region;
-	shmgrp_region_id id;
-	region = __shm_get_region(cuda_regions, tid);
-	if (region)
-		return region->shmgrp_region.addr;
-	region = calloc(1, sizeof(*region));
-	if (!region) {
-		fprintf(stderr, "Out of memory\n");
-		goto fail;
-	}
-	INIT_LIST_HEAD(&region->link);
-	region->tid = tid;
-	err = shmgrp_mkreg(ASSEMBLY_SHMGRP_KEY, size, &id);
-	if (err < 0) {
-		fprintf(stderr, "Error creating a new memory region with assembly\n");
-		goto fail;
-	}
-	err = shmgrp_leader_region(ASSEMBLY_SHMGRP_KEY, id, &region->shmgrp_region);
-	if (err < 0) {
-		fprintf(stderr, "Error accessing existing shm region %d\n", id);
-		goto fail;
-	}
-	__shm_add_region(cuda_regions, region);
-	return region->shmgrp_region.addr;
-fail:
-	if (region)
-		free(region);
-	return NULL;
-}
-
-//! Each interposed call will invoke this to locate the shared memory region
-//! allocated to the thread calling it. If one does not exist, one is allocated.
-//! Thus if there are no errors, this function will always return a valid
-//! address.
-static inline void *
-get_region(pthread_t tid)
-{
-	void *addr;
-	pthread_mutex_lock(&cuda_regions->lock);
-	addr = __add_shm(THREAD_SHM_SIZE, tid);
-	pthread_mutex_unlock(&cuda_regions->lock);
-	return addr;
-}
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
@@ -379,18 +109,13 @@ get_region(pthread_t tid)
 #	endif
 #endif
 
-// Lookup 'symbol' in our list of known registered variable addresses. If it
-// exists, then store it as the address of a variable residing in application
-// space. Else, it must be a string literal naming a global variable. If the
-// latter, copy the string to the shm region and indicate the symbol is a string
-// by setting a flag in the packet.
-static inline bool __func_symb_param_is_string(const char *symbol)
-{
-	unsigned int symb = 0;
-	while (symb < num_registered_vars)
-		if (registered_vars[symb++] == (uintptr_t)symbol)
-			return false;
-	return true;
+/** XXX Maybe this should be defined in some common 'glue' code? */
+#define HANDOFF_AND_SPIN(_pkt) \
+{ \
+	wmb(); /* make writes visible */ \
+	_pkt->flags |= CUDA_PKT_REQUEST; \
+	while (!(_pkt->flags & CUDA_PKT_RESPONSE)) \
+		rmb(); \
 }
 
 /*-------------------------------------- INTERPOSING API ---------------------*/
@@ -404,53 +129,61 @@ static inline bool __func_symb_param_is_string(const char *symbol)
 cudaError_t cudaThreadExit(void)
 {
 	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
 	printd(DBG_DEBUG, "called\n");
-	
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaThreadExit();
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_THREAD_EXIT;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaThreadExit(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_THREAD_EXIT, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaThreadSynchronize(void)
 {
 	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
 	printd(DBG_DEBUG, "called\n");
-	
 	TIMER_DECLARE1(t);
+	
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaThreadSynchronize();
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_THREAD_SYNCHRONIZE;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaThreadSynchronize(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_THREAD_SYNCHRONIZE, shmpkt->len);
+	return cerr;
 }
 
 //
@@ -459,22 +192,78 @@ cudaError_t cudaThreadSynchronize(void)
 
 const char* cudaGetErrorString(cudaError_t error)
 {
-	// Doesn't need to be forwarded anywhere. Call the function in the NVIDIA
-	// runtime (FIXME an assumption we maybe shouldn't make?)
-	const char *dl_err_str;
-	typedef const char * (*func)(cudaError_t err);
-	func f = (func)dlsym(RTLD_NEXT, "cudaGetErrorString");
-	dl_err_str = dlerror();
-	if (dl_err_str) {
-		fprintf(stderr, "Error: No NVIDIA runtime exists: %s\n", dl_err_str);
-		return NULL;
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	return bypass.cudaGetErrorString(error);
+#else
+	const char* (*f)(cudaError_t error) =
+		dlsym(RTLD_NEXT, __func__);
+	if (f) return f(error);
+	switch (error) {
+		case cudaSuccess: return "cudaSuccess";
+		case cudaErrorMissingConfiguration: return "cudaErrorMissingConfiguration";
+		case cudaErrorMemoryAllocation: return "cudaErrorMemoryAllocation";
+		case cudaErrorInitializationError: return "cudaErrorInitializationError";
+		case cudaErrorLaunchFailure: return "cudaErrorLaunchFailure";
+		case cudaErrorPriorLaunchFailure: return "cudaErrorPriorLaunchFailure";
+		case cudaErrorLaunchTimeout: return "cudaErrorLaunchTimeout";
+		case cudaErrorLaunchOutOfResources: return "cudaErrorLaunchOutOfResources";
+		case cudaErrorInvalidDeviceFunction: return "cudaErrorInvalidDeviceFunction";
+		case cudaErrorInvalidConfiguration: return "cudaErrorInvalidConfiguration";
+		case cudaErrorInvalidDevice: return "cudaErrorInvalidDevice";
+		case cudaErrorInvalidValue: return "cudaErrorInvalidValue";
+		case cudaErrorInvalidPitchValue: return "cudaErrorInvalidPitchValue";
+		case cudaErrorInvalidSymbol: return "cudaErrorInvalidSymbol";
+		case cudaErrorMapBufferObjectFailed: return "cudaErrorMapBufferObjectFailed";
+		case cudaErrorUnmapBufferObjectFailed: return "cudaErrorUnmapBufferObjectFailed";
+		case cudaErrorInvalidHostPointer: return "cudaErrorInvalidHostPointer";
+		case cudaErrorInvalidDevicePointer: return "cudaErrorInvalidDevicePointer";
+		case cudaErrorInvalidTexture: return "cudaErrorInvalidTexture";
+		case cudaErrorInvalidTextureBinding: return "cudaErrorInvalidTextureBinding";
+		case cudaErrorInvalidChannelDescriptor: return "cudaErrorInvalidChannelDescriptor";
+		case cudaErrorInvalidMemcpyDirection: return "cudaErrorInvalidMemcpyDirection";
+		case cudaErrorAddressOfConstant: return "cudaErrorAddressOfConstant";
+		case cudaErrorTextureFetchFailed: return "cudaErrorTextureFetchFailed";
+		case cudaErrorTextureNotBound: return "cudaErrorTextureNotBound";
+		case cudaErrorSynchronizationError: return "cudaErrorSynchronizationError";
+		case cudaErrorInvalidFilterSetting: return "cudaErrorInvalidFilterSetting";
+		case cudaErrorInvalidNormSetting: return "cudaErrorInvalidNormSetting";
+		case cudaErrorMixedDeviceExecution: return "cudaErrorMixedDeviceExecution";
+		case cudaErrorCudartUnloading: return "cudaErrorCudartUnloading";
+		case cudaErrorNotYetImplemented: return "cudaErrorNotYetImplemented";
+		case cudaErrorMemoryValueTooLarge: return "cudaErrorMemoryValueTooLarge";
+		case cudaErrorInvalidResourceHandle: return "cudaErrorInvalidResourceHandle";
+		case cudaErrorNotReady: return "cudaErrorNotReady";
+		case cudaErrorInsufficientDriver: return "cudaErrorInsufficientDriver";
+		case cudaErrorSetOnActiveProcess: return "cudaErrorSetOnActiveProcess";
+		case cudaErrorInvalidSurface: return "cudaErrorInvalidSurface";
+		case cudaErrorNoDevice: return "cudaErrorNoDevice";
+		case cudaErrorECCUncorrectable: return "cudaErrorECCUncorrectable";
+		case cudaErrorSharedObjectSymbolNotFound: return "cudaErrorSharedObjectSymbolNotFound";
+		case cudaErrorSharedObjectInitFailed: return "cudaErrorSharedObjectInitFailed";
+		case cudaErrorUnsupportedLimit: return "cudaErrorUnsupportedLimit";
+		case cudaErrorDuplicateVariableName: return "cudaErrorDuplicateVariableName";
+		case cudaErrorDuplicateTextureName: return "cudaErrorDuplicateTextureName";
+		case cudaErrorDuplicateSurfaceName: return "cudaErrorDuplicateSurfaceName";
+		case cudaErrorDevicesUnavailable: return "cudaErrorDevicesUnavailable";
+		case cudaErrorInvalidKernelImage: return "cudaErrorInvalidKernelImage";
+		case cudaErrorNoKernelImageForDevice: return "cudaErrorNoKernelImageForDevice";
+		case cudaErrorIncompatibleDriverContext: return "cudaErrorIncompatibleDriverContext";
+		case cudaErrorStartupFailure: return "cudaErrorStartupFailure";
+		case cudaErrorApiFailureBase: return "cudaErrorApiFailureBase";
+		case cudaErrorUnknown:
+		default:
+			return "cudaErrorUnknown";
 	}
-	return f(error);
+#endif
 }
 
 cudaError_t cudaGetLastError(void)
 {
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	return bypass.cudaGetLastError();
+#else
 	return cuda_err; // ??
+#endif
 }
 
 //
@@ -484,195 +273,188 @@ cudaError_t cudaGetLastError(void)
 cudaError_t cudaGetDevice(int *device)
 {
 	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
 	printd(DBG_DEBUG, "thread=%lu\n", pthread_self());
-	
 	TIMER_DECLARE1(t);
+	
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaGetDevice(device);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_GET_DEVICE;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(*shmpkt); // FIXME just use an arg
-	shmpkt->len = sizeof(*shmpkt) + sizeof(int);
-	shmpkt->is_sync = true;
+	pack_cudaGetDevice(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
-	*device = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	extract_cudaGetDevice(shmpkt, device);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
+	update_latencies(&shmpkt->lat, CUDA_GET_DEVICE, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaGetDeviceCount(int *count)
 {
 	struct cuda_packet *shmpkt;
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaGetDeviceCount(count);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-
-	/* Directly write the cuda packet into the shared memory region. Indicate
-	 * where the output argument's data should be stored.
-	 *
-	 *   shm	Offset
-	 * +------+ 0
-	 * + cuda +
-	 * + pkt  +
-	 * +------+	sizeof(struct cuda_packet)
-	 * + int  + 
-	 * +------+ sizeof(int) + sizeof(struct cuda_packet)
-	 *
-	 * Give the packet one argument indicating the offset into the shared memory
-	 * region where it expects the value of 'count' to reside. This will be
-	 * copied into the user-provided address before returning. For functions
-	 * with additional pointer arguments, append them to the bottom and do
-	 * additional copying before returning.
-	 */
-
-	memset((void*)shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_GET_DEVICE_COUNT;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(*shmpkt); // offset; FIXME just use an arg
-	shmpkt->len = sizeof(*shmpkt) + sizeof(int);
-	shmpkt->is_sync = true;
+	pack_cudaGetDeviceCount(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST; // set this last FIXME sink spins on this
-	wmb(); // flush writes from caches
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
-	*count = *((int *)((uintptr_t)shmpkt + shmpkt->args[0].argull));
+	extract_cudaGetDeviceCount(shmpkt, count);
 	printd(DBG_DEBUG, "%d\n", *count);
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
+	update_latencies(&shmpkt->lat, CUDA_GET_DEVICE_COUNT, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
 {
 	struct cuda_packet *shmpkt;
-	struct cudaDeviceProp *prop_shm = NULL;
-
+	cudaError_t cerr;
 	printd(DBG_DEBUG, "dev=%d\n", device);
-
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaGetDeviceProperties(prop,device);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) + sizeof(*prop);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_GET_DEVICE_PROPERTIES;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
-	shmpkt->args[1].argll = device;
-	shmpkt->len = sizeof(*shmpkt) + sizeof(*prop);
-	shmpkt->is_sync = true;
+	pack_cudaGetDeviceProperties(shmpkt, device);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
-	prop_shm = (struct cudaDeviceProp*)
-					((uintptr_t)shmpkt + shmpkt->args[0].argull);
-	memcpy(prop, prop_shm, sizeof(struct cudaDeviceProp));
+	extract_cudaGetDeviceProperties(shmpkt, (shmpkt+sizeof(*shmpkt)), prop);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_GET_DEVICE_PROPERTIES, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaSetDevice(int device)
 {
 	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
 	printd(DBG_DEBUG, "device=%d\n", device);
-
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaSetDevice(device);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_SET_DEVICE;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argll = device;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaSetDevice(shmpkt, device);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_SET_DEVICE, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaSetDeviceFlags(unsigned int flags)
 {
 	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
 	printd(DBG_DEBUG, "flags=0x%x\n", flags);
-
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaSetDeviceFlags(flags);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_SET_DEVICE_FLAGS;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = flags;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaSetDeviceFlags(shmpkt, flags);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_SET_DEVICE_FLAGS, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaSetValidDevices(int *device_arr, int len)
 {
 	struct cuda_packet *shmpkt;
-	void *shm_ptr;
+	cudaError_t cerr;
 	printd(DBG_DEBUG, "called\n");
-
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
-	shm_ptr = shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_SET_VALID_DEVICES;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(*shmpkt);
-	shmpkt->args[1].argll = len;
-	shm_ptr += shmpkt->args[0].argull;
-	memcpy(shm_ptr, device_arr, (len * sizeof(*device_arr)));
-	shmpkt->len = sizeof(*shmpkt) + (len * sizeof(*device_arr));
-	shmpkt->is_sync = true;
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaThreadExit();
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) + (len * sizeof(*device_arr));
+	shmpkt = &tpkt;
+#else
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaSetValidDevices(shmpkt, (shmpkt + 1),
+			device_arr, len);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_SET_VALID_DEVICES, shmpkt->len);
+	return cerr;
 }
 
 //
@@ -696,56 +478,127 @@ cudaError_t cudaSetValidDevices(int *device_arr, int len)
 cudaError_t cudaStreamCreate(cudaStream_t *pStream)
 {
 	struct cuda_packet *shmpkt;
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaStreamCreate(pStream);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_STREAM_CREATE;
-	shmpkt->thr_id = pthread_self();
-	// We'll expect the value of *pStream to exist in args[0]
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaStreamCreate(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
-	*pStream = shmpkt->args[0].stream;
+	extract_cudaStreamCreate(shmpkt, pStream);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
 	printd(DBG_DEBUG, "stream=%p\n", *pStream);
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+
+	update_latencies(&shmpkt->lat, CUDA_STREAM_CREATE, shmpkt->len);
+	return cerr;
+}
+
+cudaError_t cudaStreamDestroy(cudaStream_t stream)
+{
+	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
+
+	printd(DBG_DEBUG, "stream=%p\n", stream);
+
+	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaStreamDestroy(stream);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaStreamDestroy(shmpkt, stream);
+	TIMER_END(t, shmpkt->lat.lib.setup);
+
+	TIMER_START(t);
+	HANDOFF_AND_SPIN(shmpkt);
+	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
+	update_latencies(&shmpkt->lat, CUDA_STREAM_DESTROY, shmpkt->len);
+	return cerr;
+}
+
+cudaError_t cudaStreamQuery(cudaStream_t stream)
+{
+	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
+
+	printd(DBG_DEBUG, "stream=%p\n", stream);
+
+	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaStreamQuery(stream);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaStreamQuery(shmpkt, stream);
+	TIMER_END(t, shmpkt->lat.lib.setup);
+
+	TIMER_START(t);
+	HANDOFF_AND_SPIN(shmpkt);
+	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
+	update_latencies(&shmpkt->lat, CUDA_STREAM_QUERY, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaStreamSynchronize(cudaStream_t stream)
 {
 	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
+
 	printd(DBG_DEBUG, "stream=%p\n", stream);
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaStreamSynchronize(stream);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_STREAM_SYNCHRONIZE;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].stream = stream;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaStreamSynchronize(shmpkt, stream);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_STREAM_SYNCHRONIZE, shmpkt->len);
+	return cerr;
 }
 
 //
@@ -755,44 +608,42 @@ cudaError_t cudaStreamSynchronize(cudaStream_t stream)
 cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
 	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
 
 	printd(DBG_DEBUG, "grid={%d,%d,%d} block={%d,%d,%d} shmem=%lu strm=%p\n",
 			gridDim.x, gridDim.y, gridDim.z,
 			blockDim.x, blockDim.y, blockDim.z,
 			sharedMem, stream);
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaConfigureCall(gridDim,blockDim,sharedMem,stream);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_CONFIGURE_CALL;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].arg_dim = gridDim; // = on structs works :)
-	shmpkt->args[1].arg_dim = blockDim;
-	shmpkt->args[2].arr_argi[0] = sharedMem;
-	shmpkt->args[3].argull = (uint64_t)stream;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = false;
+	pack_cudaConfigureCall(shmpkt, gridDim, blockDim, sharedMem, stream);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	printd(DBG_DEBUG, "ret err = %d\n", shmpkt->ret_ex_val.err);
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_CONFIGURE_CALL, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *func)
 {
 	struct cuda_packet *shmpkt;
-	void *func_shm = NULL; // Pointer to func str within shm
-	void *attr_shm = NULL; // Pointer to attr within shm
-	unsigned int func_len;
+	cudaError_t cerr;
+	TIMER_DECLARE1(tsetup);
 
 	printd(DBG_DEBUG, "func='%s'\n", func);
 
@@ -800,8 +651,20 @@ cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *f
 		return cudaErrorInvalidDeviceFunction;
 	}
 
-	TIMER_DECLARE2(tsetup, twait);
 	TIMER_START(tsetup);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaFuncGetAttributes(attr,func);
+	TIMER_END(tsetup, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) + strlen(func) + 1;
+	shmpkt = &tpkt;
+#else
+	void *func_shm = NULL; // Pointer to func str within shm
+	void *attr_shm = NULL; // Pointer to attr within shm
+	unsigned int func_len;
+	TIMER_DECLARE1(twait);
+
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	func_len = strlen(func) + 1;
@@ -810,90 +673,91 @@ cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *f
 	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
 	shmpkt->args[1].argull = (shmpkt->args[0].argull + sizeof(*attr)); // offset
 	shmpkt->args[2].arr_argi[0] = func_len;
-	func_shm = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
+	func_shm = (void*)((void*)shmpkt + shmpkt->args[1].argull);
 	memcpy(func_shm, func, func_len);
 	shmpkt->len = sizeof(*shmpkt) + func_len;
 	shmpkt->is_sync = true;
 	TIMER_PAUSE(tsetup);
 
 	TIMER_START(twait);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
 	TIMER_RESUME(tsetup);
 	// Copy out the structure into the user argument
 	attr_shm = (struct cudaFuncAttributes*)
-		((uintptr_t)shmpkt + shmpkt->args[0].argull);
+		((void*)shmpkt + shmpkt->args[0].argull);
 	memcpy(attr, attr_shm, sizeof(*attr));
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
+	update_latencies(&shmpkt->lat, CUDA_FUNC_GET_ATTR, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaLaunch(const char *entry)
 {
 	struct cuda_packet *shmpkt;
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
+	printd(DBG_DEBUG, "entry=%p\n", entry);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaLaunch(entry);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_LAUNCH;
-	shmpkt->thr_id = pthread_self();
-	// FIXME We assume entry is just a memory pointer, not a string.
-	shmpkt->args[0].argull = (uintptr_t)entry;
-	printd(DBG_DEBUG, "entry=%p\n", (void*)shmpkt->args[0].argull);
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = false;
+	pack_cudaLaunch(shmpkt, entry);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_LAUNCH, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset)
 {
 	struct cuda_packet *shmpkt;
-	void *shm_ptr;
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
 
 	printd(DBG_DEBUG, "arg=%p size=%lu offset=%lu\n",
 			arg, size, offset);
 
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaSetupArgument(arg,size,offset);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) + size;
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_SETUP_ARGUMENT;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(*shmpkt);
-	shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
-	memcpy(shm_ptr, arg, size);
-	shmpkt->len = sizeof(*shmpkt) + size;
-	shmpkt->is_sync = false;
-	shmpkt->args[1].arr_argi[0] = size;
-	shmpkt->args[1].arr_argi[1] = offset;
+	pack_cudaSetupArgument(shmpkt, (shmpkt + 1),
+			arg, size, offset);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_SETUP_ARGUMENT, shmpkt->len);
+	return cerr;
 }
 
 //
@@ -903,88 +767,86 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset)
 cudaError_t cudaFree(void * devPtr)
 {
 	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
 	printd(DBG_DEBUG, "devPtr=%p\n", devPtr);
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaFree(devPtr);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_FREE;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argp = devPtr;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaFree(shmpkt, devPtr);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_FREE, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaFreeArray(struct cudaArray * array)
 {
 	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
 	printd(DBG_DEBUG, "array=%p\n", array);
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt;
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaFreeArray(array);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_FREE_ARRAY;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].cudaArray = array;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaFreeArray(shmpkt, array);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_FREE_ARRAY, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaFreeHost(void * ptr)
 {
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
+
+#if defined(TIMING)
+	struct rpc_latencies lat;
+	memset(&lat, 0, sizeof(lat));
+#endif
+
+	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	cerr = bypass.cudaFreeHost(ptr);
+	TIMER_END(t, lat.exec.call);
+#else
 	if (ptr)
 		free(ptr);
-	return cudaSuccess;
-
-#if 0 // Working code that forwards the RPC to the assembly runtime.
-	struct cuda_packet *shmpkt;
-	printd(DBG_DEBUG, "ptr=%p\n", ptr);
-
-	TIMER_DECLARE1(t);
-	TIMER_START(t);
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_FREE_HOST;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argp = ptr;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
-	TIMER_END(t, shmpkt->lat.lib.setup);
-
-	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
-	TIMER_END(t, shmpkt->lat.lib.wait);
-
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	cerr = cudaSuccess;
+	TIMER_END(t, lat.lib.setup);
 #endif
+
+	update_latencies(&lat, CUDA_FREE_HOST, 0UL);
+	return cerr;
 }
 
 /**
@@ -1000,17 +862,20 @@ cudaError_t cudaFreeHost(void * ptr)
  */
 cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
 {
-	void *pinned_mem = NULL;
-	int err = 0;
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
-	TIMER_START(t);
-#if TIMING
+
+#if defined(TIMING)
 	struct rpc_latencies lat;
 	memset(&lat, 0, sizeof(lat));
 #endif
 
-	pinned_mem = malloc(size);
+	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	cerr = bypass.cudaHostAlloc(pHost,size,flags);
+	TIMER_END(t, lat.exec.call);
+#else
+	void *pinned_mem = malloc(size);
 	if (!pinned_mem) {
 		printd(DBG_ERROR, "out of memory\n");
 		fprintf(stderr, "out of memory\n");
@@ -1018,18 +883,19 @@ cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
 	}
 
 	// if this fails, nothing will break
-	err = mlock(pinned_mem, size);
-	if (err < 0) {
+	if (0 > mlock(pinned_mem, size)) {
 		printd(DBG_WARNING, "memory pinning failed: %s\n", strerror(errno));
 	}
 
-	TIMER_END(t, pkt.lat.lib.setup);
-	update_latencies(&pkt.lat);
+	TIMER_END(t, lat.lib.setup);
 
 	*pHost = pinned_mem;
-	printd(DBG_DEBUG, "host=%p size=%lu flags=0x%x (ignored)\n", *pHost, size, flags);
+	cerr = cudaSuccess;
+#endif
 
-	return cudaSuccess;
+	printd(DBG_DEBUG, "host=%p size=%lu flags=0x%x (ignored)\n", *pHost, size, flags);
+	update_latencies(&lat, CUDA_HOST_ALLOC, 0UL);
+	return cerr;
 
 #if 0 // Working code that forwards the RPC to the assembly runtime.
 	struct cuda_packet *shmpkt;
@@ -1048,15 +914,12 @@ cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	*pHost = (void*)shmpkt->args[0].argull;
 	printd(DBG_DEBUG, "host=%p size=%lu flags=0x%x\n", *pHost, size, flags);
-	update_latencies(&shmpkt->lat);
+	update_latencies(&shmpkt->lat, shmpkt->len);
 	return shmpkt->ret_ex_val.err;
 #endif
 }
@@ -1064,31 +927,33 @@ cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
 cudaError_t cudaMalloc(void **devPtr, size_t size)
 {
 	struct cuda_packet *shmpkt;
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaMalloc(devPtr,size);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_MALLOC;
-	shmpkt->thr_id = pthread_self();
-	// We expect the sink to write the value of devPtr to args[0].argull
-	shmpkt->args[1].arr_argi[0] = size;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaMalloc(shmpkt, size);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
-	*devPtr = (void*)shmpkt->args[0].argull;
-	printd(DBG_DEBUG, "devPtr=%p size=%lu\n", *devPtr, size);
+	extract_cudaMalloc(shmpkt, devPtr);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	printd(DBG_DEBUG, "devPtr=%p size=%lu\n", *devPtr, size);
+	update_latencies(&shmpkt->lat, CUDA_MALLOC, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaMallocArray(
@@ -1097,234 +962,161 @@ cudaError_t cudaMallocArray(
 		size_t width, size_t height __dv(0), unsigned int flags __dv(0))
 {
 	struct cuda_packet *shmpkt;
-	void *shm_ptr;
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
-	shm_ptr = shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_MALLOC_ARRAY;
-	shmpkt->thr_id = pthread_self();
-	// We expect the value of *array to be in args[0].cudaArray in the return
-	// packet
-	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
-	shm_ptr += sizeof(*shmpkt);
-	memcpy(shm_ptr, desc, sizeof(*desc));
-	shmpkt->len = sizeof(*shmpkt) + sizeof(*desc);
-	shmpkt->args[1].arr_argi[0] = width;
-	shmpkt->args[1].arr_argi[1] = height;
-	shmpkt->args[2].argull = flags;
-	shmpkt->is_sync = true;
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaMallocArray(array,desc,width,height,flags);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaMallocArray(shmpkt, desc, width, height, flags);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
-	*array = shmpkt->args[0].cudaArray;
+	extract_cudaMallocArray(shmpkt, array);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
 	printd(DBG_DEBUG, "array=%p, desc=%p width=%lu height=%lu flags=0x%x\n",
 			*array, desc, width, height, flags);
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_MALLOC_ARRAY, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaMallocPitch(
 		void **devPtr, size_t *pitch, size_t width, size_t height) {
 	struct cuda_packet *shmpkt;
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaMallocPitch(devPtr,pitch,width,height);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_MALLOC_PITCH;
-	shmpkt->thr_id = pthread_self();
-	// We expect the sink to write the value of devPtr to args[0].argull
-	// We expect the sink to write the value of pitch to args[1].arr_argi[0]
-	shmpkt->args[2].arr_argi[0] = width;
-	shmpkt->args[2].arr_argi[1] = height;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaMallocPitch(shmpkt, width, height);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	TIMER_START(t);
+	HANDOFF_AND_SPIN(shmpkt);
+	TIMER_END(t, shmpkt->lat.lib.wait);
 
-	*devPtr = (void*)shmpkt->args[0].argull;
-	*pitch = shmpkt->args[1].arr_argi[0];
+	extract_cudaMallocPitch(shmpkt, devPtr, pitch);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
 	printd(DBG_DEBUG, "devPtr=%p pitch=%lu\n", *devPtr, *pitch);
-
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_MALLOC_PITCH, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaMemcpy(void *dst, const void *src,
 		size_t count, enum cudaMemcpyKind kind)
 {
 	struct cuda_packet *shmpkt;
-	void *shm_ptr;
+	cudaError_t cerr;
+	TIMER_DECLARE1(tsetup);
 
 	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d\n",
 			dst, src, count, kind);
 
-	TIMER_DECLARE2(tsetup, twait);
 	TIMER_START(tsetup);
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->thr_id = pthread_self();
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaMemcpy(dst,src,count,kind);
+	TIMER_END(tsetup, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) + count;
 	switch (kind) {
-		case cudaMemcpyHostToHost:
-		{
-			shmpkt->method_id = CUDA_MEMCPY_H2H; // why would you call this?
-			memcpy(dst, src, count); // right?!
-		}
-		break;
-		case cudaMemcpyHostToDevice:
-		{
-			// Need to push data DOWN to the gpu
-			shmpkt->method_id = CUDA_MEMCPY_H2D;
-			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
-			shmpkt->args[1].argull = sizeof(*shmpkt);
-			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
-			memcpy(shm_ptr, src, count);
-			shmpkt->len = sizeof(*shmpkt) + count;
-			shmpkt->is_sync = false;
-		}
-		break;
-		case cudaMemcpyDeviceToHost:
-		{
-			// Need to pull data UP from the gpu
-			shmpkt->method_id = CUDA_MEMCPY_D2H;
-			shmpkt->args[0].argull = sizeof(*shmpkt);
-			// We will expect to read 'count' bytes at this ^ offset into dst
-			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
-			shmpkt->len = sizeof(*shmpkt);
-			shmpkt->is_sync = true;
-		}
-		break;
-		case cudaMemcpyDeviceToDevice:
-		{
-			shmpkt->method_id = CUDA_MEMCPY_D2D;
-			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
-			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
-			shmpkt->len = sizeof(*shmpkt);
-			shmpkt->is_sync = false;
-		}
-		break;
-		default:
-			return cudaErrorInvalidMemcpyDirection;
+		case cudaMemcpyHostToHost: tpkt.method_id = CUDA_MEMCPY_H2H; break;
+		case cudaMemcpyHostToDevice: tpkt.method_id = CUDA_MEMCPY_H2D; break;
+		case cudaMemcpyDeviceToHost: tpkt.method_id = CUDA_MEMCPY_D2H; break;
+		case cudaMemcpyDeviceToDevice: tpkt.method_id = CUDA_MEMCPY_D2D; break;
 	}
-	shmpkt->args[2].arr_argi[0] = count;
-	shmpkt->is_sync = true;
+	shmpkt = &tpkt;
+#else
+	TIMER_DECLARE1(twait);
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaMemcpy(shmpkt, (shmpkt + 1),
+			dst, src, count, kind);
 	TIMER_PAUSE(tsetup);
 
-	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d\n",
-			dst, src, count, kind);
+	if (kind == cudaMemcpyHostToHost)
+		return cudaSuccess;
 
 	TIMER_START(twait);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
-	// copy data to user-space region
-	if (shmpkt->method_id == CUDA_MEMCPY_D2H) {
-		TIMER_RESUME(tsetup);
-		shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
-		memcpy(dst, shm_ptr, count);
-	}
+	TIMER_RESUME(tsetup);
+	extract_cudaMemcpy(shmpkt, ((void*)shmpkt + sizeof(*shmpkt)),
+			dst, src, count, kind);
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, shmpkt->method_id, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 		enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
 {
 	struct cuda_packet *shmpkt;
-	void *shm_ptr;
+	cudaError_t cerr;
+	TIMER_DECLARE1(tsetup);
 
 	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d stream=%p\n",
 			dst, src, count, kind, stream);
 
-	TIMER_DECLARE2(tsetup,twait);
 	TIMER_START(tsetup);
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->thr_id = pthread_self();
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaMemcpyAsync(dst,src,count,kind,stream);
+	TIMER_END(tsetup, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) + count;
 	switch (kind) {
-		case cudaMemcpyHostToHost:
-		{
-			shmpkt->method_id = CUDA_MEMCPY_ASYNC_H2H; // why would you call this?
-			memcpy(dst, src, count); // right?!
-		}
-		break;
-		case cudaMemcpyHostToDevice:
-		{
-			// Need to push data DOWN to the gpu
-			shmpkt->method_id = CUDA_MEMCPY_ASYNC_H2D;
-			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
-			shmpkt->args[1].argull = sizeof(*shmpkt);
-			shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
-			memcpy(shm_ptr, src, count);
-			shmpkt->len = sizeof(*shmpkt) + count;
-		}
-		break;
-		case cudaMemcpyDeviceToHost:
-		{
-			// Need to pull data UP from the gpu
-			shmpkt->method_id = CUDA_MEMCPY_ASYNC_D2H;
-			shmpkt->args[0].argull = sizeof(*shmpkt);
-			// We will expect to read 'count' bytes at this ^ offset into dst
-			// XXX Since this is an async function, the data won't necessarily
-			// be there just yet. For now, we force all async calls to be
-			// synchronous until a solution is found.
-			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
-			shmpkt->len = sizeof(*shmpkt);
-		}
-		break;
-		case cudaMemcpyDeviceToDevice:
-		{
-			shmpkt->method_id = CUDA_MEMCPY_D2D;
-			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
-			shmpkt->args[1].argull = (uintptr_t)src; // gpu ptr
-			shmpkt->len = sizeof(*shmpkt);
-		}
-		break;
-		default:
-			return cudaErrorInvalidMemcpyDirection;
+		case cudaMemcpyHostToHost: tpkt.method_id = CUDA_MEMCPY_ASYNC_H2H; break;
+		case cudaMemcpyHostToDevice: tpkt.method_id = CUDA_MEMCPY_ASYNC_H2D; break;
+		case cudaMemcpyDeviceToHost: tpkt.method_id = CUDA_MEMCPY_ASYNC_D2H; break;
+		case cudaMemcpyDeviceToDevice: tpkt.method_id = CUDA_MEMCPY_ASYNC_D2D; break;
 	}
-	shmpkt->args[2].arr_argi[0] = count;
-	shmpkt->args[3].stream = stream;
-	shmpkt->is_sync = true;
+	shmpkt = &tpkt;
+#else
+	TIMER_DECLARE1(twait);
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaMemcpyAsync(shmpkt, (shmpkt + 1),
+			dst, src, count, kind, stream);
 	TIMER_PAUSE(tsetup);
 
 	TIMER_START(twait);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
-	// copy data to user-space region
-	// XXX We'll only do this now, since these calls are all forced to be
-	// synchronous. Once they're actually async, this copy may not be performed
-	// at this time.
-	if (shmpkt->method_id == CUDA_MEMCPY_D2H) {
-		TIMER_RESUME(tsetup);
-		shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
-		memcpy(dst, shm_ptr, count);
-	}
+	TIMER_RESUME(tsetup);
+	extract_cudaMemcpyAsync(shmpkt, ((void*)shmpkt + sizeof(*shmpkt)),
+			dst, src, count, kind, stream);
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, shmpkt->method_id, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaMemcpyFromSymbol(
@@ -1334,71 +1126,44 @@ cudaError_t cudaMemcpyFromSymbol(
 		enum cudaMemcpyKind kind __dv(cudaMemcpyDeviceToHost))
 {
 	struct cuda_packet *shmpkt;
-	void *shm_ptr;
+	cudaError_t cerr;
+	TIMER_DECLARE1(tsetup);
 
 	printd(DBG_DEBUG, "dst=%p symb=%p, count=%lu\n", dst, symbol, count);
 
-	TIMER_DECLARE2(tsetup, twait);
 	TIMER_START(tsetup);
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	shm_ptr = (void*)((uintptr_t)shmpkt + sizeof(*shmpkt));
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->thr_id = pthread_self();
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaMemcpyFromSymbol(dst,symbol,count,offset,kind);
+	TIMER_END(tsetup, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) + count;
 	switch (kind) {
-		case cudaMemcpyDeviceToHost:
-		{
-			shmpkt->method_id = CUDA_MEMCPY_FROM_SYMBOL_D2H;
-			// offset within the shm from which we'll expect to read the user
-			// data in the return packet
-			shmpkt->args[0].argull = sizeof(*shmpkt);
-			shmpkt->len = sizeof(*shmpkt);
-		}
-		break;
-		case cudaMemcpyDeviceToDevice:
-		{
-			shmpkt->method_id = CUDA_MEMCPY_FROM_SYMBOL_D2D;
-			shmpkt->args[0].argull = (uintptr_t)dst; // gpu ptr
-			shmpkt->len = sizeof(*shmpkt);
-		}
-		break;
-		default:
-		{
-			fprintf(stderr, USERMSG_PREFIX " memcpy direction %d not implemented\n", kind);
-			return cudaErrorInvalidMemcpyDirection;
-		}
+		case cudaMemcpyDeviceToHost: tpkt.method_id = CUDA_MEMCPY_FROM_SYMBOL_D2H; break;
+		case cudaMemcpyDeviceToDevice: tpkt.method_id = CUDA_MEMCPY_FROM_SYMBOL_D2D; break;
+		default: BUG(1);
 	}
-	if (__func_symb_param_is_string(symbol)) {
-		shmpkt->args[1].argull = (shm_ptr - (void*)shmpkt); // store string in shm
-		memcpy(shm_ptr, symbol, strlen(symbol) + 1);
-		shm_ptr += strlen(symbol) + 1;
-		shmpkt->flags |= CUDA_PKT_SYMB_IS_STRING;
-		printd(DBG_DEBUG, "\tsymbol is string: %s\n", symbol);
-		shmpkt->len += strlen(symbol) + 1;
-	} else {
-		shmpkt->args[1].argull = (uintptr_t)symbol;
-	}
-	shmpkt->args[2].arr_argi[0] = count;
-	shmpkt->args[2].arr_argi[1] = offset;
-	shmpkt->args[3].argll = kind;
-	shmpkt->is_sync = true;
+	shmpkt = &tpkt;
+#else
+	TIMER_DECLARE1(twait);
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaMemcpyFromSymbol(shmpkt, (shmpkt + 1),
+			dst, symbol, count, offset, kind);
 	TIMER_PAUSE(tsetup);
 
 	TIMER_START(twait);
-	shmpkt->flags |= CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
-	if (kind == cudaMemcpyDeviceToHost) {
-		TIMER_RESUME(tsetup);
-		shm_ptr = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
-		memcpy(dst, shm_ptr, count);
-	}
+	TIMER_RESUME(tsetup);
+	extract_cudaMemcpyFromSymbol(shmpkt, ((void*)shmpkt + sizeof(*shmpkt)),
+			dst, symbol, count, offset, kind);
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, shmpkt->method_id, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaMemcpyToArray(
@@ -1408,59 +1173,39 @@ cudaError_t cudaMemcpyToArray(
 		enum cudaMemcpyKind kind)
 {
 	struct cuda_packet *shmpkt;
-	void *shm_ptr;
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
 
 	printd(DBG_DEBUG, "dst=%p wOffset=%lu, hOffset=%lu, src=%p, count=%lu\n",
 			dst, wOffset, hOffset, src, count);
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].cudaArray = dst; // gpu ptr
-	shmpkt->args[1].arr_argi[0] = wOffset;
-	shmpkt->args[1].arr_argi[1] = hOffset;
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaMemcpyToArray(dst,wOffset,hOffset,src,count,kind);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) + count;
 	switch (kind) {
-		case cudaMemcpyHostToHost:
-		case cudaMemcpyDeviceToHost:
-		{
-			BUG(0); // wtf is copying d->h or h->h when dst is a device address?
-		}
-		break;
-		case cudaMemcpyHostToDevice:
-		{
-			// Need to push data DOWN to the gpu
-			shmpkt->method_id = CUDA_MEMCPY_TO_ARRAY_H2D;
-			shmpkt->args[2].argull = sizeof(*shmpkt);
-			shm_ptr = (void*)((uintptr_t)shmpkt + sizeof(*shmpkt));
-			memcpy(shm_ptr, src, count);
-			shmpkt->len = sizeof(*shmpkt) + count;
-		}
-		break;
-		case cudaMemcpyDeviceToDevice:
-		{
-			shmpkt->method_id = CUDA_MEMCPY_TO_ARRAY_D2D;
-			shmpkt->args[2].argp = (void*)src; // gpu ptr?
-			shmpkt->len = sizeof(*shmpkt);
-		}
-		break;
-		default:
-			return cudaErrorInvalidMemcpyDirection;
+		case cudaMemcpyHostToDevice: tpkt.method_id = CUDA_MEMCPY_TO_ARRAY_H2D; break;
+		case cudaMemcpyDeviceToDevice: tpkt.method_id = CUDA_MEMCPY_TO_ARRAY_D2D; break;
+		default: BUG(1);
 	}
-	shmpkt->args[3].arr_argi[0] = count;
-	shmpkt->is_sync = true;
+	shmpkt = &tpkt;
+#else
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaMemcpyToArray(shmpkt, (shmpkt + 1),
+			dst, wOffset, hOffset, src, count, kind);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, shmpkt->method_id, shmpkt->len);
+	return cerr;
 }
 
 
@@ -1469,66 +1214,38 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 		enum cudaMemcpyKind kind __dv(cudaMemcpyHostToDevice))
 {
 	struct cuda_packet *shmpkt;
-	void *shm_ptr;
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
 
 	printd(DBG_DEBUG, "symb=%p src=%p count=%lu\n", symbol, src, count);
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	shm_ptr = (void*)((uintptr_t)shmpkt + sizeof(*shmpkt));
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->thr_id = pthread_self();
-	shmpkt->len = sizeof(*shmpkt);
-
-	if (__func_symb_param_is_string(symbol)) {
-		shmpkt->args[0].argull = (shm_ptr - (void*)shmpkt); // offset of string
-		memcpy(shm_ptr, symbol, strlen(symbol) + 1);
-		shmpkt->flags |= CUDA_PKT_SYMB_IS_STRING;
-		shm_ptr += strlen(symbol) + 1;
-		printd(DBG_DEBUG, "\tsymb is string: %s\n", symbol);
-		shmpkt->len += strlen(symbol) + 1;
-	} else {
-		shmpkt->args[0].argull = (uintptr_t)symbol;
-	}
-
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaMemcpyToSymbol(symbol,src,count,offset,kind);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) + count;
 	switch (kind) {
-		case cudaMemcpyHostToDevice:
-		{
-			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_H2D;
-			shmpkt->args[1].argull = (shm_ptr - (void*)shmpkt);
-			memcpy(shm_ptr, src, count);
-			shm_ptr += count;
-			shmpkt->len += count;
-		}
-		break;
-		case cudaMemcpyDeviceToDevice:
-		{
-			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_D2D;
-			shmpkt->args[1].argull = (uintptr_t)src;
-		}
-		break;
-		default:
-		{
-			fprintf(stderr, USERMSG_PREFIX " memcpy direction %d not implemented\n", kind);
-			return cudaErrorInvalidMemcpyDirection;
-		}
+		case cudaMemcpyHostToDevice: tpkt.method_id = CUDA_MEMCPY_TO_SYMBOL_H2D; break;
+		case cudaMemcpyDeviceToDevice: tpkt.method_id = CUDA_MEMCPY_TO_SYMBOL_D2D; break;
+		default: BUG(1);
 	}
-	shmpkt->args[2].arr_argi[0] = count;
-	shmpkt->args[2].arr_argi[1] = offset;
-	shmpkt->args[3].argll = kind;
-	shmpkt->is_sync = true;
+	shmpkt = &tpkt;
+#else
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaMemcpyToSymbol(shmpkt, (shmpkt + 1),
+			symbol, src, count, offset, kind);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags |= CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, shmpkt->method_id, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaMemcpyToSymbolAsync(
@@ -1536,75 +1253,55 @@ cudaError_t cudaMemcpyToSymbolAsync(
 		size_t offset, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
 {
 	struct cuda_packet *shmpkt;
-	void *shm_ptr;
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
 
 	printd(DBG_DEBUG, "symb %p\n", symbol);
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	shm_ptr = (void*)((uintptr_t)shmpkt + sizeof(*shmpkt));
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->thr_id = pthread_self();
-	shmpkt->len = sizeof(*shmpkt);
-
-	if (__func_symb_param_is_string(symbol)) {
-		shmpkt->args[1].argull = (shm_ptr - (void*)shmpkt); // offset of string
-		memcpy(shm_ptr, symbol, strlen(symbol) + 1);
-		shmpkt->flags |= CUDA_PKT_SYMB_IS_STRING;
-		printd(DBG_DEBUG, "\tsymb is string: %s\n", symbol);
-		shm_ptr += strlen(symbol) + 1;
-		shmpkt->len += strlen(symbol) + 1;
-	} else {
-		shmpkt->args[1].argull = (uintptr_t)symbol;
-	}
-
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaMemcpyToSymbolAsync(symbol,src,count,offset,kind,stream);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) + count;
 	switch (kind) {
-		case cudaMemcpyHostToDevice:
-		{
-			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_ASYNC_H2D;
-			shmpkt->args[1].argull = (shm_ptr - (void*)shmpkt);
-			memcpy(shm_ptr, src, count);
-			shm_ptr += count;
-			shmpkt->len += count;
-		}
-		break;
-		case cudaMemcpyDeviceToDevice:
-		{
-			shmpkt->method_id = CUDA_MEMCPY_TO_SYMBOL_ASYNC_D2D;
-			shmpkt->args[1].argull = (uintptr_t)src;
-		}
-		break;
-		default:
-		{
-			fprintf(stderr, USERMSG_PREFIX
-					" memcpy direction %d not implemented\n", kind);
-			return cudaErrorInvalidMemcpyDirection;
-		}
+		case cudaMemcpyHostToDevice: tpkt.method_id = CUDA_MEMCPY_H2D; break;
+		case cudaMemcpyDeviceToDevice: tpkt.method_id = CUDA_MEMCPY_D2D; break;
+		default: BUG(1);
 	}
-	shmpkt->args[2].arr_argi[0] = count;
-	shmpkt->args[2].arr_argi[1] = offset;
-	shmpkt->args[3].stream = stream;
-	shmpkt->is_sync = true;
+	shmpkt = &tpkt;
+#else
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaMemcpyToSymbolAsync(shmpkt, (shmpkt + 1),
+			symbol, src, count, offset, kind, stream);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags |= CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, shmpkt->method_id, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaMemGetInfo(size_t *free, size_t *total)
 {
 	struct cuda_packet *shmpkt;
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaMemGetInfo(free,total);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = CUDA_MEM_GET_INFO;
@@ -1617,48 +1314,50 @@ cudaError_t cudaMemGetInfo(size_t *free, size_t *total)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	*free = shmpkt->args[0].arr_argi[0];
 	*total = shmpkt->args[0].arr_argi[1];
+
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
 	printd(DBG_DEBUG, "free=%lu total=%lu\n", *free, *total);
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_MEM_GET_INFO, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaMemset(void *devPtr, int value, size_t count)
 {
 	struct cuda_packet *shmpkt;
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaMemset(devPtr,value,count);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_MEMSET;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = (uintptr_t)devPtr;
-	shmpkt->args[1].argll = value;
-	shmpkt->args[2].arr_argi[0] = count;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaMemset(shmpkt, devPtr, value, count);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
 	printd(DBG_DEBUG, "devPtr=%p value=%d count=%lu\n", devPtr, value, count);
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_MEMSET, shmpkt->len);
+	return cerr;
 }
 
 //
@@ -1673,35 +1372,33 @@ cudaError_t cudaBindTexture(size_t *offset,
 		size_t size __dv(UINT_MAX))
 {
 	struct cuda_packet *shmpkt;
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
 	printd(DBG_DEBUG, "called\n");
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaBindTexture(offset,texRef,devPtr,desc,size);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_BIND_TEXTURE;
-	shmpkt->thr_id = pthread_self();
-	// We'll expect the value of *offset to be in args[0].arr_argi[0] within the
-	// return packet
-	shmpkt->args[0].argp = (void*)texRef; // address
-	shmpkt->args[1].texRef = *texRef; // data
-	shmpkt->args[2].argp = (void*)devPtr,
-	shmpkt->args[3].desc = *desc; // whole struct copy
-	shmpkt->args[4].arr_argi[0] = size;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaBindTexture(shmpkt, texRef, devPtr, desc, size);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
-	*offset = shmpkt->args[0].arr_argi[0];
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	extract_cudaBindTexture(shmpkt, offset);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
+	update_latencies(&shmpkt->lat, CUDA_BIND_TEXTURE, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaBindTextureToArray(
@@ -1710,34 +1407,32 @@ cudaError_t cudaBindTextureToArray(
 		const struct cudaChannelFormatDesc *desc) //! non-opaque; copied in full
 {
 	struct cuda_packet *shmpkt;
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	cudaError_t cerr;
+	TIMER_DECLARE1(t);
+
 	printd(DBG_DEBUG, "called\n");
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_BIND_TEXTURE_TO_ARRAY;
-	shmpkt->thr_id = pthread_self();
-	// the caller will customize the values within texRef before invoking this
-	// function, thus we need to copy the entire structure as well as its
-	// address, so the sink can find the texture it registered with CUDA
-	shmpkt->args[0].argp = (void*)texRef; // address
-	shmpkt->args[1].texRef = *texRef; // data
-	shmpkt->args[2].cudaArray = (struct cudaArray*)array;
-	shmpkt->args[3].desc = *desc; // whole struct copy
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaBindTextureToArray(texRef,array,desc);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaBindTextureToArray(shmpkt, texRef, array, desc);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
 
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	update_latencies(&shmpkt->lat, CUDA_BIND_TEXTURE_TO_ARRAY, shmpkt->len);
+	return cerr;
 }
 
 struct cudaChannelFormatDesc
@@ -1790,10 +1485,7 @@ cudaCreateChannelDesc(int x, int y, int z, int w,
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	update_latencies(&shmpkt->lat);
@@ -1824,55 +1516,63 @@ cudaError_t cudaGetTextureReference(
 cudaError_t cudaDriverGetVersion(int *driverVersion)
 {
 	struct cuda_packet *shmpkt;
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaDriverGetVersion(driverVersion);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_DRIVER_GET_VERSION;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(*shmpkt);
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaDriverGetVersion(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
-	*driverVersion = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	extract_cudaDriverGetVersion(shmpkt, driverVersion);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
+	update_latencies(&shmpkt->lat, CUDA_DRIVER_GET_VERSION, shmpkt->len);
+	return cerr;
 }
 
 cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
 {
 	struct cuda_packet *shmpkt;
-
+	cudaError_t cerr;
 	TIMER_DECLARE1(t);
+
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	cerr = bypass.cudaRuntimeGetVersion(runtimeVersion);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = CUDA_RUNTIME_GET_VERSION;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(*shmpkt);
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+	pack_cudaRuntimeGetVersion(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
-	*runtimeVersion = *((int*)((uintptr_t)shmpkt + shmpkt->args[0].argull));
-	update_latencies(&shmpkt->lat);
-	return shmpkt->ret_ex_val.err;
+	extract_cudaRuntimeGetVersion(shmpkt, runtimeVersion);
+	cerr = shmpkt->ret_ex_val.err;
+#endif
+
+	update_latencies(&shmpkt->lat, CUDA_RUNTIME_GET_VERSION, shmpkt->len);
+	return cerr;
 }
 
 //
@@ -1881,87 +1581,82 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
 
 void** __cudaRegisterFatBinary(void* cubin)
 {
-	int err, cubin_size;
+	void **handle;
 	struct cuda_packet *shmpkt;
-	void *cubin_shm; // pointer to serialized copy of argument
-	cache_num_entries_t entries_in_cubin;
+	TIMER_DECLARE1(t);
+
+	if (num_registered_cubins <= 0) {
+#if defined(TIMING) && defined(TIMING_NATIVE)
+		fill_bypass(&bypass);
+#else
+		if (0 > attach_assembly_runtime()) { // returns if already done
+			fprintf(stderr, "Error attaching to assembly runtime\n");
+			assert(0);
+		}
+#endif
+	}
 
 	num_registered_cubins++;
 
-	err = attach_assembly_runtime(); // will return if already done
-	if (err < 0) {
-		fprintf(stderr, "Error attaching to assembly runtime\n");
-		assert(0);
-	}
-
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	handle = bypass.__cudaRegisterFatBinary(cubin);
+	TIMER_END(t, tpkt.lat.exec.call);
+	cache_num_entries_t _notused;
+	tpkt.len = sizeof(tpkt) + getFatRecPktSize(cubin, &_notused);
+	shmpkt = &tpkt;
+#else
 	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset((void*)shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = __CUDA_REGISTER_FAT_BINARY;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
-
-	// Serialize the complex cubin structure into the shared memory region,
-	// immediately after the location of the cuda packet.
-	cubin_shm = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
-	memset(&entries_in_cubin, 0, sizeof(entries_in_cubin));
-	cubin_size = getFatRecPktSize(cubin, &entries_in_cubin);
-	printd(DBG_DEBUG, "size of cubin: %d bytes\n", cubin_size);
-	if (cubin_size >= THREAD_SHM_SIZE) {
-		fprintf(stderr, "%s: error: cubin size too large: %d\n",
-				__func__, cubin_size);
-		assert(0);
-	}
-	err = packFatBinary((char *)cubin_shm, cubin, &entries_in_cubin);
-	if (err < 0) {
-		printd(DBG_ERROR, "error calling packFatBinary\n");
-		return NULL;
-	}
-	shmpkt->args[1].argll = cubin_size;
-	shmpkt->len = sizeof(*shmpkt) + cubin_size;
-	shmpkt->is_sync = true;
+	pack_cudaRegisterFatBinary(shmpkt, (shmpkt + 1), cubin);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb(); // flush writes from caches
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
+	extract_cudaRegisterFatBinary(shmpkt, &handle);
 	printd(DBG_DEBUG, "handle=%p\n", shmpkt->ret_ex_val.handle);
-	update_latencies(&shmpkt->lat);
-	return (void**)(shmpkt->ret_ex_val.handle);
+#endif
+
+	update_latencies(&shmpkt->lat, __CUDA_REGISTER_FAT_BINARY, shmpkt->len);
+	return handle;
 }
 
 void __cudaUnregisterFatBinary(void** fatCubinHandle)
 {
 	struct cuda_packet *shmpkt;
+	TIMER_DECLARE1(t);
+
 	printd(DBG_INFO, "handle=%p\n", fatCubinHandle);
 
-	TIMER_DECLARE1(t);
-	TIMER_START(t);
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
 	num_registered_cubins--;
-	shmpkt->method_id = __CUDA_UNREGISTER_FAT_BINARY;
-	shmpkt->thr_id = pthread_self();
-	shmpkt->args[0].argdp = fatCubinHandle;
-	shmpkt->len = sizeof(*shmpkt);
-	shmpkt->is_sync = true;
+
+	TIMER_START(t);
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	bypass.__cudaUnregisterFatBinary(fatCubinHandle);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt);
+	shmpkt = &tpkt;
+#else
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaUnregisterFatBinary(shmpkt, fatCubinHandle);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+#endif
 
-	update_latencies(&shmpkt->lat);
-	if (num_registered_cubins == 0) { // only detach on last unregister
+	update_latencies(&shmpkt->lat, __CUDA_UNREGISTER_FAT_BINARY, shmpkt->len);
+
+	if (num_registered_cubins <= 0) { // only detach on last unregister
+#if !(defined(TIMING) && defined(TIMING_NATIVE))
 		detach_assembly_runtime();
+#endif
 		print_latencies();
 	}
 
@@ -1972,46 +1667,39 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize)
 {
-	int err;
 	struct cuda_packet *shmpkt;
-	void *var = NULL;
+	TIMER_DECLARE1(t);
 
 	printd(DBG_DEBUG, "handle=%p hostFun=%p deviceFun=%s deviceName=%s\n",
 			fatCubinHandle, hostFun, deviceFun, deviceName);
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = __CUDA_REGISTER_FUNCTION;
-	shmpkt->thr_id = pthread_self();
-
-	shmpkt->args[0].argull = sizeof(*shmpkt);
-	// now pack it into the shm
-	var = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
-	err = packRegFuncArgs(var, fatCubinHandle, hostFun, deviceFun,
-			deviceName, thread_limit, tid, bid, bDim, gDim, wSize);
-	if (err < 0) {
-		printd(DBG_ERROR, "Error packing arguments\n");
-		assert(0); // FIXME Is there a better strategy to failing?
-	}
-	shmpkt->args[1].arr_argi[0] =
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	bypass.__cudaRegisterFunction(fatCubinHandle,hostFun,deviceFun,deviceName,
+			thread_limit,tid,bid,bDim,gDim,wSize);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) +
 		getSize_regFuncArgs(fatCubinHandle, hostFun, deviceFun, deviceName,
 				thread_limit, tid, bid, bDim, gDim, wSize);
-	shmpkt->len = sizeof(*shmpkt) + shmpkt->args[1].arr_argi[0];
-	shmpkt->is_sync = true;
+	shmpkt = &tpkt;
+#else
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaRegisterFunction(shmpkt, (shmpkt + 1),
+			fatCubinHandle, hostFun, deviceFun, deviceName, thread_limit, tid,
+			bid, bDim, gDim, wSize);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+#endif
 
-	update_latencies(&shmpkt->lat);
+	update_latencies(&shmpkt->lat, __CUDA_REGISTER_FUNCTION, shmpkt->len);
 	return;
 }
+
 void __cudaRegisterVar(
 		void **fatCubinHandle,	//! cubin this var associates with
 		char *hostVar,			//! addr of a var within app (not string)
@@ -2019,50 +1707,34 @@ void __cudaRegisterVar(
 		const char *deviceName, //! actual string
 		int ext, int vsize, int constant, int global)
 {
-	int err;
 	struct cuda_packet *shmpkt;
-	void *var = NULL;
-
+	TIMER_DECLARE1(t);
 	printd(DBG_DEBUG, "symbol=%p\n", hostVar);
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	memset(shmpkt, 0, sizeof(*shmpkt));
-	shmpkt->method_id = __CUDA_REGISTER_VARIABLE;
-	shmpkt->thr_id = pthread_self();
-
-	shmpkt->args[0].argull = sizeof(*shmpkt);
-	// now pack it into the shm
-	var = (void*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
-	err = packRegVar(var, fatCubinHandle, hostVar, deviceAddress, deviceName,
-			ext, vsize, constant, global);
-	if (err < 0) {
-		printd(DBG_ERROR, "Error packing arguments\n");
-		assert(0); // FIXME Is there a better strategy to failing?
-	}
-	shmpkt->args[1].arr_argi[0]
-		= getSize_regVar(fatCubinHandle, hostVar, deviceAddress, deviceName,
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	bypass.__cudaRegisterVar(fatCubinHandle,hostVar,deviceAddress,deviceName,
+			ext,vsize,constant,global);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) +
+		getSize_regVar(fatCubinHandle, hostVar, deviceAddress, deviceName,
 				ext, vsize, constant, global);
-	shmpkt->len = sizeof(*shmpkt) + shmpkt->args[1].arr_argi[0];
-	shmpkt->is_sync = true;
-
-	// Add it to our list of known variable symbols.
-	registered_vars[num_registered_vars++] = (uintptr_t)hostVar;
-	if (num_registered_vars >= MAX_REGISTERED_VARS) {
-		fprintf(stderr, USERMSG_PREFIX " exceeded allowance on num vars to register\n");
-		BUG(1);
-	}
+	shmpkt = &tpkt;
+#else
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	pack_cudaRegisterVar(shmpkt, (shmpkt + 1),
+			fatCubinHandle, hostVar, deviceAddress, deviceName, ext, vsize,
+			constant, global);
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+#endif
 
-	update_latencies(&shmpkt->lat);
+	update_latencies(&shmpkt->lat, __CUDA_REGISTER_VARIABLE, shmpkt->len);
 	return;
 }
 
@@ -2078,16 +1750,24 @@ void __cudaRegisterTexture(
 		int dim, int norm, int ext)
 {
 	struct cuda_packet *shmpkt;
-	void *shm_ptr;
+	TIMER_DECLARE1(t);
 
 	printd(DBG_DEBUG, "handle=%p texRef=%p devAddr=%p *devAddr=%p texName=%s"
 			" dim=%d norm=%d ext=%d\n",
 			fatCubinHandle, texRef, deviceAddress, *deviceAddress, texName,
 			dim, norm, ext);
 
-	TIMER_DECLARE1(t);
 	TIMER_START(t);
-	shm_ptr = shmpkt = (struct cuda_packet *)get_region(pthread_self());
+#if defined(TIMING) && defined(TIMING_NATIVE)
+	struct cuda_packet tpkt; // XXX this might add a lot to the stack
+	memset(&tpkt, 0, sizeof(tpkt));
+	bypass.__cudaRegisterTexture(fatCubinHandle,texRef,deviceAddress,texName,
+			dim,norm,ext);
+	TIMER_END(t, tpkt.lat.exec.call);
+	tpkt.len = sizeof(tpkt) + strlen(texName) + 1;
+	shmpkt = &tpkt;
+#else
+	void *shm_ptr = shmpkt = (struct cuda_packet *)get_region(pthread_self());
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = __CUDA_REGISTER_TEXTURE;
 	shmpkt->thr_id = pthread_self();
@@ -2113,136 +1793,10 @@ void __cudaRegisterTexture(
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	shmpkt->flags = CUDA_PKT_REQUEST;
-	wmb();
-	while (!(shmpkt->flags & CUDA_PKT_RESPONSE))
-		rmb();
+	HANDOFF_AND_SPIN(shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
+#endif
 
-	update_latencies(&shmpkt->lat);
+	update_latencies(&shmpkt->lat, __CUDA_REGISTER_TEXTURE, shmpkt->len);
 	return;
 }
-
-/*-------------------------------------- ^^ CODE TO MERGE UP ^^ --------------*/
-
-#if 0
-cudaError_t cudaChooseDevice(int *device, const struct cudaDeviceProp *prop)
-
-cudaError_t cudaThreadSetLimit(enum cudaLimit limit, size_t value)
-
-cudaError_t cudaThreadGetLimit(size_t *pValue, enum cudaLimit limit)
-
-cudaError_t cudaThreadGetCacheConfig(enum cudaFuncCache *pCacheConfig)
-
-cudaError_t cudaThreadSetCacheConfig(enum cudaFuncCache cacheConfig)
-
-cudaError_t cudaPeekAtLastError(void)
-
-cudaError_t cudaStreamDestroy(cudaStream_t stream)
-
-cudaError_t cudaStreamWaitEvent(cudaStream_t stream, cudaEvent_t event, unsigned int flags)
-
-cudaError_t cudaStreamQuery(cudaStream_t stream)
-
-cudaError_t cudaEventCreate(cudaEvent_t *event)
-
-cudaError_t cudaEventCreateWithFlags(cudaEvent_t *event, unsigned int flags)
-
-cudaError_t cudaEventRecord(cudaEvent_t event, cudaStream_t stream __dv(0))
-
-cudaError_t cudaEventQuery(cudaEvent_t event)
-
-cudaError_t cudaEventSynchronize(cudaEvent_t event)
-
-cudaError_t cudaEventDestroy(cudaEvent_t event) 
-
-cudaError_t cudaEventElapsedTime(float *ms, cudaEvent_t start, cudaEvent_t end) 
-
-cudaError_t cudaFuncSetCacheConfig(const char *func, enum cudaFuncCache cacheConfig) 
-
-cudaError_t cudaSetDoubleForDevice(double *d) 
-
-cudaError_t cudaSetDoubleForHost(double *d) 
-
-cudaError_t cudaMallocHost(void **ptr, size_t size) 
-
-cudaError_t cudaHostGetDevicePointer(void **pDevice, void *pHost, unsigned int flags)
-
-cudaError_t cudaHostGetFlags(unsigned int *pFlags, void *pHost)
-
-cudaError_t cudaMalloc3D(struct cudaPitchedPtr* pitchedDevPtr, struct cudaExtent extent)
-
-cudaError_t cudaMalloc3DArray(struct cudaArray** array, const struct cudaChannelFormatDesc* desc, struct cudaExtent extent, unsigned int flags)
-
-cudaError_t cudaMemcpy3D(const struct cudaMemcpy3DParms *p)
-
-cudaError_t cudaMemcpy3DAsync(const struct cudaMemcpy3DParms *p, cudaStream_t stream __dv(0))
-
-cudaError_t cudaMemcpyFromArray(void *dst, const struct cudaArray *src, size_t wOffset, size_t hOffset, size_t count, enum cudaMemcpyKind kind)
-
-cudaError_t cudaMemcpyArrayToArray(struct cudaArray *dst, size_t wOffsetDst, size_t hOffsetDst, const struct cudaArray *src, size_t wOffsetSrc, size_t hOffsetSrc, size_t count, enum cudaMemcpyKind kind __dv(cudaMemcpyDeviceToDevice))
-
-cudaError_t cudaMemcpy2D(void *dst, size_t dpitch, const void *src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind)
-
-cudaError_t cudaMemcpy2DToArray(struct cudaArray *dst, size_t wOffset, size_t hOffset, const void *src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind)
-
-cudaError_t cudaMemcpy2DFromArray(void *dst, size_t dpitch, const struct cudaArray *src, size_t wOffset, size_t hOffset, size_t width, size_t height, enum cudaMemcpyKind kind)
-
-cudaError_t cudaMemcpy2DArrayToArray(struct cudaArray *dst, size_t wOffsetDst, size_t hOffsetDst, const struct cudaArray *src, size_t wOffsetSrc, size_t hOffsetSrc, size_t width, size_t height, enum cudaMemcpyKind kind __dv(cudaMemcpyDeviceToDevice))
-
-cudaError_t cudaMemcpyToArrayAsync(struct cudaArray *dst, size_t wOffset, size_t hOffset, const void *src, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
-
-cudaError_t cudaMemcpyFromArrayAsync(void *dst, const struct cudaArray *src, size_t wOffset, size_t hOffset, size_t count, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
-
-cudaError_t cudaMemcpy2DAsync(void *dst, size_t dpitch, const void *src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
-
-cudaError_t cudaMemcpy2DToArrayAsync(struct cudaArray *dst, size_t wOffset, size_t hOffset, const void *src, size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
-
-cudaError_t cudaMemcpy2DFromArrayAsync(void *dst, size_t dpitch, const struct cudaArray *src, size_t wOffset, size_t hOffset, size_t width, size_t height, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0))
-
-cudaError_t cudaMemcpyFromSymbolAsync(void *dst, const char *symbol, size_t count, size_t offset, enum cudaMemcpyKind kind, cudaStream_t stream __dv(0)) 
-
-cudaError_t cudaMemset2D(void *devPtr, size_t pitch, int value, size_t width, size_t height)
-
-cudaError_t cudaMemset3D(struct cudaPitchedPtr pitchedDevPtr, int value, struct cudaExtent extent)
-
-cudaError_t cudaMemsetAsync(void *devPtr, int value, size_t count, cudaStream_t stream __dv(0))
-
-cudaError_t cudaMemset2DAsync(void *devPtr, size_t pitch, int value, size_t width, size_t height, cudaStream_t stream __dv(0))
-
-cudaError_t cudaMemset3DAsync(struct cudaPitchedPtr pitchedDevPtr, int value, struct cudaExtent extent, cudaStream_t stream __dv(0))
-
-cudaError_t cudaGetSymbolAddress(void **devPtr, const char *symbol)
-
-cudaError_t cudaGetSymbolSize(size_t *size, const char *symbol)
-
-cudaError_t cudaGraphicsUnregisterResource(cudaGraphicsResource_t resource)
-
-cudaError_t cudaGraphicsResourceSetMapFlags(cudaGraphicsResource_t resource, unsigned int flags)
-
-cudaError_t cudaGraphicsMapResources(int count, cudaGraphicsResource_t *resources, cudaStream_t stream __dv(0))
-
-cudaError_t cudaGraphicsUnmapResources(int count, cudaGraphicsResource_t *resources, cudaStream_t stream __dv(0))
-
-cudaError_t cudaGraphicsResourceGetMappedPointer(void **devPtr, size_t *size, cudaGraphicsResource_t resource)
-
-cudaError_t cudaGraphicsSubResourceGetMappedArray( struct cudaArray **array, cudaGraphicsResource_t resource, unsigned int arrayIndex, unsigned int mipLevel)
-
-cudaError_t cudaGetChannelDesc(struct cudaChannelFormatDesc *desc, const struct cudaArray *array)
-
-cudaError_t cudaBindTexture2D(size_t *offset, const struct textureReference *texref, const void *devPtr, const struct cudaChannelFormatDesc *desc, size_t width, size_t height, size_t pitch)
-
-cudaError_t cudaBindTextureToArray( const struct textureReference *texref, const struct cudaArray *array, const struct cudaChannelFormatDesc *desc)
-
-cudaError_t cudaUnbindTexture(const struct textureReference *texref)
-
-cudaError_t cudaGetTextureAlignmentOffset(size_t *offset, const struct textureReference *texref)
-
-cudaError_t cudaBindSurfaceToArray( const struct surfaceReference *surfref, const struct cudaArray *array, const struct cudaChannelFormatDesc *desc)
-
-cudaError_t cudaGetSurfaceReference( const struct surfaceReference **surfref, const char *symbol)
-
-cudaError_t cudaGetExportTable(const void **ppExportTable, const cudaUUID_t *pExportTableId)
-
-void __cudaRegisterShared(void** fatCubinHandle, void** devicePtr)
-#endif

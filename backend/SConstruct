@@ -1,102 +1,48 @@
 #! /usr/bin/env python
 
-"""@file SConstruct
-   @author Magdalena Slawinska magg@gatech.edu
-   @date 2011-02-22
-   @brief Building the network stuff
-"""
+""" Build file for the backend code. """
 
 import os
 import commands
 import sys
 
-Import('CUDA_ROOT', 'DEBUG', 'TIMING')
+__author__ = 'Alex Merritt'
+__email__ = 'merritt.alex@gatech.edu'
 
-def get_platform_characteristic_str():
-    """
-        @todo It should be imported like something
-        from ...SConstruct import get_platform_characteristic
-        but I need time to figure out how to do this
-       intended to get the characteristic string to allow for automatic
-       recognition of the platform and applied customized build environment
-       @return: the characteristic string for the platform
-       @rtype: string
-    """    
-    nodename = commands.getoutput('uname -n') # doesn't work on keeneland
-    return nodename
+Import('NODE_NAME', 'ENV', 'INSTALL_DIR')
 
-GLOBAL_CCFLAGS=['-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-Wno-unused-function']
-if int(DEBUG) == 1:
-	GLOBAL_CCFLAGS.append('-ggdb')
-	GLOBAL_CCFLAGS.append('-DDEBUG')
-	print 'Debugging code enabled for backend'
-else:
-	GLOBAL_CCFLAGS.append('-O3')
+env = ENV[NODE_NAME]
+env.Append(LIBS = ['pthread', 'uuid', 'cudart', 'cuda'])
 
-if int(TIMING) == 1:
-	GLOBAL_CCFLAGS.append('-DTIMING')
+sources = []
 
-########################################################333
-# here we define the environments for particular nodes
-#######################################################3
-# environment for the Keeneland and prost
-envBackendKeeneland = Environment(
-      LIBS=['pthread', 'rt', 'dl', 'uuid', 'cudart', 'cuda', 'shmgrp' ],
-      LIBPATH=[CUDA_ROOT + '/lib64', '/nics/b/home/merritt/local/lib'],
-      CPPPATH=['.', '../include', CUDA_ROOT + '/include', '/nics/b/home/merritt/local/include'],
-	  CCFLAGS=GLOBAL_CCFLAGS
-	  )
+files = os.listdir('./')
+for src in files:
+	(name,ext) = os.path.splitext(src)
+	if name in ['runtime', 'localsink']:
+		continue
+	if '.c' == ext.lower():
+		sources.append(src)
 
-# env for Prost, GT machine
-envBackendProst = envBackendKeeneland
+files = os.listdir('assembly/')
+for src in files:
+	(name,ext) = os.path.splitext(src)
+	if 'remotesink' in name:
+		continue
+	if '.c' == ext.lower():
+		sources.append('assembly/' + src)
 
-# Shiva, GT machine
-envBackendShiva = Environment(
-      CC='/usr/local/bin/gcc4.4.4',
-      LIBS=['pthread', 'rt', 'dl', 'uuid', 'cudart', 'cuda', 'shmgrp'],
-      LIBPATH=[CUDA_ROOT + 'lib64'],
-      CPPPATH=['.', '../include', CUDA_ROOT + 'include', ],
-	  CCFLAGS=GLOBAL_CCFLAGS)
+sources.append('../common/cuda/execute.c')
+sources.append('../common/cuda/marshal_hidden.c')
+sources.append('../common/cuda/rpc.c')
+sources.append('../common/io/sock.c')
+sources.append('../common/util/rbtree.c')
 
-# Ifrit, GT machine
-envBackendIfrit = envBackendShiva
+biny = env.Program('runtime', ['runtime.c', sources])
+env.Install(INSTALL_DIR + '/bin', biny)
 
-#############################################
-# end of environment definitions
-##########################################3
+biny = env.Program('localsink', ['localsink.c', sources])
+env.Install(INSTALL_DIR + '/bin', biny)
 
-
-def build_backend(env):
-    srclist = ['assembly/assembly.c', 'assembly/assemble.c', 'assembly/rpc.c',
-			'assembly/export.c', '../common/io/sock.c', '../common/cuda/execute.c',
-			'../common/cuda/rpc.c', '../common/cuda/marshal.c',
-			'../common/util/rbtree.c']
-    env.Program('runtime', ['runtime.c', srclist])
-    env.Program('localsink', ['localsink.c', srclist])
-    env.Program('assembly/remotesink', ['assembly/remotesink.c', srclist])
-
-
-def build_program():
-    global envBackendKeeneland
-    global envBackendProst
-    global envBackendShiva
-    global envBackendIfrit
-    
-    # try to recognize the machine
-    nodename = get_platform_characteristic_str()
-    
-    if nodename.startswith('kid'):
-        build_backend(envBackendKeeneland)
-    elif nodename.startswith('prost'):
-        build_backend(envBackendProst)
-    elif nodename.startswith('shiva'):
-        build_backend(envBackendShiva)
-    elif nodename.startswith('ifrit'):
-        build_backend(envBackendIfrit)
-    else:
-        print("Error: Define build environment for this machine in backend/SConstruct")
-        sys.exit()
-
-
-# build the program
-build_program()
+biny = env.Program('remotesink', ['assembly/remotesink.c', sources])
+env.Install(INSTALL_DIR + '/bin', biny)

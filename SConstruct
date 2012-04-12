@@ -1,128 +1,113 @@
 #! /usr/bin/env python
 
-"""@file SConstruct
-   @author Magdalena Slawinska magg@gatech.edu
-   @author Alex Merritt, merritt.alex@gatech.edu
-   @date 2011-02-15
+""" Build script for the Shadowfax code base.
+
+	Modify the local_* variables to include header and library directory paths for
+	locally installed software. Currently, ~/local/lib and ~/local/include are
+	appended for Keeneland nodes.
+
+	New machines may be added by extending the CUDA location configuration and
+	the global ENV dict variable.
 """
+
 import os
 import commands
 import sys
 
-Help("""
-   Type: 'scons -Q' to build the production program,
-         'scons -c' to clean the program
-   Currently automatically detected environments: 
-   - keeneland (NICS, UTK) 
-   - prost     (Georgia Tech)
-   - shiva     (Georgia TEch)
-   - ifrit     (Georgia TEch)
-   If you want to add another environment check the function
-   build_variables_set(). Currently it is based on the
-   hostnames you are building on.
-    """)
+__author__ = "Alex Merritt"
+__email__ = "merritt.alex@gatech.edu"
 
+#
+# Global variables
+#
+NODE_NAME = commands.getoutput('uname -n').split('.')[0]
+ENV = {}
+INSTALL_DIR = os.getcwd() + '/build'
 
-""" 
-  required variables for this building system
-  if you need to add another configuration you need to modify the 
-  setBuildVariables()
-"""
+#
+# Configure CUDA location
+#
+cuda_root=''
+if NODE_NAME.startswith('kid'):
+	cuda_root = '/sw/keeneland/cuda/3.2/linux_binary'
+	NODE_NAME = 'kid'
+elif NODE_NAME == 'prost':
+	cuda_root = '/opt/cuda/'
+elif NODE_NAME == 'shiva':
+	cuda_root = '/usr/local/cuda'
+elif NODE_NAME == 'ifrit':
+	cuda_root = '/usr/local/cuda'
+else:
+	print("Build not configured for this node.")
+	sys.exit(-1)
 
-# points to the directory where the CUDA root is
-CUDA_ROOT=None
+#
+# Extract arguments
+#
+args = {}
+args['debug'] = ARGUMENTS.get('dbg', 0)
+# Perform latency measurements of the code.
+args['timing'] = ARGUMENTS.get('timing', 0)
+# Timing, but without use of the backend; native passthrough only.
+# XXX DO NOT run multi-threaded codes with timing_native
+args['timing_native'] = ARGUMENTS.get('timing_native', 0)
+args['network'] = ARGUMENTS.get('network', 'eth')
 
-DEBUG=0
+#
+# Configure environment
+#
+ccflags = ['-Wall', '-Wextra', '-Werror']
+ccflags.append('-Winline')
+ccflags.extend(['-Wno-unused-parameter', '-Wno-unused-function'])
 
-def get_platform_characteristic_str():
-    """
-       intended to get the characteristic string to allow for automatic
-       recognition of the platform and applied customized build environment
-       @return: the characteristic string for the platform
-       @rtype: string
-    """
-    nodename = commands.getoutput('uname -n')
-    return nodename
-    
+if int(args['debug']):
+	ccflags.append('-ggdb')
+	ccflags.append('-DDEBUG')
+else:
+	ccflags.append('-O3')
 
-#################################################
-# helper functions
-#################################################
-def build_variables_set():
-    """
-      sets the build variables automatically depending on the system you
-      are working on
-    """
-    global CUDA_ROOT
-    global DEBUG
-        
-    nodename = get_platform_characteristic_str()
-    print('The configuration will be applied for: ' + nodename)
-    
-    # configuration for keeneland
-    if ( nodename.startswith('kid') ):
-        print('kid prefix detected ...')
-        CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary'
-    
-    # custom machine at Georgia Tech configuration for prost
-    if ( nodename.startswith('prost')):
-        print('prost prefix detected ...')
-        CUDA_ROOT = '/opt/cuda/'
-    
-    # Custom machine at Georgia Tech
-    if nodename.startswith('shiva'):
-		print('shiva prefix detected ...')
-		CUDA_ROOT = '/usr/local/cuda/'
-    
-    # Custom machine at Georgia Tech, same as shiva
-    if nodename.startswith('ifrit') :
-    	print('ifrit prefix detected ...')
-        CUDA_ROOT = '/usr/local/cuda/'
+if int(args['timing']):
+	ccflags.append('-DTIMING')
 
+if int(args['timing_native']):
+	if not int(args['timing']):
+		print('--> timing_native only valid with timing')
+		sys.exit(1)
+	ccflags.append('-DTIMING_NATIVE')
 
-def variable_check_exit(var_name, var):
-    """
-        checks if the variable is correctly set and quits the script if not
-        @param var_name: The name of the variable to be checked 
-        @param var: The variable that supposed to be a path to the directory 
-    """
-    if var == None :
-        print(var_name +  ' not set. You have to set it in build_variables_set() in this script')
-        sys.exit(-1)
-    if not os.path.exists(var):
-        print(var_name + '= ' + var + ' does not exist!')
-        sys.exit(-1)
-    print(var_name + '= ' +  var)
+if args['network'] == 'eth':
+	ccflags.append('-DNIC_ETHERNET')
+elif args['network'] == 'sdp':
+	ccflags.append('-DNIC_SDP')
+else:
+	print('--> network flag invalid')
+	sys.exit(1)
 
+# for anything you install locally, add/modify them here
+home = os.environ['HOME']
+local_lpath = [home + '/local/lib']
+local_cpath = [home + '/local/include']
 
-def build_variables_print():
-    """
-      prints the build variables or exits the script if they are not set
-    """
-    variable_check_exit('CUDA_ROOT', CUDA_ROOT)
+# env values common across all files in project
+libpath = [cuda_root + '/lib64', '/lib64']
+cpath = [cuda_root + '/include', os.getcwd() + '/include']
+libs = ['rt', 'dl', 'shmgrp']
 
-#######################################
-# start actual execution script
-#######################################
+# machine-specific paths
+ENV['kid'] = Environment(CCFLAGS = ccflags, LIBS = libs)
+ENV['kid'].Append(CPPPATH = cpath + local_cpath)
+ENV['kid'].Append(LIBPATH = libpath + local_lpath)
 
-# set build variables    
-build_variables_set()
-# check if the variables are set and directories exist and print them
-build_variables_print()
+ENV['prost'] = ENV['kid']
 
-# Extract debug flag from command line.
-DEBUG = ARGUMENTS.get('dbg', 0)
+ENV['shiva'] = Environment(CC = 'gcc4.4.4', CCFLAGS = ccflags, LIBS = libs)
+ENV['shiva'].Append(CPPPATH = cpath)
+ENV['shiva'].Append(LIBPATH = libpath)
 
-# Extract other flags from command line.
-TIMING = ARGUMENTS.get('timing',0)
+ENV['ifrit'] = ENV['shiva']
 
-# export variables to other scripts
-Export('CUDA_ROOT', 'DEBUG', 'TIMING')
-
-# call all scripts
-SConscript([
-#        'cuda-app/SConstruct', # it doesn't depend on anything
-        'interposer/SConstruct',    # it compiles a bunch of stuff
-        'backend/SConstruct'            
-        ])
-
+#
+# Execute the build
+#
+Export('NODE_NAME', 'ENV', 'INSTALL_DIR')
+SConscript(['interposer/SConstruct', 'backend/SConstruct'])

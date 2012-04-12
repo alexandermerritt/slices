@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <stdint.h>
 #include <time.h>
 
 /*-------------------------------------- DEFINITIONS -------------------------*/
@@ -135,7 +136,7 @@ timer_reset(struct timer *tm)
 	tm->isPaused = false;
 }
 
-static inline uint64_t
+static uint64_t
 timer_end(struct timer *tm, enum answerUnit_t unit) 
 {
 	if(clock_gettime(tm->id, &tm->e) != 0) {

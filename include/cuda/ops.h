@@ -63,6 +63,8 @@ struct cuda_ops
 	OPS_FN_PROTO_PTR(setupArgument);
 	OPS_FN_PROTO_PTR(setValidDevices);
 	OPS_FN_PROTO_PTR(streamCreate);
+	OPS_FN_PROTO_PTR(streamDestroy);
+	OPS_FN_PROTO_PTR(streamQuery);
 	OPS_FN_PROTO_PTR(streamSynchronize);
 	OPS_FN_PROTO_PTR(threadExit);
 	OPS_FN_PROTO_PTR(threadSynchronize);
