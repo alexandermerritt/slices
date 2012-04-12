@@ -1,2 +1,6 @@
 *.o
 *.os
+*.so
+*.sconsign.dblite
+*.swp
+cscope.out
