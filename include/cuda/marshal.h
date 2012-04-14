@@ -145,7 +145,7 @@ pack_cudaThreadExit(struct cuda_packet *pkt)
 	pkt->method_id = CUDA_THREAD_EXIT;
 	pkt->thr_id = pthread_self();
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -154,7 +154,7 @@ pack_cudaThreadSynchronize(struct cuda_packet *pkt)
 	pkt->method_id = CUDA_THREAD_SYNCHRONIZE;
 	pkt->thr_id = pthread_self();
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 //
@@ -168,7 +168,7 @@ pack_cudaGetDevice(struct cuda_packet *pkt)
 	pkt->method_id = CUDA_GET_DEVICE;
 	pkt->thr_id = pthread_self();
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 	// Expect the device ID in args[0].argll
 }
 
@@ -190,7 +190,7 @@ pack_cudaGetDeviceCount(struct cuda_packet *pkt)
 	pkt->method_id = CUDA_GET_DEVICE_COUNT;
 	pkt->thr_id = pthread_self();
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 	// Expect the count in args[0].argll
 }
 
@@ -214,7 +214,7 @@ pack_cudaGetDeviceProperties(struct cuda_packet *pkt, int device)
 	pkt->args[0].argull = 0UL; // Expect structure at this offset in buffer
 	pkt->args[1].argll = device;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -248,7 +248,7 @@ pack_cudaSetDevice(struct cuda_packet *pkt,
 	pkt->thr_id = pthread_self();
 	pkt->args[0].argll = device;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -266,7 +266,7 @@ pack_cudaSetDeviceFlags(struct cuda_packet *pkt,
 	pkt->thr_id = pthread_self();
 	pkt->args[0].argull = flags;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -287,7 +287,7 @@ pack_cudaSetValidDevices(struct cuda_packet *pkt, void *buf,
 	pkt->args[1].argll = len;
 	memcpy(buf, device_arr, arr_len);
 	pkt->len = sizeof(*pkt) + arr_len;
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 // does not copy the array out of buf
@@ -309,7 +309,7 @@ pack_cudaStreamCreate(struct cuda_packet *pkt)
 	pkt->method_id = CUDA_STREAM_CREATE;
 	pkt->thr_id = pthread_self();
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -334,7 +334,7 @@ pack_cudaStreamDestroy(struct cuda_packet *pkt,
 	pkt->thr_id = pthread_self();
 	pkt->args[0].stream = stream;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = false;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -352,7 +352,7 @@ pack_cudaStreamQuery(struct cuda_packet *pkt,
 	pkt->thr_id = pthread_self();
 	pkt->args[0].stream = stream;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -370,7 +370,7 @@ pack_cudaStreamSynchronize(struct cuda_packet *pkt,
 	pkt->thr_id = pthread_self();
 	pkt->args[0].stream = stream;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -395,7 +395,7 @@ pack_cudaConfigureCall(struct cuda_packet *pkt,
 	pkt->args[2].arr_argi[0] = sharedMem;
 	pkt->args[3].stream = stream;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = false;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -421,7 +421,7 @@ pack_cudaLaunch(struct cuda_packet *pkt,
 	// FIXME We assume entry is just a memory pointer, not a string.
 	pkt->args[0].argull = (uintptr_t)entry;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = false;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -442,7 +442,7 @@ pack_cudaSetupArgument(struct cuda_packet *pkt, void *buf,
 	pkt->args[1].arr_argi[0] = size;
 	pkt->args[1].arr_argi[1] = offset;
 	pkt->len = sizeof(*pkt) + size;
-	pkt->is_sync = false;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -465,7 +465,7 @@ pack_cudaFree(struct cuda_packet *pkt, void *devPtr)
 	pkt->thr_id = pthread_self();
 	pkt->args[0].argp = devPtr;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -483,7 +483,7 @@ pack_cudaFreeArray(struct cuda_packet *pkt,
 	pkt->thr_id = pthread_self();
 	pkt->args[0].cudaArray = array;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -504,7 +504,7 @@ pack_cudaMalloc(struct cuda_packet *pkt, size_t size)
 	pkt->thr_id = pthread_self();
 	pkt->args[1].arr_argi[0] = size;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -537,7 +537,7 @@ pack_cudaMallocArray(struct cuda_packet *pkt,
 	pkt->args[1].arr_argi[0] = width;
 	pkt->args[1].arr_argi[1] = height;
 	pkt->args[2].argull = flags;
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -572,7 +572,7 @@ pack_cudaMallocPitch(struct cuda_packet *pkt,
 	pkt->args[2].arr_argi[0] = width;
 	pkt->args[2].arr_argi[1] = height;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -619,7 +619,7 @@ pack_cudaMemcpy(struct cuda_packet *pkt, void *buf,
 			pkt->args[1].argull = 0UL; // offset of src in buf
 			memcpy(buf, src, count);
 			pkt->len = sizeof(*pkt) + count;
-			pkt->is_sync = false;
+			pkt->is_sync = method_synctable[pkt->method_id];
 		}
 		break;
 		case cudaMemcpyDeviceToHost:
@@ -630,7 +630,7 @@ pack_cudaMemcpy(struct cuda_packet *pkt, void *buf,
 			pkt->args[0].argull = 0UL;
 			pkt->args[1].argp = (void*)src; // gpu ptr
 			pkt->len = sizeof(*pkt);
-			pkt->is_sync = true;
+			pkt->is_sync = method_synctable[pkt->method_id];
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
@@ -639,14 +639,14 @@ pack_cudaMemcpy(struct cuda_packet *pkt, void *buf,
 			pkt->args[0].argp = dst; // gpu ptr
 			pkt->args[1].argp = (void*)src; // gpu ptr
 			pkt->len = sizeof(*pkt);
-			pkt->is_sync = false;
+			pkt->is_sync = method_synctable[pkt->method_id];
 		}
 		break;
 		default:
 			BUG(1);
 	}
 	pkt->args[2].arr_argi[0] = count;
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -730,7 +730,7 @@ pack_cudaMemcpyAsync(struct cuda_packet *pkt, void *buf,
 	}
 	pkt->args[2].arr_argi[0] = count;
 	pkt->args[3].stream = stream;
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -778,7 +778,7 @@ pack_cudaMemcpyFromSymbol(struct cuda_packet *pkt, void *buf,
 	pkt->args[2].arr_argi[0] = count;
 	pkt->args[2].arr_argi[1] = offset;
 	pkt->args[3].argll = kind;
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -852,7 +852,7 @@ pack_cudaMemcpyToArray(struct cuda_packet *pkt, void *buf,
 			BUG(1);
 	}
 	pkt->args[3].arr_argi[0] = count;
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -922,7 +922,7 @@ pack_cudaMemcpyToSymbol(struct cuda_packet *pkt, void *buf,
 	pkt->args[2].arr_argi[0] = count;
 	pkt->args[2].arr_argi[1] = offset;
 	pkt->args[3].argll = kind;
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -999,7 +999,7 @@ pack_cudaMemcpyToSymbolAsync(struct cuda_packet *pkt, void *buf,
 	pkt->args[2].arr_argi[0] = count;
 	pkt->args[2].arr_argi[1] = offset;
 	pkt->args[3].stream = stream;
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 // TODO
@@ -1015,7 +1015,7 @@ pack_cudaMemset(struct cuda_packet *pkt,
 	pkt->args[1].argll = value;
 	pkt->args[2].arr_argi[0] = count;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -1044,7 +1044,7 @@ pack_cudaBindTexture(struct cuda_packet *pkt,
 	pkt->args[3].desc = *desc; // whole struct copy
 	pkt->args[4].arr_argi[0] = size;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -1091,7 +1091,7 @@ pack_cudaBindTextureToArray(struct cuda_packet *pkt,
 	pkt->args[2].cudaArray = (struct cudaArray*)array;
 	pkt->args[3].desc = *desc; // whole struct copy
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -1120,7 +1120,7 @@ pack_cudaDriverGetVersion(struct cuda_packet *pkt)
 	pkt->method_id = CUDA_DRIVER_GET_VERSION;
 	pkt->thr_id = pthread_self();
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -1136,7 +1136,7 @@ pack_cudaRuntimeGetVersion(struct cuda_packet *pkt)
 	pkt->method_id = CUDA_RUNTIME_GET_VERSION;
 	pkt->thr_id = pthread_self();
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 	// Expect version in args[0].argll
 }
 
@@ -1170,7 +1170,7 @@ pack_cudaRegisterFatBinary(struct cuda_packet *pkt, void *buf,
 	if (err < 0) BUG(1);
 	pkt->args[1].argll = cubin_size;
 	pkt->len = sizeof(*pkt) + cubin_size;
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -1195,7 +1195,7 @@ pack_cudaUnregisterFatBinary(struct cuda_packet *pkt,
 	pkt->thr_id = pthread_self();
 	pkt->args[0].argdp = fatCubinHandle;
 	pkt->len = sizeof(*pkt);
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -1227,7 +1227,7 @@ pack_cudaRegisterFunction(struct cuda_packet *pkt, void *buf,
 		getSize_regFuncArgs(fatCubinHandle, hostFun, deviceFun, deviceName,
 				thread_limit, tid, bid, bDim, gDim, wSize);
 	pkt->len = sizeof(*pkt) + pkt->args[1].arr_argi[0];
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 }
 
 static inline void
@@ -1262,7 +1262,7 @@ pack_cudaRegisterVar(struct cuda_packet *pkt, void *buf,
 		= getSize_regVar(fatCubinHandle, hostVar, deviceAddress, deviceName,
 				ext, vsize, constant, global);
 	pkt->len = sizeof(*pkt) + pkt->args[1].arr_argi[0];
-	pkt->is_sync = true;
+	pkt->is_sync = method_synctable[pkt->method_id];
 
 	// Add it to our list of known variable symbols.
 	registered_vars[num_registered_vars++] = (uintptr_t)hostVar;

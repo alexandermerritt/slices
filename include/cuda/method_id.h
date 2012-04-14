@@ -76,6 +76,72 @@ typedef enum METHOD_ID {
 	CUDA_METHOD_LIMIT
 } method_id_t;
 
+/** structure indicating whether a func is to be handled synchronously */
+static const bool
+method_synctable[CUDA_METHOD_LIMIT] = {
+	[CUDA_INVALID_METHOD]                =  false,  //  not a real func
+	[CUDA_MALLOC]                        =  true,
+	[CUDA_HOST_ALLOC]                    =  true,
+	[CUDA_MALLOC_PITCH]                  =  true,
+	[CUDA_MALLOC_ARRAY]                  =  true,
+	[CUDA_FREE]                          =  false,
+	[CUDA_FREE_ARRAY]                    =  false,
+	[CUDA_MEMCPY_H2H]                    =  true,
+	[CUDA_MEMCPY_H2D]                    =  false,
+	[CUDA_MEMCPY_D2H]                    =  true,
+	[CUDA_MEMCPY_D2D]                    =  true,   //  reexamine
+	[CUDA_MEMCPY_TO_ARRAY_D2D]           =  true,   //  reexamine
+	[CUDA_MEMCPY_TO_ARRAY_H2D]           =  false,
+	[CUDA_MEMCPY_ASYNC_H2D]              =  false,
+	[CUDA_MEMCPY_ASYNC_D2H]              =  true,
+	[CUDA_MEMCPY_ASYNC_H2H]              =  true,
+	[CUDA_MEMCPY_ASYNC_D2D]              =  true,   //  reexamine
+	[CUDA_SETUP_ARGUMENT]                =  false,
+	[CUDA_LAUNCH]                        =  false,
+	[CUDA_GET_DEVICE_COUNT]              =  true,
+	[CUDA_GET_DEVICE_PROPERTIES]         =  true,
+	[CUDA_GET_DEVICE]                    =  true,
+	[CUDA_SET_DEVICE]                    =  false,
+	[CUDA_SET_DEVICE_FLAGS]              =  false,
+	[CUDA_SET_VALID_DEVICES]             =  false,
+	[CUDA_CONFIGURE_CALL]                =  false,
+	[CUDA_THREAD_SYNCHRONIZE]            =  true,
+	[CUDA_THREAD_EXIT]                   =  true,
+	[CUDA_MEMSET]                        =  false,
+	[CUDA_UNBIND_TEXTURE]                =  false,
+	[CUDA_BIND_TEXTURE_TO_ARRAY]         =  false,
+	[CUDA_FREE_HOST]                     =  false,
+	[CUDA_MEMCPY_TO_SYMBOL_H2D]          =  false,
+	[CUDA_MEMCPY_TO_SYMBOL_D2D]          =  true,   //  reexamine
+	[CUDA_MEMCPY_FROM_SYMBOL_D2H]        =  true,
+	[CUDA_MEMCPY_FROM_SYMBOL_D2D]        =  true,   //  reexamine
+	[CUDA_MEMCPY_TO_SYMBOL_ASYNC_H2D]    =  false,
+	[CUDA_MEMCPY_TO_SYMBOL_ASYNC_D2D]    =  true,   //  reexamine
+	[CUDA_MEMCPY_FROM_SYMBOL_ASYNC_D2H]  =  true,
+	[CUDA_MEMCPY_FROM_SYMBOL_ASYNC_D2D]  =  true,   //  reexamine
+	[CUDA_MEMCPY_2D_TO_ARRAY_D2D]        =  true,   //  reexamine
+	[CUDA_MEMCPY_2D_TO_ARRAY_H2D]        =  false,
+	[CUDA_MEMCPY_2D_TO_ARRAY_D2H]        =  true,
+	[CUDA_MEMCPY_2D_TO_ARRAY_H2H]        =  true,
+	[CUDA_MEM_GET_INFO]                  =  true,
+	[__CUDA_REGISTER_FAT_BINARY]         =  true,
+	[__CUDA_REGISTER_FUNCTION]           =  false,
+	[__CUDA_REGISTER_VARIABLE]           =  false,
+	[__CUDA_REGISTER_TEXTURE]            =  false,
+	[__CUDA_REGISTER_SHARED]             =  false,
+	[__CUDA_UNREGISTER_FAT_BINARY]       =  true,
+	[CUDA_DRIVER_GET_VERSION]            =  true,
+	[CUDA_RUNTIME_GET_VERSION]           =  true,
+	[CUDA_FUNC_GET_ATTR]                 =  true,
+	[CUDA_BIND_TEXTURE]                  =  false,
+	[CUDA_GET_TEXTURE_REFERENCE]         =  true,
+	[CUDA_STREAM_CREATE]                 =  true,
+	[CUDA_STREAM_DESTROY]                =  false,
+	[CUDA_STREAM_QUERY]                  =  false,
+	[CUDA_STREAM_SYNCHRONIZE]            =  true,
+	[CUDA_CREATE_CHANNEL_DESC]           =  true
+};
+
 static const char *
 method2str(method_id_t id)
 {

@@ -105,6 +105,8 @@ update_latencies(const struct rpc_latencies *l, method_id_t id, size_t call_size
 	}
 }
 
+#define SYNC2STR(is_sync)	((is_sync) ? "sync" : "async")
+
 inline void
 print_latencies(void)
 {
@@ -127,23 +129,26 @@ print_latencies(void)
 			lat.remote.batch_exec);
 #endif
 
+	// c used here as call number
 	printf(TIMERMSG_PREFIX " -- BEGIN TRACE DUMP -- num:id:id-name:size-bytes:lat-us\n");
 	while (c < num_calls_made) {
 		api_counts[trace[c].id]++;
 		api_lat[trace[c].id] += trace[c].lat;
 		printf(TIMERMSG_PREFIX
-				"\t%lu %u %s %lu %lu\n",
-				c, trace[c].id, method2str(trace[c].id), trace[c].bytes, trace[c].lat);
+				"\t%lu %u %s %lu %lu %s\n",
+				c, trace[c].id, method2str(trace[c].id), trace[c].bytes, trace[c].lat,
+				SYNC2STR(method_synctable[trace[c].id]));
 		c++;
 	}
 	printf(TIMERMSG_PREFIX " -- END TRACE DUMP --\n");
 
-	printf(TIMERMSG_PREFIX " -- BEGIN CALL COUNTS -- count:id:id-name:agg-lat-us\n");
+	// c used here as method_id
+	printf(TIMERMSG_PREFIX " -- BEGIN CALL COUNTS -- count:id:id-name:agg-lat-us:sync\n");
 	for (c = (CUDA_INVALID_METHOD + 1); c < CUDA_METHOD_LIMIT; c++)
 		if (api_counts[c])
 			printf(TIMERMSG_PREFIX
-					"\t%lu %lu %s %lu\n",
-					api_counts[c], c, method2str(c), api_lat[c]);
+					"\t%lu %lu %s %lu %s\n",
+					api_counts[c], c, method2str(c), api_lat[c], SYNC2STR(method_synctable[c]));
 	printf(TIMERMSG_PREFIX " -- END CALL COUNTS --\n");
 }
 
