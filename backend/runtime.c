@@ -57,7 +57,7 @@ extern char **environ;
 
 // Daemon state
 static pid_t sid;
-static const char log[] = "runtime.log";
+static char *log; /** determined based on machine name */
 static FILE *logf = NULL;
 static const char wd[] = "."; //! working dir of runtime once exec'd
 
@@ -529,6 +529,16 @@ int main(int argc, char *argv[])
 		print_usage();
 		return -1;
 	}
+
+	/** configure log file name */
+	log = calloc(1, HOST_NAME_MAX << 1);
+	if (!log) {
+		fprintf(stderr, "No memory left\n");
+		exit(1);
+	}
+	strcat(log, "runtime-");
+	gethostname((log + strlen(log)), HOST_NAME_MAX);
+	strcat(log, ".log");
 
 	printf(">:[ daemonizing ... log file at %s/%s\n", wd, log);
 	if (0 > daemonize())
