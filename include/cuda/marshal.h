@@ -1124,6 +1124,13 @@ pack_cudaDriverGetVersion(struct cuda_packet *pkt)
 }
 
 static inline void
+insert_cudaDriverGetVersion(struct cuda_packet *pkt,
+		int driverVersion)
+{
+	pkt->args[0].argll = driverVersion;
+}
+
+static inline void
 extract_cudaDriverGetVersion(struct cuda_packet *pkt,
 		int *driverVersion)
 {
@@ -1138,6 +1145,13 @@ pack_cudaRuntimeGetVersion(struct cuda_packet *pkt)
 	pkt->len = sizeof(*pkt);
 	pkt->is_sync = method_synctable[pkt->method_id];
 	// Expect version in args[0].argll
+}
+
+static inline void
+insert_cudaRuntimeGetVersion(struct cuda_packet *pkt,
+		int runtimeVersion)
+{
+	pkt->args[0].argll = runtimeVersion;
 }
 
 static inline void
