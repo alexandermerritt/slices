@@ -43,7 +43,7 @@ int cuda_rpc_init(struct cuda_rpc *rpc, size_t batch_size)
 		return -1;
 	}
 	if (batch_size > CUDA_BATCH_MAX) {
-		printd(DBG_ERROR, "Batch size %lu too large (max %lu)\n",
+		printd(DBG_ERROR, "Batch size %lu too large (max %d)\n",
 				batch_size, CUDA_BATCH_MAX);
 		return -1;
 	}
@@ -109,6 +109,8 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 
 	TIMER_START(t);
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, &batch->header, sizeof(batch->header)) );
+	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->offsets, sizeof(offset_t) * batch->header.num_pkts) );
+	//FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->offsets, sizeof(batch->offsets)) );
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->buffer, batch->header.bytes_used) );
 	TIMER_END(t, put_time);
 
@@ -139,7 +141,8 @@ fail:
 static void
 batch_clear(struct cuda_pkt_batch *batch)
 {
-	memset(&batch->header, 0, sizeof(batch->header));
+	batch->header.num_pkts = 0UL;
+	batch->header.bytes_used = 0UL;
 	// don't free buffer storage
 }
 
@@ -160,7 +163,7 @@ batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 	printd(DBG_DEBUG, "pkt %lu offset %lu len %lu\n",
 			batch->header.num_pkts, batch->header.bytes_used, rpc_size);
 
-	batch->header.offsets[batch->header.num_pkts++] = batch->header.bytes_used;
+	batch->offsets[batch->header.num_pkts++] = batch->header.bytes_used;
 
 	// We assume we will always have storage space to hold a packet and its
 	// data, and that a "flush" will only occur due to a synchronous packet or
@@ -205,9 +208,9 @@ batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 		va_end(extra);									\
 	} while(0)
 
-#define FAIL_ON_BATCH_ERR(err)		\
+#define FAIL_ON_BATCH_ERR(func)		\
 	do { 							\
-		if (unlikely(err < 0)) {	\
+		if (unlikely((func) < 0)) {	\
 			exit_errno = -ENETDOWN;	\
 			goto fail;				\
 		}							\

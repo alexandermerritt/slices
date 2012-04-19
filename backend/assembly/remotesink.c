@@ -265,6 +265,8 @@ minion_cleanup(void *arg)
 			printd(DBG_ERROR, EXIT_STRING "error: thread spawn\n");
 			break;
 		default:
+			printd(DBG_ERROR, EXIT_STRING
+					"error: unknown exit code %d\n", state->exit_code);
 			BUG(1);
 			break;
 	}
@@ -367,9 +369,10 @@ minion_thread(void *arg)
 					}
 				}
 				pthread_mutex_unlock(&minion_lock);
-				break; // client app finished w/o error, we stop processing
+				printd(DBG_INFO, "client app finished w/o error, we stop processing\n");
+				break;
 			}
-			// everything else is a real error
+			printd(DBG_ERROR, "unidentified error\n");
 			state->exit_code = err;
 			break;
 		}
@@ -657,6 +660,16 @@ cudarpc_has_payload(
 	return has_payload;
 }
 
+#define BAIL_ON_NW_ERR(func) \
+	do { \
+		int _err = (func); \
+		if (unlikely(_err <= 0)) { \
+			fprintf(stderr, "nw error; ret %d\n", _err); \
+			printd(DBG_ERROR, "nw error; ret %d\n", _err); \
+			return -ENETDOWN; \
+		} \
+	} while(0)
+
 /**
  * Receive, process and dismiss a batch of CUDA RPCs. The goal is to set up the
  * memory region in a way that common/cuda/execute.c expects it, which is how
@@ -672,7 +685,7 @@ do_cuda_rpc(
 		struct cuda_pkt_batch *batch,	//! buffer to use for receiving RPCs + payloads
 		struct remote_cubin *rcubin)	//! CUBIN state necessary for symbol lookup
 {
-	int err, retval = 0;
+	int retval = 0;
 	struct cuda_packet *pkt = NULL;
 	TIMER_DECLARE1(t);
 
@@ -683,10 +696,10 @@ do_cuda_rpc(
 	payload_size data_size;
 
 	// pull in the batch of serialized RPCs
-	err = conn_get(conn, &batch->header, sizeof(batch->header));
-	if (err < 0) return -1;
-	err = conn_get(conn, batch->buffer, batch->header.bytes_used);
-	if (err < 0) return -1;
+	BAIL_ON_NW_ERR( conn_get(conn, &batch->header, sizeof(batch->header)) );
+	BAIL_ON_NW_ERR( conn_get(conn, batch->offsets, sizeof(offset_t) * batch->header.num_pkts) );
+	//BAIL_ON_NW_ERR( conn_get(conn, batch->offsets, sizeof(batch->offsets)) );
+	BAIL_ON_NW_ERR( conn_get(conn, batch->buffer, batch->header.bytes_used) );
 
 	pthread_testcancel();
 
@@ -695,9 +708,11 @@ do_cuda_rpc(
 	printd(DBG_INFO, "executing %lu RPCs\n", batch->header.num_pkts);
 	size_t pkt_num;
 	for (pkt_num = 0; pkt_num < batch->header.num_pkts; pkt_num++) {
-		pkt = (struct cuda_packet*)(batch->buffer + batch->header.offsets[pkt_num]);
-		err = demux(pkt, &(rcubin->cubins));
-		if (err < 0) return -1;
+		pkt = (struct cuda_packet*)(batch->buffer + batch->offsets[pkt_num]);
+		if (0 > demux(pkt, &(rcubin->cubins))) {
+			printd(DBG_ERROR, "demux failed\n");
+			return -1;
+		}
 	}
 	TIMER_END(t, pkt->lat.remote.batch_exec);
 
@@ -707,14 +722,11 @@ do_cuda_rpc(
 	has_payload = cudarpc_has_payload(pkt, &direction, &data_size);
 	if (has_payload && (direction & TO_HOST)) {
 		pkt->len = sizeof(*pkt) + data_size.to_host;
-		err = conn_put(conn, pkt, sizeof(*pkt));
-		if (err < 0) return -ENETDOWN;
-		err = conn_put(conn, (pkt + 1), (data_size.to_host));
-		if (err < 0) return -ENETDOWN;
+		BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt)) );
+		BAIL_ON_NW_ERR( conn_put(conn, (pkt + 1), (data_size.to_host)) );
 	} else {
 		pkt->len = sizeof(*pkt);
-		err = conn_put(conn, pkt, sizeof(*pkt));
-		if (err < 0) return -ENETDOWN;
+		BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt)) );
 	}
 
 	// Update CUBIN registration counts. No need to lock as the assembly module

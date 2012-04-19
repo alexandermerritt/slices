@@ -188,21 +188,27 @@ typedef struct cuda_packet {
 #endif
 } cuda_packet_t;
 
+//! Data type describing an offset into the batch buffer. Cannot realistically
+//! be smaller than uint if the buffer size is anything reasonable.
+typedef unsigned int offset_t;
+
 //! Absolute maximum number of packets a batch can hold, as the offset array is
 //! allocated at compile time and is included in the batch header.
-#define CUDA_BATCH_MAX			16384UL
+#define CUDA_BATCH_MAX			16384
 #define CUDA_BATCH_BUFFER_SZ	(512 << 20)
 
 struct cuda_pkt_batch {
 	struct {
-		size_t num_pkts; //! packets stored in this batch; limited by CUDA_BATCH_MAX
-		//! Offsets of packets within buffer. Offsets specified within packet
-		//! arguments are relative to the address of the packet itself.
-		// XXX Be careful the storage type of 'offsets' is able to hold offset
-		// values into the storage pointed to by 'buffer'.
-		unsigned int offsets[CUDA_BATCH_MAX];
-		size_t bytes_used;
+		size_t num_pkts; //! offsets used
+		size_t bytes_used; //! in the buffer
 	} header;
+
+	//! Offsets of packets within buffer. Offsets specified within packet
+	//! arguments are relative to the address of the packet itself.
+	// XXX Be careful the storage type of 'offsets' is able to hold offset
+	// values into the storage pointed to by 'buffer'.
+	offset_t offsets[CUDA_BATCH_MAX];
+
 	size_t max; //! Maximum number of packets allowed
 	void *buffer;
 };
