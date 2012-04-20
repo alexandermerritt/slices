@@ -194,20 +194,28 @@ typedef unsigned int offset_t;
 
 //! Absolute maximum number of packets a batch can hold, as the offset array is
 //! allocated at compile time and is included in the batch header.
-#define CUDA_BATCH_MAX			16384
+#define CUDA_BATCH_MAX			4096
 #define CUDA_BATCH_BUFFER_SZ	(512 << 20)
+
+/** size at which SDP switches to ZCopy */
+#define ZCPY_TRIGGER_SZ			(64 << 10)
+
+/** additional bytes needed in the header to trigger ZCopy */
+#define PADDING_BYTES			(ZCPY_TRIGGER_SZ - (sizeof(offset_t) * CUDA_BATCH_MAX))
 
 struct cuda_pkt_batch {
 	struct {
 		size_t num_pkts; //! offsets used
 		size_t bytes_used; //! in the buffer
+		/** Offsets of packets within buffer. Offsets specified within packet
+		 * arguments are relative to the address of the packet itself.  XXX Be
+		 * careful the storage type of 'offsets' is able to hold offset values
+		 * into the storage pointed to by 'buffer'. */
+		offset_t offsets[CUDA_BATCH_MAX];
+#if defined(NIC_SDP)
+		unsigned char _SDPZCopyPadding[PADDING_BYTES];
+#endif
 	} header;
-
-	//! Offsets of packets within buffer. Offsets specified within packet
-	//! arguments are relative to the address of the packet itself.
-	// XXX Be careful the storage type of 'offsets' is able to hold offset
-	// values into the storage pointed to by 'buffer'.
-	offset_t offsets[CUDA_BATCH_MAX];
 
 	size_t max; //! Maximum number of packets allowed
 	void *buffer;

@@ -697,9 +697,11 @@ do_cuda_rpc(
 
 	// pull in the batch of serialized RPCs
 	BAIL_ON_NW_ERR( conn_get(conn, &batch->header, sizeof(batch->header)) );
-	BAIL_ON_NW_ERR( conn_get(conn, batch->offsets, sizeof(offset_t) * batch->header.num_pkts) );
-	//BAIL_ON_NW_ERR( conn_get(conn, batch->offsets, sizeof(batch->offsets)) );
+#if defined(NIC_SDP)
+	BAIL_ON_NW_ERR( conn_get(conn, batch->buffer, batch->header.bytes_used + ZCPY_TRIGGER_SZ) );
+#else
 	BAIL_ON_NW_ERR( conn_get(conn, batch->buffer, batch->header.bytes_used) );
+#endif
 
 	pthread_testcancel();
 
@@ -708,8 +710,8 @@ do_cuda_rpc(
 	printd(DBG_INFO, "executing %lu RPCs\n", batch->header.num_pkts);
 	size_t pkt_num;
 	for (pkt_num = 0; pkt_num < batch->header.num_pkts; pkt_num++) {
-		pkt = (struct cuda_packet*)((uintptr_t)batch->buffer + (uintptr_t)batch->offsets[pkt_num]);
-		if (0 > demux(pkt, &(rcubin->cubins))) {
+		pkt = (struct cuda_packet*)((uintptr_t)batch->buffer + (uintptr_t)batch->header.offsets[pkt_num]);
+		if (unlikely(0 > demux(pkt, &(rcubin->cubins)))) {
 			printd(DBG_ERROR, "demux failed\n");
 			return -1;
 		}
@@ -722,11 +724,20 @@ do_cuda_rpc(
 	has_payload = cudarpc_has_payload(pkt, &direction, &data_size);
 	if (has_payload && (direction & TO_HOST)) {
 		pkt->len = sizeof(*pkt) + data_size.to_host;
+#if defined(NIC_SDP)
+		BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt) + ZCPY_TRIGGER_SZ) );
+		BAIL_ON_NW_ERR( conn_put(conn, (pkt + 1), (data_size.to_host) + ZCPY_TRIGGER_SZ) );
+#else
 		BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt)) );
 		BAIL_ON_NW_ERR( conn_put(conn, (pkt + 1), (data_size.to_host)) );
+#endif
 	} else {
 		pkt->len = sizeof(*pkt);
+#if defined(NIC_SDP)
+		BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt) + ZCPY_TRIGGER_SZ) );
+#else
 		BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt)) );
+#endif
 	}
 
 	// Update CUBIN registration counts. No need to lock as the assembly module

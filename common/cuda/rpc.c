@@ -110,20 +110,29 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 
 	TIMER_START(t);
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, &batch->header, sizeof(batch->header)) );
-	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->offsets, sizeof(offset_t) * batch->header.num_pkts) );
-	//FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->offsets, sizeof(batch->offsets)) );
+#if defined(NIC_SDP)
+	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->buffer, batch->header.bytes_used + ZCPY_TRIGGER_SZ) );
+#else
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->buffer, batch->header.bytes_used) );
+#endif
 	TIMER_END(t, put_time);
 
 	TIMER_START(t); // time execution of batch and receipt of return packet
+#if defined(NIC_SDP)
+	FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt) + ZCPY_TRIGGER_SZ) );
+#else
 	FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt)) );
+#endif
 	TIMER_END(t, wait_time);
 
 	payload_len = return_pkt->len - sizeof(*return_pkt);
 	if (payload_len > 0) {
 		TIMER_START(t);
-		printd(DBG_INFO, "\treturn payload = %lu\n", payload_len);
+#if defined(NIC_SDP)
+		FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len + ZCPY_TRIGGER_SZ) );
+#else
 		FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len) );
+#endif
 		TIMER_END(t, return_pkt->lat.rpc.recv);
 	}
 
@@ -164,7 +173,7 @@ batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 	printd(DBG_DEBUG, "pkt %lu offset %lu len %lu\n",
 			batch->header.num_pkts, batch->header.bytes_used, rpc_size);
 
-	batch->offsets[batch->header.num_pkts++] = batch->header.bytes_used;
+	batch->header.offsets[batch->header.num_pkts++] = batch->header.bytes_used;
 
 	// We assume we will always have storage space to hold a packet and its
 	// data, and that a "flush" will only occur due to a synchronous packet or
