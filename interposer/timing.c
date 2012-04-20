@@ -80,10 +80,14 @@ update_latencies(const struct rpc_latencies *l, method_id_t id, size_t call_size
 {
 	// Trace values.
 	trace[num_calls_made].id = id;
-	trace[num_calls_made].lat = l->exec.call;
 	trace[num_calls_made].bytes = call_size;
+#if defined(TIMING_NATIVE)
+	trace[num_calls_made].lat = l->exec.call; // native has no handoff with sink
+#else
+	trace[num_calls_made].lat = (l->lib.setup + l->lib.wait); // total cost
+#endif
 
-#if !(defined(TIMING) && defined(TIMING_NATIVE))
+#if !defined(TIMING_NATIVE)
 	// Aggregate values across the cluster.
 	lat.lib.setup += l->lib.setup;
 	lat.lib.wait += l->lib.wait;
