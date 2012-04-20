@@ -650,7 +650,7 @@ cudarpc_has_payload(
 			size->to_host = pkt->args[2].arr_argi[0];
 			break;
 		case CUDA_FUNC_GET_ATTR:
-			*direction = (FROM_HOST | TO_HOST);
+			*direction = (data_direction)(FROM_HOST | TO_HOST);
 			size->to_host = sizeof(struct cudaFuncAttributes);
 		default: // everything else has no data, or is not a supported call
 			has_payload = false;
@@ -692,7 +692,7 @@ do_cuda_rpc(
 	BUG(!batch->buffer);
 
 	bool has_payload; //! any data an RPC requires is stored after the pkt
-	data_direction direction = 0;
+	data_direction direction;
 	payload_size data_size;
 
 	// pull in the batch of serialized RPCs
@@ -708,7 +708,7 @@ do_cuda_rpc(
 	printd(DBG_INFO, "executing %lu RPCs\n", batch->header.num_pkts);
 	size_t pkt_num;
 	for (pkt_num = 0; pkt_num < batch->header.num_pkts; pkt_num++) {
-		pkt = (struct cuda_packet*)(batch->buffer + batch->offsets[pkt_num]);
+		pkt = (struct cuda_packet*)((uintptr_t)batch->buffer + (uintptr_t)batch->offsets[pkt_num]);
 		if (0 > demux(pkt, &(rcubin->cubins))) {
 			printd(DBG_ERROR, "demux failed\n");
 			return -1;

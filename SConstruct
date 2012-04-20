@@ -87,6 +87,8 @@ else:
 home = os.environ['HOME']
 local_lpath = [home + '/local/lib']
 local_cpath = [home + '/local/include']
+icc = '/opt/intel/composer_xe_2011_sp1.8.273/bin/intel64/icc'
+gcc = 'gcc'
 
 # env values common across all files in project
 libpath = [cuda_root + '/lib64', '/lib64']
@@ -94,7 +96,7 @@ cpath = [cuda_root + '/include', os.getcwd() + '/include']
 libs = ['rt', 'dl', 'shmgrp']
 
 # machine-specific paths
-ENV['kid'] = Environment(CCFLAGS = ccflags, LIBS = libs)
+ENV['kid'] = Environment(CC = icc, CCFLAGS = ccflags, LIBS = libs)
 ENV['kid'].Append(CPPPATH = cpath + local_cpath)
 ENV['kid'].Append(LIBPATH = libpath + local_lpath)
 

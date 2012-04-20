@@ -95,6 +95,7 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 {
 	int exit_errno;
 	struct cuda_pkt_batch *batch = &rpc->batch;
+	size_t payload_len = 0UL;
 
 	TIMER_DECLARE1(t);
 #ifdef TIMING
@@ -118,7 +119,7 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 	FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt)) );
 	TIMER_END(t, wait_time);
 
-	size_t payload_len = return_pkt->len - sizeof(*return_pkt);
+	payload_len = return_pkt->len - sizeof(*return_pkt);
 	if (payload_len > 0) {
 		TIMER_START(t);
 		printd(DBG_INFO, "\treturn payload = %lu\n", payload_len);
@@ -245,10 +246,12 @@ fail:
 
 const struct cuda_ops rpc_ops =
 {
+	.setupArgument			= CudaDoRPC,
 	.configureCall			= CudaDoRPC,
+	.launch					= CudaDoRPC,
+	.threadSynchronize		= CudaDoRPC,
 	.free					= CudaDoRPC,
 	.funcGetAttributes		= CudaDoRPC,
-	.launch					= CudaDoRPC,
 	.malloc					= CudaDoRPC,
 	.mallocPitch			= CudaDoRPC,
 	.memcpyD2D				= CudaDoRPC,
@@ -265,12 +268,10 @@ const struct cuda_ops rpc_ops =
 	.setDevice				= CudaDoRPC,
 	.setDeviceFlags			= CudaDoRPC,
 	.setValidDevices		= CudaDoRPC,
-	.setupArgument			= CudaDoRPC,
 	.streamCreate			= CudaDoRPC,
 	.streamDestroy			= CudaDoRPC,
 	.streamQuery			= CudaDoRPC,
 	.streamSynchronize		= CudaDoRPC,
 	.threadExit				= CudaDoRPC,
-	.threadSynchronize		= CudaDoRPC,
 	.unregisterFatBinary	= CudaDoRPC
 };

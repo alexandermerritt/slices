@@ -875,7 +875,7 @@ static OPS_FN_PROTO(CudaCreateChannelDesc)
 	int y = pkt->args[0].arr_argii[1];
 	int z = pkt->args[0].arr_argii[2];
 	int w = pkt->args[0].arr_argii[3];
-	enum cudaChannelFormatKind format = pkt->args[1].arr_arguii[0];
+	enum cudaChannelFormatKind format = (enum cudaChannelFormatKind)pkt->args[1].arr_arguii[0];
 	printd(DBG_DEBUG, "x=%d y=%d z=%d w=%d format=%u\n", x,y,z,w,format);
 	TIMER_END(timer, pkt->lat.exec.setup);
 

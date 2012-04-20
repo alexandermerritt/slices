@@ -228,7 +228,7 @@ static inline void
 insert_cudaGetDeviceProperties(struct cuda_packet *pkt, void *buf,
 		struct cudaDeviceProp *prop)
 {
-	void *loc = (buf + pkt->args[0].argull);
+	void *loc = (void*)((uintptr_t)buf + pkt->args[0].argull);
 	memcpy(loc, prop, sizeof(*prop));
 }
 
@@ -236,7 +236,7 @@ static inline void
 extract_cudaGetDeviceProperties(struct cuda_packet *pkt, void *buf,
 		struct cudaDeviceProp *prop)
 {
-	void *loc = (buf + pkt->args[0].argull);
+	void *loc = (void*)((uintptr_t)buf + pkt->args[0].argull);
 	memcpy(prop, loc, sizeof(*prop));
 }
 
@@ -295,7 +295,7 @@ static inline void
 unpack_cudaSetValidDevices(struct cuda_packet *pkt, void *buf,
 		int **device_arr, int *len)
 {
-	*device_arr = (int*)(buf + pkt->args[0].argull);
+	*device_arr = (int*)((uintptr_t)buf + pkt->args[0].argull);
 	*len = pkt->args[1].argll;
 }
 
@@ -449,7 +449,7 @@ static inline void
 unpack_cudaSetupArgument(struct cuda_packet *pkt, void *buf,
 		const void **arg, size_t *size, size_t *offset)
 {
-	*arg = (buf + pkt->args[0].argull);
+	*arg = (void*)((uintptr_t)buf + pkt->args[0].argull);
 	*size = pkt->args[1].arr_argi[0];
 	*offset = pkt->args[1].arr_argi[1];
 }
@@ -657,12 +657,12 @@ unpack_cudaMemcpy(struct cuda_packet *pkt, void *buf,
 		case cudaMemcpyHostToDevice:
 		{
 			*dst = pkt->args[0].argp; // gpu ptr
-			*src = (buf + pkt->args[1].argull);
+			*src = (void*)((uintptr_t)buf + pkt->args[1].argull);
 		}
 		break;
 		case cudaMemcpyDeviceToHost:
 		{
-			*dst = (buf + pkt->args[0].argull);
+			*dst = (void*)((uintptr_t)buf + pkt->args[0].argull);
 			*src = pkt->args[1].argp; // gpu ptr
 		}
 		break;
@@ -683,7 +683,7 @@ extract_cudaMemcpy(struct cuda_packet *pkt, void *buf,
 		void *dst, const void *src, size_t count, enum cudaMemcpyKind kind)
 {
 	if (pkt->method_id == CUDA_MEMCPY_D2H)
-		memcpy(dst, (buf + pkt->args[0].argull), count);
+		memcpy(dst, (void*)((uintptr_t)buf + pkt->args[0].argull), count);
 }
 
 static inline void
@@ -739,7 +739,7 @@ extract_cudaMemcpyAsync(struct cuda_packet *pkt, void *buf,
 		cudaStream_t stream)
 {
 	if (pkt->method_id == CUDA_MEMCPY_D2H)
-		memcpy(dst, (buf + pkt->args[0].argull), count);
+		memcpy(dst, (void*)((uintptr_t)buf + pkt->args[0].argull), count);
 }
 
 static inline void
@@ -787,14 +787,14 @@ unpack_cudaMemcpyFromSymbol(struct cuda_packet *pkt, void *buf,
 		enum cudaMemcpyKind kind)
 {
 	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING) {
-		*symbol = (const char*)(buf + pkt->args[1].argull);
+		*symbol = (const char*)((uintptr_t)buf + pkt->args[1].argull);
 	} else {
 		*symbol = (const char*)(pkt->args[1].argp);
 	}
 	switch (kind) {
 		case cudaMemcpyDeviceToHost:
 		{
-			*dst = (buf + pkt->args[0].argull);
+			*dst = (void*)((uintptr_t)buf + pkt->args[0].argull);
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
@@ -819,7 +819,7 @@ extract_cudaMemcpyFromSymbol(struct cuda_packet *pkt, void *buf,
 		enum cudaMemcpyKind kind)
 {
 	if (kind == cudaMemcpyDeviceToHost)
-		memcpy(dst, (buf + pkt->args[0].argull), count);
+		memcpy(dst, (void*)((uintptr_t)buf + pkt->args[0].argull), count);
 }
 
 static inline void
@@ -866,7 +866,7 @@ unpack_cudaMemcpyToArray(struct cuda_packet *pkt, void *buf,
 	switch (kind) {
 		case cudaMemcpyHostToDevice:
 		{
-			*src = (buf + pkt->args[2].argull);
+			*src = (void*)((uintptr_t)buf + pkt->args[2].argull);
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
@@ -891,7 +891,7 @@ pack_cudaMemcpyToSymbol(struct cuda_packet *pkt, void *buf,
 
 	if (__func_symb_param_is_string(symbol)) {
 		pkt->args[0].argull = buf_offset; // for symbol string
-		memcpy(buf + buf_offset, symbol, strlen(symbol) + 1);
+		memcpy((void*)((uintptr_t)buf + buf_offset), symbol, strlen(symbol) + 1);
 		pkt->flags |= CUDA_PKT_SYMB_IS_STRING;
 		buf_offset += strlen(symbol) + 1;
 		printd(DBG_DEBUG, "\tsymb is string: %s\n", symbol);
@@ -905,7 +905,7 @@ pack_cudaMemcpyToSymbol(struct cuda_packet *pkt, void *buf,
 		{
 			pkt->method_id = CUDA_MEMCPY_TO_SYMBOL_H2D;
 			pkt->args[1].argull = buf_offset;
-			memcpy(buf + buf_offset, src, count);
+			memcpy((void*)((uintptr_t)buf + buf_offset), src, count);
 			buf_offset += count;
 			pkt->len += count;
 		}
@@ -931,14 +931,14 @@ unpack_cudaMemcpyToSymbol(struct cuda_packet *pkt, void *buf,
 		size_t *offset, enum cudaMemcpyKind kind)
 {
 	if (pkt->flags & CUDA_PKT_SYMB_IS_STRING) {
-		*symbol = (buf + pkt->args[0].argull);
+		*symbol = (void*)((uintptr_t)buf + pkt->args[0].argull);
 	} else {
 		*symbol = pkt->args[0].argp;
 	}
 	switch (kind) {
 		case cudaMemcpyHostToDevice:
 		{
-			*src = (buf + pkt->args[1].argull);
+			*src = (void*)((uintptr_t)buf + pkt->args[1].argull);
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
@@ -968,7 +968,7 @@ pack_cudaMemcpyToSymbolAsync(struct cuda_packet *pkt, void *buf,
 
 	if (__func_symb_param_is_string(symbol)) {
 		pkt->args[0].argull = buf_offset; // of symbol string
-		memcpy(buf + buf_offset, symbol, strlen(symbol) + 1);
+		memcpy((void*)((uintptr_t)buf + buf_offset), symbol, strlen(symbol) + 1);
 		pkt->flags |= CUDA_PKT_SYMB_IS_STRING;
 		printd(DBG_DEBUG, "\tsymb is string: %s\n", symbol);
 		buf_offset += strlen(symbol) + 1;
@@ -982,7 +982,7 @@ pack_cudaMemcpyToSymbolAsync(struct cuda_packet *pkt, void *buf,
 		{
 			pkt->method_id = CUDA_MEMCPY_TO_SYMBOL_ASYNC_H2D;
 			pkt->args[1].argull = buf_offset;
-			memcpy(buf + buf_offset, src, count);
+			memcpy((void*)((uintptr_t)buf + buf_offset), src, count);
 			buf_offset += count;
 			pkt->len += count;
 		}
@@ -1191,7 +1191,7 @@ static inline void
 unpack_cudaRegisterFatBinary(struct cuda_packet *pkt, void *buf,
 		__cudaFatCudaBinary *cubin)
 {
-	if (0 > unpackFatBinary(cubin, (buf + pkt->args[0].argull)))
+	if (0 > unpackFatBinary(cubin, (char*)((uintptr_t)buf + pkt->args[0].argull)))
 		BUG(1);
 }
 
@@ -1248,7 +1248,7 @@ static inline void
 unpack_cudaRegisterFunction(struct cuda_packet *pkt, void *buf,
 		reg_func_args_t *args)
 {
-	if (0 > unpackRegFuncArgs(args, (char*)(buf + pkt->args[0].argull)))
+	if (0 > unpackRegFuncArgs(args, (char*)((uintptr_t)buf + pkt->args[0].argull)))
 		BUG(1);
 }
 
@@ -1287,7 +1287,7 @@ static inline void
 unpack_cudaRegisterVar(struct cuda_packet *pkt, void *buf,
 		reg_var_args_t *args)
 {
-	if (0 > unpackRegVar(args, (char *)(buf + pkt->args[0].argull)))
+	if (0 > unpackRegVar(args, (char *)((uintptr_t)buf + pkt->args[0].argull)))
 		BUG(1);
 }
 

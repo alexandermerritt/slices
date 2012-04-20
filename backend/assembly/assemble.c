@@ -250,6 +250,7 @@ __do_compose_assembly(
 	struct global global;
 	struct assembly *assm = NULL;
 	struct gpu *gpus = NULL;
+	int gpus_granted = 0;
 
 	assm = calloc(1, sizeof(*assm));
 	if (!assm)
@@ -270,7 +271,7 @@ __do_compose_assembly(
 	global.hostname = hostname;
 	global.nlist = node_list;
 	global.alist = assembly_list;
-	int gpus_granted = hint->num_gpus;
+	gpus_granted = hint->num_gpus;
 
 	// NOTE: If no GPU can be found remotely, this function should always
 	// default to returning local GPUs in their place.

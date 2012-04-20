@@ -195,9 +195,9 @@ const char* cudaGetErrorString(cudaError_t error)
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	return bypass.cudaGetErrorString(error);
 #else
-	const char* (*f)(cudaError_t error) =
-		dlsym(RTLD_NEXT, __func__);
-	if (f) return f(error);
+	typedef const char*(*func_t)(cudaError_t);
+	func_t func = (func_t)dlsym(RTLD_NEXT, __func__);
+	if (func) return func(error);
 	switch (error) {
 		case cudaSuccess: return "cudaSuccess";
 		case cudaErrorMissingConfiguration: return "cudaErrorMissingConfiguration";
@@ -673,7 +673,7 @@ cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *f
 	shmpkt->args[0].argull = sizeof(*shmpkt); // offset
 	shmpkt->args[1].argull = (shmpkt->args[0].argull + sizeof(*attr)); // offset
 	shmpkt->args[2].arr_argi[0] = func_len;
-	func_shm = (void*)((void*)shmpkt + shmpkt->args[1].argull);
+	func_shm = (void*)((uintptr_t)shmpkt + shmpkt->args[1].argull);
 	memcpy(func_shm, func, func_len);
 	shmpkt->len = sizeof(*shmpkt) + func_len;
 	shmpkt->is_sync = true;
@@ -685,8 +685,7 @@ cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *f
 
 	TIMER_RESUME(tsetup);
 	// Copy out the structure into the user argument
-	attr_shm = (struct cudaFuncAttributes*)
-		((void*)shmpkt + shmpkt->args[0].argull);
+	attr_shm = (struct cudaFuncAttributes*)((uintptr_t)shmpkt + shmpkt->args[0].argull);
 	memcpy(attr, attr_shm, sizeof(*attr));
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
 
@@ -1063,7 +1062,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
 	TIMER_RESUME(tsetup);
-	extract_cudaMemcpy(shmpkt, ((void*)shmpkt + sizeof(*shmpkt)),
+	extract_cudaMemcpy(shmpkt, (void*)((uintptr_t)shmpkt + sizeof(*shmpkt)),
 			dst, src, count, kind);
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
 	cerr = shmpkt->ret_ex_val.err;
@@ -1109,7 +1108,7 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
 	TIMER_RESUME(tsetup);
-	extract_cudaMemcpyAsync(shmpkt, ((void*)shmpkt + sizeof(*shmpkt)),
+	extract_cudaMemcpyAsync(shmpkt, (void*)((uintptr_t)shmpkt + sizeof(*shmpkt)),
 			dst, src, count, kind, stream);
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
 	cerr = shmpkt->ret_ex_val.err;
@@ -1156,7 +1155,7 @@ cudaError_t cudaMemcpyFromSymbol(
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
 	TIMER_RESUME(tsetup);
-	extract_cudaMemcpyFromSymbol(shmpkt, ((void*)shmpkt + sizeof(*shmpkt)),
+	extract_cudaMemcpyFromSymbol(shmpkt, (void*)((uintptr_t)shmpkt + sizeof(*shmpkt)),
 			dst, symbol, count, offset, kind);
 	TIMER_END(tsetup, shmpkt->lat.lib.setup);
 	cerr = shmpkt->ret_ex_val.err;
@@ -1767,7 +1766,9 @@ void __cudaRegisterTexture(
 	tpkt.len = sizeof(tpkt) + strlen(texName) + 1;
 	shmpkt = &tpkt;
 #else
-	void *shm_ptr = shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	uintptr_t shm_ptr;
+	shmpkt = (struct cuda_packet *)get_region(pthread_self());
+	shm_ptr = (uintptr_t)shmpkt;
 	memset(shmpkt, 0, sizeof(*shmpkt));
 	shmpkt->method_id = __CUDA_REGISTER_TEXTURE;
 	shmpkt->thr_id = pthread_self();
@@ -1784,7 +1785,7 @@ void __cudaRegisterTexture(
 	shmpkt->args[3].argp = (void*)*deviceAddress; // copy actual address
 	shmpkt->args[4].argull = sizeof(*shmpkt); // offset
 	shm_ptr += sizeof(*shmpkt);
-	memcpy(shm_ptr, texName, strlen(texName) + 1);
+	memcpy((void*)shm_ptr, texName, strlen(texName) + 1);
 	shmpkt->args[5].arr_argii[0] = dim;
 	shmpkt->args[5].arr_argii[1] = norm;
 	shmpkt->args[5].arr_argii[2] = ext;
