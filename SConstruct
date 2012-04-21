@@ -101,7 +101,6 @@ ENV['kid'].Append(CPPPATH = cpath + local_cpath)
 ENV['kid'].Append(LIBPATH = libpath + local_lpath)
 
 ENV['prost'] = ENV['kid']
-ENV['prost'].Replace(CC = gcc)
 
 ENV['shiva'] = Environment(CC = 'gcc4.4.4', CCFLAGS = ccflags, LIBS = libs)
 ENV['shiva'].Append(CPPPATH = cpath)
