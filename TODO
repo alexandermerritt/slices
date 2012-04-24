@@ -29,6 +29,14 @@ Assembly Runtime
 			of inotify. redesign that communication substrate, in fact...
 			doing this will allow us to remove use of those annoying directories
 
+	- interposer
+		[ ] cuda_packet sizes are not computed consistently between
+			timing_native and !timing_native. Size for native includes the total
+			data, sent and received. !native has a len for the packet with
+			respect to the direction it is flowing; if there is an output
+			parameter it is not included in the len when the packet is being
+			shipped to the server.
+
 	[C] support multiple fat binaries
 
 	- distributed assembly (Alex)
