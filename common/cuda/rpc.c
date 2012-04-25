@@ -181,7 +181,7 @@ batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 	// can.
 	size_t remaining_storage = CUDA_BATCH_BUFFER_SZ - batch->header.bytes_used;
 	BUG(remaining_storage < rpc_size);
-	BUG(batch->header.num_pkts >= CUDA_BATCH_MAX);
+	BUG(batch->header.num_pkts > CUDA_BATCH_MAX);
 	BUG(!batch->buffer);
 
 	memcpy((void*)buf_ptr, pkt, rpc_size);
