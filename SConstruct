@@ -52,6 +52,7 @@ args['timing'] = ARGUMENTS.get('timing', 0)
 # XXX DO NOT run multi-threaded codes with timing_native
 args['timing_native'] = ARGUMENTS.get('timing_native', 0)
 args['network'] = ARGUMENTS.get('network', 'eth')
+args['daemon'] = ARGUMENTS.get('daemon', 1)
 
 #
 # Configure environment
@@ -82,6 +83,9 @@ elif args['network'] == 'sdp':
 else:
 	print('--> network flag invalid')
 	sys.exit(1)
+
+if not int(args['daemon']):
+	ccflags.append('-DNO_DAEMONIZE')
 
 # for anything you install locally, add/modify them here
 home = os.environ['HOME']

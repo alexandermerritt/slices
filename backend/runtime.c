@@ -483,6 +483,9 @@ static int daemonize(void)
 	struct sigaction action;
 	int logfd = -1;
 
+#ifndef NO_DAEMONIZE
+	printf(">:[ daemonizing ... log file at %s/%s\n", wd, log);
+
 	pid_t pid = fork();
 	if (pid < 0)
 		return -(errno);
@@ -502,6 +505,7 @@ static int daemonize(void)
 
 	if (0 > (sid = setsid()))
 		return -(errno);
+#endif	/* !NO_DAEMONIZE */
 
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = sigint_handler;
@@ -540,7 +544,6 @@ int main(int argc, char *argv[])
 	gethostname((log + strlen(log)), HOST_NAME_MAX);
 	strcat(log, ".log");
 
-	printf(">:[ daemonizing ... log file at %s/%s\n", wd, log);
 	if (0 > daemonize())
 		return -1;
 
