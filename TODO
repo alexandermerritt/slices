@@ -62,6 +62,9 @@ Assembly Runtime
 	mutex instead of spinning on flags, wasting CPU cycles. how would this
 	affect the latency of each call?
 
+	[ ] Have the runtime auto-spawn itself across nodes in the cluster, instead
+		of relying on the operator to do this. Maybe use MPI? Something.
+
 Monitoring
 ==========
 	[C] Design data structure(s) for exporting Lynx data (Naila)
