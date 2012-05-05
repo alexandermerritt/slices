@@ -46,6 +46,9 @@ Assembly Runtime
 		[ ] add use of monitoring API to assembly composition
 		[L] duplicate register calls across nodes in assembly
 			i think the algorithm is broken
+		[ ]  maybe use mpi to distribute binaries (but not necessarily use mpi
+			for communication)
+			- can we fork from mpi ranks?
 
 	- remote data paths (Alex w/ network API)
 		[ ] what is local:remote sink process configuration?
