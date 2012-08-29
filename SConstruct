@@ -37,6 +37,8 @@ elif NODE_NAME == 'shiva':
 	cuda_root = '/usr/local/cuda'
 elif NODE_NAME == 'ifrit':
 	cuda_root = '/usr/local/cuda'
+elif NODE_NAME == 'gunn':
+	cuda_root = '/usr/local/cuda'
 else:
 	print("Build not configured for this node.")
 	sys.exit(-1)
@@ -97,7 +99,7 @@ gcc = 'gcc'
 # env values common across all files in project
 libpath = [cuda_root + '/lib64', '/lib64']
 cpath = [cuda_root + '/include', os.getcwd() + '/include']
-libs = ['rt', 'dl', 'shmgrp']
+libs = ['rt', 'dl']
 
 # machine-specific paths
 ENV['kid'] = Environment(CC = icc, CCFLAGS = ccflags, LIBS = libs)
@@ -106,11 +108,12 @@ ENV['kid'].Append(LIBPATH = libpath + local_lpath)
 
 ENV['prost'] = ENV['kid']
 
-ENV['shiva'] = Environment(CC = 'gcc4.4.4', CCFLAGS = ccflags, LIBS = libs)
+ENV['shiva'] = Environment(CCFLAGS = ccflags, LIBS = libs)
 ENV['shiva'].Append(CPPPATH = cpath)
 ENV['shiva'].Append(LIBPATH = libpath)
 
 ENV['ifrit'] = ENV['shiva']
+ENV['gunn'] = ENV['shiva']
 
 #
 # Execute the build

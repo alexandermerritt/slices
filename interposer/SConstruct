@@ -19,7 +19,18 @@ for src in files:
 	if '.c' == ext.lower():
 		sources.append(src)
 
-sources.append('../common/cuda/marshal_hidden.c')
+files = os.listdir('../backend/assembly/')
+for src in files:
+	(name,ext) = os.path.splitext(src)
+	if '.c' == ext.lower():
+		sources.append('../backend/assembly/' + src)
 
-lib = env.SharedLibrary('libci.so', sources)
+sources.remove('shm.c');
+sources.append('../common/cuda/execute.c')
+sources.append('../common/cuda/marshal_hidden.c')
+sources.append('../common/cuda/rpc.c')
+sources.append('../common/io/sock.c')
+sources.append('../common/mq.c')
+
+lib = env.SharedLibrary('libsf.so', sources)
 env.Install(INSTALL_DIR + '/lib', lib)

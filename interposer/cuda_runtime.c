@@ -44,6 +44,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <uuid/uuid.h>
 
 // CUDA includes
 #include <__cudaFatFormat.h>
@@ -52,9 +53,6 @@
 #include <driver_types.h>
 #include <vector_types.h>
 
-// Other project includes
-#include <shmgrp.h>
-
 // Project includes
 #include <assembly.h>
 #include <cuda/hidden.h>
@@ -62,6 +60,7 @@
 #include <cuda/method_id.h>
 #include <cuda/packet.h> 
 #include <debug.h>
+#include <mq.h>
 #include <util/compiler.h>
 #include <util/x86_system.h>
 
@@ -77,12 +76,11 @@
 
 /*-------------------------------------- EXTERNAL DEFINITIONS ----------------*/
 
-// Functions from ./shm.c
-extern int attach_assembly_runtime(void);
-extern void detach_assembly_runtime(void);
-extern void* get_region(pthread_t tid);
-
 /*-------------------------------------- INTERNAL STATE ----------------------*/
+
+/*
+ * CUDA State
+ */
 
 //! to indicate the error with the dynamic loaded library
 //static cudaError_t cudaErrorDL = cudaErrorUnknown;
@@ -95,7 +93,135 @@ static cudaError_t cuda_err = cudaSuccess;
 //! Reference count for register and unregister fatbinary invocations.
 static unsigned int num_registered_cubins = 0;
 
+/*
+ * Scheduler state
+ */
+
+static bool scheduler_joined = false;
+static struct mq_state recv_mq, send_mq;
+
+/*
+ * Assembly state
+ */
+
+static asmid_t assm_id;
+static assembly_key_uuid assm_key;
+
+/* association between an application thread and vgpu in the assembly */
+/* assume one assembly is used for now */
+struct tid_vgpu
+{
+    bool valid;
+    pthread_t tid;
+    int vgpu_id;
+    void *buffer; /* for marshaling the data; cuda_packet exists at top */
+};
+static int num_tids;
+static struct tid_vgpu tid_vgpus[32];
+static pthread_mutex_t tid_vgpu_lock = PTHREAD_MUTEX_INITIALIZER;
+
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
+
+static int join_scheduler(void)
+{
+    int err;
+    char uuid_str[64];
+
+    if (scheduler_joined)
+        return -1;
+
+    scheduler_joined = true;
+
+    memset(&recv_mq, 0, sizeof(recv_mq));
+    memset(&send_mq, 0, sizeof(send_mq));
+
+    err = attach_init(&recv_mq, &send_mq);
+    if (err < 0) {
+        printd(DBG_ERROR, "Error attach_init: %d\n", err);
+        return -1;
+    }
+    err = attach_send_connect(&recv_mq, &send_mq);
+    if (err < 0) {
+        printd(DBG_ERROR, "Error attach_send_connect: %d\n", err);
+        return -1;
+    }
+    err = attach_send_request(&recv_mq, &send_mq, assm_key);
+    if (err < 0) {
+        printd(DBG_ERROR, "Error attach_send_request: %d\n", err);
+        return -1;
+    }
+    uuid_unparse(assm_key, uuid_str);
+    printd(DBG_INFO, "Importing assm key from scheduler: '%s'\n", uuid_str);
+
+	err = assembly_runtime_init(NODE_TYPE_MAPPER, NULL);
+    if (err < 0) {
+        printd(DBG_ERROR, "Error initializing assembly state\n");
+        return -1;
+    }
+    err = assembly_import(&assm_id, assm_key);
+    BUG(assm_id == INVALID_ASSEMBLY_ID);
+    if (err < 0) {
+        printd(DBG_ERROR, "Error assembly_import: %d\n", err);
+        return -1;
+    }
+
+    err = assembly_map(assm_id);
+    if (err < 0) {
+        printd(DBG_ERROR, "Error assembly_map: %d\n", err);
+        return -1;
+    }
+
+    return 0;
+}
+
+static int leave_scheduler(void)
+{
+    int err;
+
+    if (!scheduler_joined)
+        return -1;
+
+    scheduler_joined = false;
+
+    err = assembly_runtime_shutdown();
+
+    err = attach_tini(&recv_mq, &send_mq);
+
+    return 0;
+}
+
+/* TODO need some way of specifying vgpu mapping */
+/* TODO return vgpu_id */
+/* TODO lock only if adding/removing entry, not when looking up */
+/* TODO add only at first !valid slot, not keep appending at end */
+static void *get_region(pthread_t tid)
+{
+    int i;
+    void *ret = NULL;
+    pthread_mutex_lock(&tid_vgpu_lock);
+    for (i = 0; i < num_tids; i++) {
+        if (!tid_vgpus[i].valid)
+            continue;
+        if (0 != pthread_equal(tid_vgpus[i].tid, tid))
+            break;
+    }
+    if (i < num_tids) { /* found tid state (more likely) */
+        ret = tid_vgpus[i].buffer;
+    } else { /* not found, make new entry */
+        tid_vgpus[num_tids].valid = true;
+        tid_vgpus[num_tids].vgpu_id = 0;
+        tid_vgpus[num_tids].tid = tid;
+        ret = tid_vgpus[num_tids].buffer = malloc(128UL << 20);
+        if (!ret) {
+            fprintf(stderr, "Out of memory\n");
+            abort();
+        }
+        num_tids++;
+    }
+    pthread_mutex_unlock(&tid_vgpu_lock);
+    BUG(!ret);
+    return ret;
+}
 
 //! This appears in some values of arguments. I took this from
 //! opt/cuda/include/cuda_runtime_api.h It looks as this comes from a default
@@ -108,15 +234,6 @@ static unsigned int num_registered_cubins = 0;
 #		define __dv(v)
 #	endif
 #endif
-
-/** XXX Maybe this should be defined in some common 'glue' code? */
-#define HANDOFF_AND_SPIN(_pkt) \
-{ \
-	wmb(); /* make writes visible */ \
-	_pkt->flags |= CUDA_PKT_REQUEST; \
-	while (!(_pkt->flags & CUDA_PKT_RESPONSE)) \
-		rmb(); \
-}
 
 /*-------------------------------------- INTERPOSING API ---------------------*/
 
@@ -147,7 +264,7 @@ cudaError_t cudaThreadExit(void)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+    assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -177,7 +294,7 @@ cudaError_t cudaThreadSynchronize(void)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+    assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -291,7 +408,7 @@ cudaError_t cudaGetDevice(int *device)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	extract_cudaGetDevice(shmpkt, device);
@@ -308,6 +425,17 @@ cudaError_t cudaGetDeviceCount(int *count)
 	cudaError_t cerr;
 	TIMER_DECLARE1(t);
 
+	if (num_registered_cubins <= 0) { /* no kernels registered; we are the first call */
+#if defined(TIMING) && defined(TIMING_NATIVE)
+		fill_bypass(&bypass);
+#else
+		if (0 > join_scheduler()) { // returns if already done
+			fprintf(stderr, "Error attaching to assembly runtime\n");
+			assert(0);
+		}
+#endif
+	}
+
 	TIMER_START(t);
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	struct cuda_packet tpkt;
@@ -322,7 +450,7 @@ cudaError_t cudaGetDeviceCount(int *count)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	extract_cudaGetDeviceCount(shmpkt, count);
@@ -355,7 +483,7 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	extract_cudaGetDeviceProperties(shmpkt, (shmpkt+sizeof(*shmpkt)), prop);
@@ -387,7 +515,7 @@ cudaError_t cudaSetDevice(int device)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -417,7 +545,7 @@ cudaError_t cudaSetDeviceFlags(unsigned int flags)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -448,7 +576,7 @@ cudaError_t cudaSetValidDevices(int *device_arr, int len)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -495,7 +623,7 @@ cudaError_t cudaStreamCreate(cudaStream_t *pStream)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	extract_cudaStreamCreate(shmpkt, pStream);
@@ -530,7 +658,7 @@ cudaError_t cudaStreamDestroy(cudaStream_t stream)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -561,7 +689,7 @@ cudaError_t cudaStreamQuery(cudaStream_t stream)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -592,7 +720,7 @@ cudaError_t cudaStreamSynchronize(cudaStream_t stream)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -630,7 +758,7 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -680,7 +808,7 @@ cudaError_t cudaFuncGetAttributes(struct cudaFuncAttributes *attr, const char *f
 	TIMER_PAUSE(tsetup);
 
 	TIMER_START(twait);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
 	TIMER_RESUME(tsetup);
@@ -717,7 +845,7 @@ cudaError_t cudaLaunch(const char *entry)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -750,7 +878,7 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -784,7 +912,7 @@ cudaError_t cudaFree(void * devPtr)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -814,7 +942,7 @@ cudaError_t cudaFreeArray(struct cudaArray * array)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -913,7 +1041,7 @@ cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	*pHost = (void*)shmpkt->args[0].argull;
@@ -943,7 +1071,7 @@ cudaError_t cudaMalloc(void **devPtr, size_t size)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	extract_cudaMalloc(shmpkt, devPtr);
@@ -978,7 +1106,7 @@ cudaError_t cudaMallocArray(
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	extract_cudaMallocArray(shmpkt, array);
@@ -1011,7 +1139,7 @@ cudaError_t cudaMallocPitch(
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	extract_cudaMallocPitch(shmpkt, devPtr, pitch);
@@ -1058,7 +1186,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 		return cudaSuccess;
 
 	TIMER_START(twait);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
 	TIMER_RESUME(tsetup);
@@ -1104,7 +1232,7 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 	TIMER_PAUSE(tsetup);
 
 	TIMER_START(twait);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
 	TIMER_RESUME(tsetup);
@@ -1151,7 +1279,7 @@ cudaError_t cudaMemcpyFromSymbol(
 	TIMER_PAUSE(tsetup);
 
 	TIMER_START(twait);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(twait, shmpkt->lat.lib.wait);
 
 	TIMER_RESUME(tsetup);
@@ -1198,7 +1326,7 @@ cudaError_t cudaMemcpyToArray(
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -1238,7 +1366,7 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -1277,7 +1405,7 @@ cudaError_t cudaMemcpyToSymbolAsync(
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -1313,7 +1441,7 @@ cudaError_t cudaMemGetInfo(size_t *free, size_t *total)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	*free = shmpkt->args[0].arr_argi[0];
@@ -1348,7 +1476,7 @@ cudaError_t cudaMemset(void *devPtr, int value, size_t count)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -1389,7 +1517,7 @@ cudaError_t cudaBindTexture(size_t *offset,
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	extract_cudaBindTexture(shmpkt, offset);
@@ -1425,7 +1553,7 @@ cudaError_t cudaBindTextureToArray(
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 	cerr = shmpkt->ret_ex_val.err;
 #endif
@@ -1458,7 +1586,7 @@ cudaCreateChannelDesc(int x, int y, int z, int w,
 	return f(x,y,z,w,format);
 #else
 	int err;
-	err = attach_assembly_runtime(); // will return if already done
+	err = join_scheduler(); // will return if already done
 	if (err < 0) {
 		fprintf(stderr, "Error attaching to assembly runtime\n");
 		assert(0);
@@ -1484,7 +1612,7 @@ cudaCreateChannelDesc(int x, int y, int z, int w,
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	update_latencies(&shmpkt->lat);
@@ -1532,7 +1660,7 @@ cudaError_t cudaDriverGetVersion(int *driverVersion)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	extract_cudaDriverGetVersion(shmpkt, driverVersion);
@@ -1563,7 +1691,7 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	extract_cudaRuntimeGetVersion(shmpkt, runtimeVersion);
@@ -1588,12 +1716,14 @@ void** __cudaRegisterFatBinary(void* cubin)
 #if defined(TIMING) && defined(TIMING_NATIVE)
 		fill_bypass(&bypass);
 #else
-		if (0 > attach_assembly_runtime()) { // returns if already done
+		if (0 > join_scheduler()) { // returns if already done
 			fprintf(stderr, "Error attaching to assembly runtime\n");
 			assert(0);
 		}
 #endif
 	}
+    else
+        abort();
 
 	num_registered_cubins++;
 
@@ -1612,7 +1742,7 @@ void** __cudaRegisterFatBinary(void* cubin)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 
 	extract_cudaRegisterFatBinary(shmpkt, &handle);
@@ -1646,7 +1776,7 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle)
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 #endif
 
@@ -1654,7 +1784,7 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle)
 
 	if (num_registered_cubins <= 0) { // only detach on last unregister
 #if !(defined(TIMING) && defined(TIMING_NATIVE))
-		detach_assembly_runtime();
+		leave_scheduler();
 #endif
 		print_latencies();
 	}
@@ -1691,7 +1821,7 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 #endif
 
@@ -1729,7 +1859,7 @@ void __cudaRegisterVar(
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 #endif
 
@@ -1794,7 +1924,7 @@ void __cudaRegisterTexture(
 	TIMER_END(t, shmpkt->lat.lib.setup);
 
 	TIMER_START(t);
-	HANDOFF_AND_SPIN(shmpkt);
+	assembly_rpc(assm_id, 0, shmpkt);
 	TIMER_END(t, shmpkt->lat.lib.wait);
 #endif
 

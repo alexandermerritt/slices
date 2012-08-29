@@ -28,7 +28,7 @@ enum node_type
 {
 	NODE_TYPE_MAIN = 0,
 	NODE_TYPE_MINION,
-	NODE_TYPE_MAPPER,
+    NODE_TYPE_MAPPER,
 	NODE_TYPE_INVALID	//! Used to compare against valid type values
 };
 

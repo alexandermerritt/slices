@@ -394,9 +394,9 @@ remote_disable(void)
 			pthread_mutex_lock(&internals->lock);
 			return -(errno);
 		}
-		if (status != 0) {
-			printd(DBG_DEBUG,
-					"remotesink exited with non-zero status %d\n", status);
+		if (!WIFEXITED(status)) {
+			printd(DBG_DEBUG, "remotesink exited abnormally with code %d\n",
+                    WEXITSTATUS(status));
 		}
 		internals->rsink_pid = -1;
 	}
@@ -1005,9 +1005,9 @@ int assembly_runtime_init(enum node_type type, const char *main_ip)
 		err = node_minion_init(main_ip);
 	else if (type == NODE_TYPE_MAIN)
 		err = node_main_init();
-	else if (type == NODE_TYPE_MAPPER)
-		; // no initialization function right now
-	else
+    else if (type == NODE_TYPE_MAPPER) {
+        /* got nothing yet */
+    } else
 		goto fail;
 	if (err < 0)
 		goto fail;
@@ -1027,8 +1027,6 @@ int assembly_runtime_shutdown(void)
 		err = node_main_shutdown();
 	else if (internals->type == NODE_TYPE_MINION)
 		err = node_minion_shutdown();
-	else if (internals->type == NODE_TYPE_MAPPER)
-		err = node_mapper_shutdown();
 	if (err < 0)
 		goto fail;
 	if (internals)
@@ -1104,27 +1102,16 @@ int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt)
 	// doesn't involve main node
 	// data paths should already be configured and set up
 
-	err = pthread_mutex_lock(&internals->lock);
-	if (err < 0) {
-		printd(DBG_ERROR, "Could not lock internals\n");
-		goto fail;
-	}
 	// search assembly list for the id, search for indicated vgpu, then RPC CUDA
 	// packet to it.
+	pthread_mutex_lock(&internals->lock);
 	assm = __find_assembly(id);
 	if (!assm) {
 		printd(DBG_ERROR, "could not locate assembly %lu\n", id);
-		err = pthread_mutex_unlock(&internals->lock);
-		if (err < 0) {
-			printd(DBG_ERROR, "Could not unlock internals\n");
-		}
+		pthread_mutex_unlock(&internals->lock);
 		goto fail;
 	}
-	err = pthread_mutex_unlock(&internals->lock);
-	if (err < 0) {
-		printd(DBG_ERROR, "Could not unlock internals\n");
-		goto fail;
-	}
+	pthread_mutex_unlock(&internals->lock);
 
 	// Execute calls. Some return data specific to the assembly, others can go
 	// directly to NVIDIA's runtime.
@@ -1373,10 +1360,8 @@ int assembly_map(asmid_t id)
 				goto fail;
 			}
 			vgpu->ops = rpc_ops;
-			// Send our (localsink) PID over, so the remote end can correctly
-			// maintain CUBIN state. We can use the localsink PID instead of the
-			// application PID so long as each application processes and
-			// localsink processes exist 1:1
+			// Send our PID over, so the remote end can correctly
+			// maintain CUBIN state.
 			pid_t app_pid = getpid();
 			err = conn_put(&vgpu->rpc->sockconn, &app_pid, sizeof(pid_t));
 			if (err < 0) {
@@ -1496,7 +1481,7 @@ int assembly_import(asmid_t *id, const assembly_key_uuid uuid)
 	*id = assm->id;
 	return 0;
 fail:
-	printd(DBG_ERROR, "failed\n");
+	printd(DBG_ERROR, "Failed: %d\n", exit_errno);
 	if (assm)
 		free(assm);
 	return exit_errno;

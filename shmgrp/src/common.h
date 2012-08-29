@@ -165,6 +165,7 @@ struct message
 	message_type type;
 	union {
 		struct region_descriptor region;
+        char padding[16];
 	} m; // m for message
 };
 
