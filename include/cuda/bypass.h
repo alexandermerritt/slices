@@ -11,8 +11,6 @@
 #include <assert.h>
 #include <cuda_runtime_api.h>
 
-extern struct bypass bypass;
-
 /*
  * Function pointer typedefs
  */
@@ -112,5 +110,7 @@ struct bypass
 	fn_cudaThreadSynchronize   	cudaThreadSynchronize;
 	fn__cudaUnregisterFatBinary	__cudaUnregisterFatBinary;
 };
+
+extern struct bypass bypass;
 
 void fill_bypass(struct bypass *bypass);

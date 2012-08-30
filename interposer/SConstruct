@@ -29,6 +29,7 @@ sources.remove('shm.c');
 sources.append('../common/cuda/execute.c')
 sources.append('../common/cuda/marshal_hidden.c')
 sources.append('../common/cuda/rpc.c')
+sources.append('../common/cuda/bypass.c')
 sources.append('../common/io/sock.c')
 sources.append('../common/mq.c')
 
