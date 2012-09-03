@@ -188,6 +188,18 @@ typedef struct cuda_packet {
 #endif
 } cuda_packet_t;
 
+/* cudaError_t return value of RPC packet */
+static inline cudaError_t
+cpkt_ret_err(void *buf)
+{
+    return ((struct cuda_packet*)(buf))->ret_ex_val.err;
+}
+static inline void**
+cpkt_ret_hdl(void *buf)
+{
+    return ((struct cuda_packet*)(buf))->ret_ex_val.handle;
+}
+
 //! Data type describing an offset into the batch buffer. Cannot realistically
 //! be smaller than uint if the buffer size is anything reasonable.
 typedef unsigned int offset_t;

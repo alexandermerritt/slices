@@ -260,6 +260,7 @@ const struct cuda_ops rpc_ops =
 	.launch					= CudaDoRPC,
 	.threadSynchronize		= CudaDoRPC,
 	.free					= CudaDoRPC,
+	.freeArray				= CudaDoRPC,
 	.funcGetAttributes		= CudaDoRPC,
 	.malloc					= CudaDoRPC,
 	.mallocPitch			= CudaDoRPC,

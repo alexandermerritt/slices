@@ -88,6 +88,11 @@ process_messages(struct mq_state *state)
     int err;
     struct message msg;
 
+    if (!state || !state->valid)
+        return;
+
+    BUG(!MQ_ID_IS_VALID(state->id));
+
 	// Re-enable notification on the message queue. The man page says
 	// notifications are one-shot, and need to be reset after each trigger. It
 	// additionally says that notifications are only triggered upon receipt of a
@@ -106,7 +111,8 @@ process_messages(struct mq_state *state)
         if ( err < 0 ) {
             if ( err == -EAGAIN )
                 break;
-            fprintf(stderr, "Error recv msg: %s\n", strerror(-(err)));
+            fprintf(stderr, "Error recv msg on id %d: %s\n",
+                    state->id, strerror(-(err)));
         }
 
         state->notify(msg.type, msg.m.pid);
@@ -172,6 +178,7 @@ int attach_open(msg_recv_callback notify)
     daemon_mq.notify = notify;
     snprintf(daemon_mq.name, MAX_LEN, "%s", ATTACH_DAEMON_MQ_NAME);
     daemon_mq.pid = -1; /* not used for open() */
+    daemon_mq.valid = true;
 
     memset(&qattr, 0, sizeof(qattr));
     qattr.mq_maxmsg = MQ_MAX_MESSAGES;
@@ -192,10 +199,12 @@ int attach_open(msg_recv_callback notify)
 
 int attach_close(void)
 {
+    daemon_mq.valid = false;
     if (0 > mq_close(daemon_mq.id)) {
         perror("mq_close");
         return -1;
     }
+    daemon_mq.id = MQ_ID_INVALID_VALUE;
     if (0 > mq_unlink(daemon_mq.name)) {
         perror("mq_unlink");
         return -1;

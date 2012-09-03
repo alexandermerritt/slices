@@ -1006,6 +1006,30 @@ pack_cudaMemcpyToSymbolAsync(struct cuda_packet *pkt, void *buf,
 // 		cudaMemGetInfo
 
 static inline void
+pack_cudaMemGetInfo(struct cuda_packet *pkt)
+{
+    pkt->method_id = CUDA_MEM_GET_INFO;
+	pkt->thr_id = pthread_self();
+	pkt->len = sizeof(*pkt);
+}
+
+static inline void
+insert_cudaMemGetInfo(struct cuda_packet *pkt,
+        size_t free, size_t total)
+{
+	pkt->args[0].arr_argi[0] = free;
+	pkt->args[0].arr_argi[1] = total;
+}
+
+static inline void
+extract_cudaMemGetInfo(struct cuda_packet *pkt,
+        size_t *free, size_t *total)
+{
+	*free = pkt->args[0].arr_argi[0];
+	*total = pkt->args[0].arr_argi[1];
+}
+
+static inline void
 pack_cudaMemset(struct cuda_packet *pkt,
 		void *devPtr, int value, size_t count)
 {

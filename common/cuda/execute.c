@@ -731,18 +731,14 @@ static OPS_FN_PROTO(CudaMemcpyToSymbolAsyncH2D)
 static OPS_FN_PROTO(CudaMemGetInfo)
 {
 	TIMER_DECLARE1(timer);
+	size_t free, total;
 
 	TIMER_START(timer);
-	size_t *free, *total;
-	free = &(pkt->args[0].arr_argi[0]);
-	total = &(pkt->args[0].arr_argi[1]);
-	TIMER_END(timer, pkt->lat.exec.setup);
-
-	TIMER_START(timer);
-	pkt->ret_ex_val.err = cudaMemGetInfo(free, total);
+	pkt->ret_ex_val.err = cudaMemGetInfo(&free, &total);
+    insert_cudaMemGetInfo(pkt, free, total);
 	TIMER_END(timer, pkt->lat.exec.call);
 
-	printd(DBG_DEBUG, "memGetInfo free=%lu total=%lu\n", *free, *total);
+	printd(DBG_DEBUG, "memGetInfo free=%lu total=%lu\n", free, total);
 	EXAMINE_CUDAERROR(pkt);
 	return 0;
 }

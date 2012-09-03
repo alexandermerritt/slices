@@ -38,6 +38,7 @@ typedef void (*msg_recv_callback)(msg_event e, pid_t pid);
 /* connection state */
 struct mq_state
 {
+    bool valid;
     char name[MAX_LEN];
     pid_t pid;
     mqd_t id;
