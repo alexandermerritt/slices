@@ -49,10 +49,6 @@ static size_t count = 0; //! internal counter of app entries for use with incr
 
 /*-------------------------------------- EXTERNAL VARIABLES ------------------*/
 
-// Current process' environment variables (POSIX). Modified with putenv.
-// man 7 environ
-extern char **environ;
-
 /*-------------------------------------- INTERNAL STATE ----------------------*/
 
 /* an application process using shadowfax */
@@ -128,6 +124,7 @@ static void msg_received(msg_event e, pid_t pid)
 
     case ATTACH_CONNECT:
     {
+        printd(DBG_INFO, "msg ATTACH_CONNECT PID %d\n", pid);
         app = calloc(1, sizeof(*app));
         if ( app )
         {
@@ -153,7 +150,7 @@ static void msg_received(msg_event e, pid_t pid)
 
     case ATTACH_DISCONNECT: /* process is going to die */
     {
-        printd(DBG_INFO, "disconnect: from PID %d\n", pid);
+        printd(DBG_INFO, "msg ATTACH_DISCONNECT PID %d\n", pid);
         pthread_mutex_lock(&apps_lock);
         for_each_app(app, apps)
             if ( app->pid == pid )
@@ -164,11 +161,11 @@ static void msg_received(msg_event e, pid_t pid)
         if ( app )
         {
             printd(DBG_INFO, "disconnect: found app state for PID %d\n", pid);
-			err = assembly_teardown(app->asmid);
-			if (err < 0) {
-				printd(DBG_ERROR, "Could not destroy assembly %lu\n",
-						app->asmid);
-			}
+            if (0 > assembly_teardown(app->asmid))
+            {
+                printd(DBG_ERROR, "fail assembly_teardown asmid %lu\n",
+                        app->asmid);
+            }
             free(app);
         }
         else
@@ -179,6 +176,7 @@ static void msg_received(msg_event e, pid_t pid)
 
     case ATTACH_REQUEST_ASSEMBLY:
     {
+        printd(DBG_INFO, "msg ATTACH_REQUEST_ASSEMBLY PID %d\n", pid);
         char uuid_str[64];
         configure_hint();
         asmid = assembly_request(&hint);
@@ -199,6 +197,7 @@ static void msg_received(msg_event e, pid_t pid)
                 break;
         pthread_mutex_unlock(&apps_lock);
         if (app) {
+            app->asmid = asmid;
             err = attach_send_assembly(&app->mq, key);
             if (err < 0) {
                 fprintf(stderr, "Error sending assm to PID %d\n", pid);

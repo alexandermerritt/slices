@@ -181,6 +181,12 @@ static int leave_scheduler(void)
 
     scheduler_joined = false;
 
+    err = attach_send_disconnect(&recv_mq, &send_mq);
+    if (err < 0) {
+        printd(DBG_ERROR, "Error telling daemon disconnect\n");
+        return -1;
+    }
+
     /* remove state associated with the assembly cuda interface */
     err = assm_cuda_tini();
     if (err < 0) {

@@ -88,10 +88,13 @@ process_messages(struct mq_state *state)
     int err;
     struct message msg;
 
-    if (!state || !state->valid)
+    if (!state || !state->valid) {
+        printd(DBG_INFO, "!state || !state->valid\n");
         return;
+    }
 
-    BUG(!MQ_ID_IS_VALID(state->id));
+    if (!MQ_ID_IS_VALID(state->id))
+        return;
 
 	// Re-enable notification on the message queue. The man page says
 	// notifications are one-shot, and need to be reset after each trigger. It
@@ -113,6 +116,7 @@ process_messages(struct mq_state *state)
                 break;
             fprintf(stderr, "Error recv msg on id %d: %s\n",
                     state->id, strerror(-(err)));
+            return;
         }
 
         state->notify(msg.type, msg.m.pid);
@@ -192,6 +196,8 @@ int attach_open(msg_recv_callback notify)
                     " or previously crashed and old MQ was not cleaned up\n");
         return -1;
     }
+    printd(DBG_INFO, "Opened daemon MQ %d '%s'\n",
+            daemon_mq.id, daemon_mq.name);
 
     set_notify(&daemon_mq);
     return 0;
@@ -199,16 +205,22 @@ int attach_open(msg_recv_callback notify)
 
 int attach_close(void)
 {
+    /* If the mq is first closed, the notify thread will somehow wake up and try
+     * to do work. So we only unlink it. */
+#if 0
     daemon_mq.valid = false;
-    if (0 > mq_close(daemon_mq.id)) {
+    if (0 > mq_close(daemon_mqid)) {
         perror("mq_close");
         return -1;
     }
-    daemon_mq.id = MQ_ID_INVALID_VALUE;
+    printd(DBG_INFO, "Closed daemon MQ %d\n", daemon_mq.id);
+#endif
+
     if (0 > mq_unlink(daemon_mq.name)) {
         perror("mq_unlink");
         return -1;
     }
+    printd(DBG_INFO, "Unlinked daemon MQ '%s'\n", daemon_mq.name);
     return 0;
 }
 
