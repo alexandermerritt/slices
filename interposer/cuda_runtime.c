@@ -190,7 +190,7 @@ static int leave_scheduler(void)
     /* remove state associated with the assembly cuda interface */
     err = assm_cuda_tini();
     if (err < 0) {
-        printd(DBG_ERROR, "Error initializing assembly cuda interface\n");
+        printd(DBG_ERROR, "Error deinitializing assembly cuda interface\n");
         return -1;
     }
 
@@ -511,10 +511,8 @@ cudaError_t cudaSetValidDevices(int *device_arr, int len)
 // cuda v3.2 cudaStream_t: pointer to opaque struct
 // cuda v2.3 cudaStream_t: integer
 
-#if 0
 cudaError_t cudaStreamCreate(cudaStream_t *pStream)
 {
-	struct cuda_packet *shmpkt;
 	cudaError_t cerr;
 	TIMER_DECLARE1(t);
 
@@ -527,16 +525,7 @@ cudaError_t cudaStreamCreate(cudaStream_t *pStream)
 	tpkt.len = sizeof(tpkt);
 	shmpkt = &tpkt;
 #else
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaStreamCreate(shmpkt);
-	TIMER_END(t, shmpkt->lat.lib.setup);
-
-	TIMER_START(t);
-	//assembly_rpc(assm_id, 0, shmpkt);
-	TIMER_END(t, shmpkt->lat.lib.wait);
-
-	extract_cudaStreamCreate(shmpkt, pStream);
-	cerr = shmpkt->ret_ex_val.err;
+	cerr = assm_cudaStreamCreate(pStream);
 #endif
 
 	printd(DBG_DEBUG, "stream=%p\n", *pStream);
@@ -545,6 +534,7 @@ cudaError_t cudaStreamCreate(cudaStream_t *pStream)
 	return cerr;
 }
 
+#if 0
 cudaError_t cudaStreamDestroy(cudaStream_t stream)
 {
 	struct cuda_packet *shmpkt;
@@ -605,10 +595,10 @@ cudaError_t cudaStreamQuery(cudaStream_t stream)
 	update_latencies(&shmpkt->lat, CUDA_STREAM_QUERY, shmpkt->len);
 	return cerr;
 }
+#endif
 
 cudaError_t cudaStreamSynchronize(cudaStream_t stream)
 {
-	struct cuda_packet *shmpkt;
 	cudaError_t cerr;
 	TIMER_DECLARE1(t);
 
@@ -623,20 +613,12 @@ cudaError_t cudaStreamSynchronize(cudaStream_t stream)
 	tpkt.len = sizeof(tpkt);
 	shmpkt = &tpkt;
 #else
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaStreamSynchronize(shmpkt, stream);
-	TIMER_END(t, shmpkt->lat.lib.setup);
-
-	TIMER_START(t);
-	//assembly_rpc(assm_id, 0, shmpkt);
-	TIMER_END(t, shmpkt->lat.lib.wait);
-	cerr = shmpkt->ret_ex_val.err;
+	cerr = assm_cudaStreamSynchronize(stream);
 #endif
 
 	update_latencies(&shmpkt->lat, CUDA_STREAM_SYNCHRONIZE, shmpkt->len);
 	return cerr;
 }
-#endif
 
 //
 // Execution Control API
@@ -1432,18 +1414,16 @@ void** __cudaRegisterFatBinary(void* cubin)
 	TIMER_DECLARE1(t);
 
 	if (num_registered_cubins <= 0) {
+        fill_bypass(&bypass);
 #if defined(TIMING) && defined(TIMING_NATIVE)
-		fill_bypass(&bypass);
+        /* nothing */
 #else
-		if (0 > join_scheduler()) { // returns if already done
+		if (0 > join_scheduler()) {
 			fprintf(stderr, "Error attaching to assembly runtime\n");
 			assert(0);
 		}
-		fill_bypass(&bypass);
 #endif
 	}
-    else
-        abort();
 
 	num_registered_cubins++;
 
@@ -1526,7 +1506,6 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	return;
 }
 
-#if 0
 void __cudaRegisterVar(
 		void **fatCubinHandle,	//! cubin this var associates with
 		char *hostVar,			//! addr of a var within app (not string)
@@ -1534,7 +1513,6 @@ void __cudaRegisterVar(
 		const char *deviceName, //! actual string
 		int ext, int vsize, int constant, int global)
 {
-	struct cuda_packet *shmpkt;
 	TIMER_DECLARE1(t);
 	printd(DBG_DEBUG, "symbol=%p\n", hostVar);
 
@@ -1550,21 +1528,15 @@ void __cudaRegisterVar(
 				ext, vsize, constant, global);
 	shmpkt = &tpkt;
 #else
-	shmpkt = (struct cuda_packet *)get_region(pthread_self());
-	pack_cudaRegisterVar(shmpkt, (shmpkt + 1),
-			fatCubinHandle, hostVar, deviceAddress, deviceName, ext, vsize,
-			constant, global);
-	TIMER_END(t, shmpkt->lat.lib.setup);
-
-	TIMER_START(t);
-	//assembly_rpc(assm_id, 0, shmpkt);
-	TIMER_END(t, shmpkt->lat.lib.wait);
+	assm__cudaRegisterVar(fatCubinHandle,hostVar,deviceAddress,deviceName,
+			ext,vsize,constant,global);
 #endif
 
 	update_latencies(&shmpkt->lat, __CUDA_REGISTER_VARIABLE, shmpkt->len);
 	return;
 }
 
+#if 0
 // first three args we treat as handles (i.e. only pass down the pointer
 // addresses)
 void __cudaRegisterTexture(

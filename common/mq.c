@@ -15,6 +15,7 @@
 
 #include <mq.h>
 
+/* The permissions settings are masked against the process umask. */
 #define MQ_PERMS				(S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | \
 														S_IROTH | S_IWOTH)
 #define MQ_OPEN_OWNER_FLAGS		(O_RDONLY | O_CREAT | O_EXCL | O_NONBLOCK)
@@ -48,7 +49,7 @@ struct message
 static int set_notify(struct mq_state*);
 
 // Receive a message. If we are sent some signal while receiving, we retry the
-// receive. If the in MQ is empty, we spin.
+// receive. If the MQ is empty, exit with -EAGAIN
 static int
 recv_message(struct mq_state *state, struct message *msg)
 {
@@ -58,8 +59,6 @@ again:
 	if (err < 0) {
 		if (errno == EINTR)
 			goto again; // A signal interrupted the call, try again
-        if (errno == EAGAIN)
-            goto again; // MQ is empty, try again
 		exit_errno = -(errno);
 		goto fail;
 	}
@@ -68,6 +67,27 @@ fail:
 	return exit_errno;
 }
 
+// Same as recv_message except if the MQ is empty, keep retrying
+static int
+recv_message_block(struct mq_state *state, struct message *msg)
+{
+	int err, exit_errno;
+again:
+	err = mq_receive(state->id, (char*)msg, sizeof(*msg), NULL);
+	if (err < 0) {
+		if (errno == EINTR)
+			goto again; // A signal interrupted the call, try again
+		if (errno == EAGAIN)
+			goto again; // retry if empty
+		exit_errno = -(errno);
+		goto fail;
+	}
+	return 0;
+fail:
+	return exit_errno;
+}
+
+/* used by daemon to open the app MQ when it connects */
 static int
 open_other_mq(struct mq_state *state)
 {
@@ -112,8 +132,8 @@ process_messages(struct mq_state *state)
     while ( 1 ) {
         err = recv_message(state, &msg);
         if ( err < 0 ) {
-            if ( err == -EAGAIN )
-                break;
+            if (err == -EAGAIN)
+                break; // MQ is empty
             fprintf(stderr, "Error recv msg on id %d: %s\n",
                     state->id, strerror(-(err)));
             return;
@@ -132,6 +152,7 @@ __process_messages(union sigval sval)
     process_messages(state);
 }
 
+/* retries if MQ is full */
 static int
 send_message(struct mq_state *state, struct message *msg)
 {
@@ -174,6 +195,7 @@ set_notify(struct mq_state *state)
 int attach_open(msg_recv_callback notify)
 {
     struct mq_attr qattr;
+    bool tried_again = false;
 
     if ( !notify )
         return -1;
@@ -187,14 +209,29 @@ int attach_open(msg_recv_callback notify)
     memset(&qattr, 0, sizeof(qattr));
     qattr.mq_maxmsg = MQ_MAX_MESSAGES;
     qattr.mq_msgsize = MQ_MAX_MSG_SIZE;
+try_again:
     daemon_mq.id =
         mq_open(daemon_mq.name, MQ_OPEN_OWNER_FLAGS, MQ_PERMS, &qattr);
     if ( !MQ_ID_IS_VALID(daemon_mq.id) ) {
-        perror("mq_open");
-        if ( errno == EEXIST )
+        if ( errno == EEXIST ) {
             fprintf(stderr, "> Daemon already running in another instance,"
-                    " or previously crashed and old MQ was not cleaned up\n");
-        return -1;
+                    " or previously crashed and old MQ was not cleaned up\n"
+                    "> Removing MQ '%s'\n", daemon_mq.name);
+            if (0 > mq_unlink(daemon_mq.name)) {
+                // try to remove it and start again
+                fprintf(stderr, "> Failed to remove MQ. Aborting\n");
+                abort();
+            } else {
+                if (tried_again) {
+                    fprintf(stderr, "> Failed to open MQ after removal. Aborting\n");
+                    abort();
+                }
+                tried_again = true;
+                goto try_again;
+            }
+        } else {
+            return -1; /* some other error */
+        }
     }
     printd(DBG_INFO, "Opened daemon MQ %d '%s'\n",
             daemon_mq.id, daemon_mq.name);
@@ -324,8 +361,10 @@ int attach_send_connect(struct mq_state *recv, struct mq_state *send)
         return -1;
     }
 
+    printd(DBG_INFO, "Waiting for daemon to reply\n");
+
     /* block until daemon sends the okay */
-    if (0 > recv_message(recv, &msg)) {
+    if (0 > recv_message_block(recv, &msg)) {
         fprintf(stderr, "Error receving message from daemon\n");
         return -1;
     }
@@ -377,7 +416,7 @@ int attach_send_request(struct mq_state *recv, struct mq_state *send,
     }
 
     /* block until daemon has exported assembly for us */
-    if (0 > recv_message(recv, &msg)) {
+    if (0 > recv_message_block(recv, &msg)) {
         fprintf(stderr, "Error receving message from daemon\n");
         return -1;
     }

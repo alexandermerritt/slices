@@ -129,7 +129,7 @@ int assm_cuda_tini(void)
 
 #define FUNC_SETUP_CERR \
     FUNC_SETUP; \
-    cudaError_t cerr
+    cudaError_t cerr = cudaSuccess
 
 /* initialize the buf ptr once thread state has been looked up */
 static inline void
@@ -249,8 +249,39 @@ cudaError_t assm_cudaSetValidDevices(int *device_arr, int len)
 }
 
 //
-// Stream Management API TODO
+// Stream Management API
 //
+
+cudaError_t assm_cudaStreamCreate(cudaStream_t *pStream)
+{
+    FUNC_SETUP_CERR;
+
+    if (VGPU_IS_LOCAL(tinfo->vgpu))
+        bypass.cudaStreamCreate(pStream);
+    else {
+        init_buf(&buf, tinfo);
+        pack_cudaStreamCreate(buf);
+        rpc_ops.streamCreate(buf, NULL, rpc(tinfo));
+        extract_cudaStreamCreate(buf, pStream);
+        cerr = cpkt_ret_err(buf);
+    }
+    return cerr;
+}
+
+cudaError_t assm_cudaStreamSynchronize(cudaStream_t stream)
+{
+    FUNC_SETUP_CERR;
+
+    if (VGPU_IS_LOCAL(tinfo->vgpu))
+        bypass.cudaStreamSynchronize(stream);
+    else {
+        init_buf(&buf, tinfo);
+        pack_cudaStreamSynchronize(buf, stream);
+        rpc_ops.streamSynchronize(buf, NULL, rpc(tinfo));
+        cerr = cpkt_ret_err(buf);
+    }
+    return cerr;
+}
 
 //
 // Execution Control API
@@ -588,8 +619,7 @@ void assm__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		char* deviceFun, const char* deviceName, int thread_limit, uint3* tid,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize)
 {
-    void *buf = NULL;
-    struct tinfo *tinfo = __lookup(pthread_self());
+    FUNC_SETUP;
 
     if (VGPU_IS_LOCAL(tinfo->vgpu))
         bypass.__cudaRegisterFunction(fatCubinHandle, hostFun, deviceFun,
@@ -605,8 +635,7 @@ void assm__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 
 void assm__cudaUnregisterFatBinary(void** fatCubinHandle)
 {
-    void *buf = NULL;
-    struct tinfo *tinfo = __lookup(pthread_self());
+    FUNC_SETUP;
 
     if (VGPU_IS_LOCAL(tinfo->vgpu))
         bypass.__cudaUnregisterFatBinary(fatCubinHandle);
@@ -617,3 +646,20 @@ void assm__cudaUnregisterFatBinary(void** fatCubinHandle)
     }
 }
 
+void assm__cudaRegisterVar(void **fatCubinHandle, char *hostVar, char
+        *deviceAddress, const char *deviceName, int ext, int vsize,
+        int constant, int global)
+{
+    FUNC_SETUP;
+
+    if (VGPU_IS_LOCAL(tinfo->vgpu))
+        bypass.__cudaRegisterVar(fatCubinHandle, hostVar, deviceAddress,
+                deviceName, ext, vsize, constant, global);
+    else {
+        init_buf(&buf, tinfo);
+        pack_cudaRegisterVar(buf, (buf + sizeof(struct cuda_packet)),
+                fatCubinHandle, hostVar, deviceAddress, deviceName, ext,
+                vsize, constant, global);
+        rpc_ops.registerVar(buf, NULL, rpc(tinfo));
+    }
+}
