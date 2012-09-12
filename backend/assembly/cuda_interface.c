@@ -163,7 +163,7 @@ cudaError_t assm_cudaThreadExit(struct rpc_latencies *lat)
         rpc_ops.threadExit(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -183,7 +183,7 @@ cudaError_t assm_cudaThreadSynchronize(struct rpc_latencies *lat)
         rpc_ops.threadSynchronize(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -205,7 +205,8 @@ cudaError_t assm_cudaGetDeviceCount(int *count, struct rpc_latencies *lat)
     return cudaSuccess;
 }
 
-cudaError_t assm_cudaGetDeviceProperties(struct cudaDeviceProp *prop,int device, struct rpc_latencies *lat)
+cudaError_t assm_cudaGetDeviceProperties(struct cudaDeviceProp *prop,int device,
+        struct rpc_latencies *lat)
 {
     FUNC_SETUP;
     init_buf(&buf, tinfo);
@@ -235,7 +236,7 @@ cudaError_t assm_cudaSetDevice(int device, struct rpc_latencies *lat)
         rpc_ops.setDevice(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -254,7 +255,7 @@ cudaError_t assm_cudaSetDeviceFlags(unsigned int flags, struct rpc_latencies *la
         rpc_ops.setDeviceFlags(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -275,7 +276,7 @@ cudaError_t assm_cudaSetValidDevices(int *device_arr, int len,
         rpc_ops.setValidDevices(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -301,7 +302,7 @@ cudaError_t assm_cudaStreamCreate(cudaStream_t *pStream,
         TIMER_END(t, lat->lib.wait);
         extract_cudaStreamCreate(buf, pStream); /* XXX include in timing */
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -322,7 +323,7 @@ cudaError_t assm_cudaStreamSynchronize(cudaStream_t stream,
         rpc_ops.streamSynchronize(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -347,7 +348,7 @@ cudaError_t assm_cudaConfigureCall(dim3 gridDim, dim3 blockDim,
         rpc_ops.configureCall(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -367,7 +368,7 @@ cudaError_t assm_cudaLaunch(const char* entry, struct rpc_latencies *lat)
         rpc_ops.launch(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -388,7 +389,7 @@ cudaError_t assm_cudaSetupArgument(const void *arg, size_t size, size_t offset,
         rpc_ops.setupArgument(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -411,7 +412,7 @@ cudaError_t assm_cudaFree(void * devPtr, struct rpc_latencies *lat)
         rpc_ops.free(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -430,7 +431,7 @@ cudaError_t assm_cudaFreeArray(struct cudaArray * array, struct rpc_latencies *l
         rpc_ops.freeArray(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -449,7 +450,7 @@ cudaError_t assm_cudaFreeHost(void *ptr, struct rpc_latencies *lat)
         rpc_ops.freeHost(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -484,7 +485,7 @@ cudaError_t assm_cudaMalloc(void **devPtr, size_t size, struct rpc_latencies *la
         TIMER_END(t, lat->lib.wait);
         extract_cudaMalloc(buf, devPtr); /* XXX include in timing */
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -507,7 +508,7 @@ cudaError_t assm_cudaMallocArray(
         TIMER_END(t, lat->lib.wait);
         extract_cudaMallocArray(buf, array); /* XXX include in timing */
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -528,7 +529,7 @@ cudaError_t assm_cudaMallocPitch(
         TIMER_END(t, lat->lib.wait);
         extract_cudaMallocPitch(buf, devPtr, pitch); /* XXX include in timing */
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -560,7 +561,7 @@ cudaError_t assm_cudaMemcpy(void *dst, const void *src,
         extract_cudaMemcpy(buf, ((struct cuda_packet*)buf) + 1,
                 dst, src, count, kind); /* XXX include in timing */
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -592,7 +593,7 @@ cudaError_t assm_cudaMemcpyAsync(void *dst, const void *src, size_t count,
         extract_cudaMemcpyAsync(buf, ((struct cuda_packet*)buf) + 1,
                 dst, src, count, kind, stream); /* XXX include in timing */
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -621,7 +622,7 @@ cudaError_t assm_cudaMemcpyFromSymbol(void *dst, const char *symbol, size_t coun
         extract_cudaMemcpyFromSymbol(buf, ((struct cuda_packet*)buf) + 1,
                 dst, symbol, count, offset, kind); /* XXX include in timing */
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -650,7 +651,7 @@ cudaError_t assm_cudaMemcpyToArray( struct cudaArray *dst, size_t wOffset,
         }
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -677,7 +678,7 @@ cudaError_t assm_cudaMemcpyToSymbol(const char *symbol, const void *src,
         }
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -705,7 +706,7 @@ cudaError_t assm_cudaMemcpyToSymbolAsync(const char *symbol, const void *src,
         }
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -729,7 +730,7 @@ cudaError_t assm_cudaMemGetInfo(size_t *free, size_t *total, struct rpc_latencie
         TIMER_END(t, lat->lib.wait);
         extract_cudaMemGetInfo(buf, free, total); /* XXX include in timing */
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -748,7 +749,7 @@ cudaError_t assm_cudaMemset(void *devPtr, int value, size_t count, struct rpc_la
         rpc_ops.memset(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         cerr = cpkt_ret_err(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
@@ -774,7 +775,7 @@ void** assm__cudaRegisterFatBinary(void *cubin, struct rpc_latencies *lat)
         rpc_ops.registerFatBinary(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
         ret = cpkt_ret_hdl(buf);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
     return ret;
 }
@@ -798,7 +799,7 @@ void assm__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
         TIMER_START(t);
         rpc_ops.registerFunction(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
 }
 
@@ -816,7 +817,7 @@ void assm__cudaUnregisterFatBinary(void** fatCubinHandle, struct rpc_latencies *
         TIMER_START(t);
         rpc_ops.unregisterFatBinary(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
 }
 
@@ -838,6 +839,6 @@ void assm__cudaRegisterVar(void **fatCubinHandle, char *hostVar, char
         TIMER_END(t, lat->lib.setup);
         rpc_ops.registerVar(buf, NULL, rpc(tinfo));
         TIMER_END(t, lat->lib.wait);
-        LAT_SET_LENGTH(lat, cpkt_ret_len(buf));
+        LAT_UPDATE(lat, buf);
     }
 }

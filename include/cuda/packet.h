@@ -30,6 +30,9 @@
 
 #define MAX_ARGS 6
 
+// forward declaration
+struct cuda_packet;
+
 // TODO Create macros to access and modify the value of 'flags' in a cuda packet
 // instead of having code manually do raw bit ops everywhere.
 enum cuda_packet_flags
@@ -170,11 +173,23 @@ struct rpc_latencies {
 #define LAT_DECLARE(name) \
     struct rpc_latencies _lat = LATENCIES_INIT; \
     struct rpc_latencies *name = &_lat
-#define LAT_SET_LENGTH(lat,size) \
-    ((lat)->len = (size))
+/* add all latency values within a cuda_packet to the provided lat structure */
+#define LAT_UPDATE(lat,cpkt) \
+{ \
+    (lat)->lib.setup  += ((struct cuda_packet*)cpkt)->lat.lib.setup; \
+    (lat)->lib.wait   += ((struct cuda_packet*)cpkt)->lat.lib.wait; \
+    (lat)->exec.setup += ((struct cuda_packet*)cpkt)->lat.exec.setup; \
+    (lat)->exec.call  += ((struct cuda_packet*)cpkt)->lat.exec.call; \
+    (lat)->rpc.append += ((struct cuda_packet*)cpkt)->lat.rpc.append; \
+    (lat)->rpc.send   += ((struct cuda_packet*)cpkt)->lat.rpc.send; \
+    (lat)->rpc.wait   += ((struct cuda_packet*)cpkt)->lat.rpc.wait; \
+    (lat)->rpc.recv   += ((struct cuda_packet*)cpkt)->lat.rpc.recv; \
+    (lat)->remote.batch_exec += ((struct cuda_packet*)cpkt)->lat.remote.batch_exec; \
+    (lat)->len += ((struct cuda_packet*)cpkt)->len; \
+}
 #else   /* !TIMING */
 #define LAT_DECLARE(name)   void *name = NULL
-#define LAT_SET_LENGTH(lat,size)
+#define LAT_UPDATE(lat,cpkt)
 #endif	/* TIMING */
 
 #define LATENCIES_INIT  { {0,0}, {0,0}, {0,0,0,0}, {0}, 0 }
@@ -203,11 +218,6 @@ static inline void**
 cpkt_ret_hdl(void *buf)
 {
     return ((struct cuda_packet*)(buf))->ret_ex_val.handle;
-}
-static inline size_t
-cpkt_ret_len(void *buf)
-{
-    return ((struct cuda_packet*)buf)->len;
 }
 
 //! Data type describing an offset into the batch buffer. Cannot realistically
