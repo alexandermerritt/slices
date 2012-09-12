@@ -137,26 +137,19 @@ typedef union ret_extra {
 	void **handle;	    // Used to return fatCubinHandle
 } ret_extra_t;
 
-#ifdef TIMING
 /**
  * Measurements of time spent by a cuda_packet RPC within each component of the
  * runtime. Only allocated/updated if macro TIMING is defined.
  */
 struct rpc_latencies {
-	// If you measure the total time of the application, then subtract from it
-	// the attach and detach latencies (joining/departing the runtime) as well
-	// as lib.setup and lib.wait, you end up approx. with the time in the
-	// application spent NOT using CUDA.
 	struct {
-		uint64_t setup; //! Time spent marshaling and misc setup
-		//! Time spent polling for result. Composed of all costs in the assembly
-		//! runtime executing the call, locally or remote.
-		uint64_t wait;
-	} lib; // interposer overhead
+		uint64_t setup; //! marshaling (always zero if local)
+		uint64_t wait;  //! lib waiting on NV CUDA (local) or RPC (remote)
+	} lib;
 	struct {
 		uint64_t setup; //! Argument setup and symbol/cubin lookup time
-		uint64_t call; //! Latency in the CUDA runtime/driver
-	} exec; // cuda/execute.c either local- or remote-tip execution
+		uint64_t call;  //! Latency in the CUDA runtime/driver
+	} exec; //! latencies on remote end, except if TIMING_NATIVE is defined
 	struct {
 		uint64_t append; //! Time squandered doing memcpy to the batch buffer
 		uint64_t send; //! Time spent sending the batch
@@ -171,8 +164,20 @@ struct rpc_latencies {
 		// batch_exec - exec.{setup|call} = batch unpacking
 		uint64_t batch_exec; //! Executing all RPCs in a batch
 	} remote; // on remote machine (all zeros if vgpu is not remote)
+    size_t len; // length of packet + data
 };
+#ifdef TIMING
+#define LAT_DECLARE(name) \
+    struct rpc_latencies _lat = LATENCIES_INIT; \
+    struct rpc_latencies *name = &_lat
+#define LAT_SET_LENGTH(lat,size) \
+    ((lat)->len = (size))
+#else   /* !TIMING */
+#define LAT_DECLARE(name)   void *name = NULL
+#define LAT_SET_LENGTH(lat,size)
 #endif	/* TIMING */
+
+#define LATENCIES_INIT  { {0,0}, {0,0}, {0,0,0,0}, {0}, 0 }
 
 typedef struct cuda_packet {
 	method_id_t method_id;     // to identify which method
@@ -184,7 +189,7 @@ typedef struct cuda_packet {
 	bool is_sync; //! whether this func must be interposed/invoked synchronously
 	ret_extra_t ret_ex_val; // return value from call filled in response packet
 #ifdef TIMING
-	struct rpc_latencies lat;
+    struct rpc_latencies lat;
 #endif
 } cuda_packet_t;
 
@@ -198,6 +203,11 @@ static inline void**
 cpkt_ret_hdl(void *buf)
 {
     return ((struct cuda_packet*)(buf))->ret_ex_val.handle;
+}
+static inline size_t
+cpkt_ret_len(void *buf)
+{
+    return ((struct cuda_packet*)buf)->len;
 }
 
 //! Data type describing an offset into the batch buffer. Cannot realistically

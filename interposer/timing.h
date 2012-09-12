@@ -16,12 +16,12 @@
 struct call
 {
 	method_id_t id;
-	unsigned long lat; // ency
+	unsigned long lat; // (approx) latency of call from app's perspective
 	size_t bytes; // cuda_packet.len
 };
 
 void timers_init(void);
-void update_latencies(const struct rpc_latencies *l, method_id_t id, size_t call_size);
+void update_latencies(const struct rpc_latencies *l, method_id_t id);
 void print_latencies(void);
 
 void timers_start_attach(void);
@@ -32,7 +32,7 @@ void timers_stop_detach(void);
 #else	/* !TIMING */
 
 #define timers_init()
-#define update_latencies(lat,id,sz)
+#define update_latencies(lat,id)
 #define print_latencies()
 
 #define timers_start_attach

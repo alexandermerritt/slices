@@ -76,11 +76,11 @@ timers_stop_detach(void)
  * XXX This function is in NO WAY thread-safe.
  */
 inline void
-update_latencies(const struct rpc_latencies *l, method_id_t id, size_t call_size)
+update_latencies(const struct rpc_latencies *l, method_id_t id)
 {
 	// Trace values.
 	trace[num_calls_made].id = id;
-	trace[num_calls_made].bytes = call_size;
+	trace[num_calls_made].bytes = l->len;
 #if defined(TIMING_NATIVE)
 	trace[num_calls_made].lat = l->exec.call; // native has no handoff with sink
 #else

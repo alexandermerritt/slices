@@ -498,6 +498,22 @@ unpack_cudaFreeArray(struct cuda_packet *pkt,
 // 		cudaHostAlloc
 
 static inline void
+pack_cudaFreeHost(struct cuda_packet *pkt, void *devPtr)
+{
+	pkt->method_id = CUDA_FREE_HOST;
+	pkt->thr_id = pthread_self();
+	pkt->args[0].argp = devPtr;
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = method_synctable[pkt->method_id];
+}
+
+static inline void
+unpack_cudaFreeHost(struct cuda_packet *pkt, void **devPtr)
+{
+	*devPtr = pkt->args[0].argp;
+}
+
+static inline void
 pack_cudaMalloc(struct cuda_packet *pkt, size_t size)
 {
 	pkt->method_id = CUDA_MALLOC;

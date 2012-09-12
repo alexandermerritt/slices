@@ -438,6 +438,7 @@ admission_thread(void *arg)
 #error NIC_* not defined
 #endif
 	if (err < 0) {
+        printd(DBG_ERROR, "could not bind local port\n");
 		state->exit_code = -ENETDOWN;
 		pthread_exit(NULL);
 	}
@@ -448,6 +449,7 @@ admission_thread(void *arg)
 
 		err = conn_accept(conn, &new_conn);
 		if (err < 0) {
+            printd(DBG_ERROR, "could not accept incoming connection\n");
 			BUG(err == -EINVAL);
 			state->exit_code = -ENETDOWN;
 			break;
