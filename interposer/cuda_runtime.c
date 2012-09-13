@@ -891,6 +891,9 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 		case cudaMemcpyHostToDevice: id = CUDA_MEMCPY_H2D; break;
 		case cudaMemcpyDeviceToHost: id = CUDA_MEMCPY_D2H; break;
 		case cudaMemcpyDeviceToDevice: id = CUDA_MEMCPY_D2D; break;
+        default:
+            fprintf(stderr, "> %s kind %d unhandled\n", __func__, kind);
+            abort();
 	}
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
@@ -922,6 +925,9 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 		case cudaMemcpyHostToDevice: id = CUDA_MEMCPY_ASYNC_H2D; break;
 		case cudaMemcpyDeviceToHost: id = CUDA_MEMCPY_ASYNC_D2H; break;
 		case cudaMemcpyDeviceToDevice: id = CUDA_MEMCPY_ASYNC_D2D; break;
+        default:
+            fprintf(stderr, "> %s kind %d unhandled\n", __func__, kind);
+            abort();
 	}
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);

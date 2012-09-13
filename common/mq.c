@@ -46,7 +46,23 @@ struct message
 };
 
 /* forward declaration */
-static int set_notify(struct mq_state*);
+static void __process_messages(union sigval sval);
+
+static inline int
+set_notify(struct mq_state *state)
+{
+	struct sigevent event;
+	memset(&event, 0, sizeof(event));
+	event.sigev_notify = SIGEV_THREAD;
+	event.sigev_notify_function = __process_messages;
+	event.sigev_value.sival_ptr = state;
+	if ( 0 > mq_notify(state->id, &event) )
+    {
+        perror("mq_notify");
+        return -1;
+    }
+	return 0;
+}
 
 // Receive a message. If we are sent some signal while receiving, we retry the
 // receive. If the MQ is empty, exit with -EAGAIN
@@ -170,22 +186,6 @@ again:
 	return 0;
 fail:
 	return exit_errno;
-}
-
-static inline int
-set_notify(struct mq_state *state)
-{
-	struct sigevent event;
-	memset(&event, 0, sizeof(event));
-	event.sigev_notify = SIGEV_THREAD;
-	event.sigev_notify_function = __process_messages;
-	event.sigev_value.sival_ptr = state;
-	if ( 0 > mq_notify(state->id, &event) )
-    {
-        perror("mq_notify");
-        return -1;
-    }
-	return 0;
 }
 
 /*

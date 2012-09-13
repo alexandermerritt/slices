@@ -556,6 +556,9 @@ cudaError_t assm_cudaMemcpy(void *dst, const void *src,
                 rpc_ops.memcpyD2H(buf, NULL, rpc(tinfo)); break;
             case cudaMemcpyDeviceToDevice:
                 rpc_ops.memcpyD2D(buf, NULL, rpc(tinfo)); break;
+			default:
+				fprintf(stderr, "> %s kind %d unhandled\n", __func__, kind);
+				abort();
         }
         TIMER_END(t, lat->lib.wait);
         extract_cudaMemcpy(buf, ((struct cuda_packet*)buf) + 1,
@@ -588,6 +591,9 @@ cudaError_t assm_cudaMemcpyAsync(void *dst, const void *src, size_t count,
                 rpc_ops.memcpyAsyncD2H(buf, NULL, rpc(tinfo)); break;
             case cudaMemcpyDeviceToDevice:
                 rpc_ops.memcpyAsyncD2D(buf, NULL, rpc(tinfo)); break;
+			default:
+				fprintf(stderr, "> %s kind %d unhandled\n", __func__, kind);
+				abort();
         }
         TIMER_END(t, lat->lib.wait);
         extract_cudaMemcpyAsync(buf, ((struct cuda_packet*)buf) + 1,

@@ -29,7 +29,7 @@ INSTALL_DIR = os.getcwd() + '/build'
 #
 cuda_root=''
 if NODE_NAME.startswith('kid'):
-	cuda_root = '/sw/keeneland/cuda/3.2/linux_binary'
+	cuda_root = '/sw/keeneland/cuda/4.1/linux_binary'
 	NODE_NAME = 'kid'
 elif NODE_NAME == 'prost':
 	cuda_root = '/opt/cuda/'
@@ -102,7 +102,7 @@ cpath = [cuda_root + '/include', os.getcwd() + '/include']
 libs = ['rt', 'dl']
 
 # machine-specific paths
-ENV['kid'] = Environment(CC = icc, CCFLAGS = ccflags, LIBS = libs)
+ENV['kid'] = Environment(CCFLAGS = ccflags, LIBS = libs)
 ENV['kid'].Append(CPPPATH = cpath + local_cpath)
 ENV['kid'].Append(LIBPATH = libpath + local_lpath)
 
