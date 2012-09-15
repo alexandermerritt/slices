@@ -33,5 +33,5 @@ sources.append('../common/cuda/bypass.c')
 sources.append('../common/io/sock.c')
 sources.append('../common/mq.c')
 
-lib = env.SharedLibrary('libsf.so', sources)
+lib = env.SharedLibrary('libsfcuda.so', sources)
 env.Install(INSTALL_DIR + '/lib', lib)
