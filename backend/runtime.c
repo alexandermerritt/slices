@@ -73,46 +73,9 @@ static FILE *logf = NULL;
 static char *log; /** determined based on machine name */
 static const char wd[] = "."; //! working dir of runtime once exec'd
 
-// XXX We assume a single-process single-threaded CUDA application for now. Thus
-// one assembly, one hint and one sink child.
-static struct assembly_hint hint =
-{
-	.num_gpus = 1,
-	.batch_size = CUDA_BATCH_MAX,
-	// Configure network based on build flag
-#if defined(NIC_SDP)
-	.nic_type = HINT_USE_IB
-#elif defined(NIC_ETHERNET)
-	.nic_type = HINT_USE_ETH
-#else
-#error NIC_* not defined
-#endif
-};
-
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
-static void configure_hint(void)
-{
-	/**
-	 * File that may be used to specify a hint for assembly creation. Contains a
-	 * single integer specifying how many vGPUs are wanted. XXX This should be
-	 * removed when shmgrp enables passing generic messages between member and
-	 * leader, such that we can pass assembly requests from within the
-	 * interposer.
-	 */
-#define HINT_FILE_NAME "hint.assm"
-	// Look for a hint file. If none found, fall back to the default.
-	if (0 == access(HINT_FILE_NAME, R_OK)) {
-		FILE *hint_file = fopen(HINT_FILE_NAME, "r");
-		if (!hint_file)
-			return;
-		fscanf(hint_file, "%d", &hint.num_gpus);
-		fclose(hint_file);
-		printf("read in %s: %d gpus\n", HINT_FILE_NAME, hint.num_gpus);
-	}
-}
-
-static void msg_received(msg_event e, pid_t pid)
+static void msg_received(msg_event e, pid_t pid, void *data)
 {
     int err;
     struct app *app = NULL;
@@ -178,10 +141,12 @@ static void msg_received(msg_event e, pid_t pid)
     {
         printd(DBG_INFO, "msg ATTACH_REQUEST_ASSEMBLY PID %d\n", pid);
         char uuid_str[64];
-        configure_hint();
-        asmid = assembly_request(&hint);
+        struct assembly_hint *hint = data;
+
+        asmid = assembly_request(hint);
         assembly_print(asmid);
 
+        /* hand off to interposer for mapping */
         err = assembly_export(asmid, key); /* modifies 'key' */
         if (err < 0) {
             fprintf(stderr, "Error exporting assm\n");
@@ -191,6 +156,7 @@ static void msg_received(msg_event e, pid_t pid)
         uuid_unparse(key, uuid_str);
         printd(DBG_INFO, "exported key '%s'\n", uuid_str);
 
+        /* add application to our list to track */
         pthread_mutex_lock(&apps_lock);
         for_each_app(app, apps)
             if ( app->pid == pid )

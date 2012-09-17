@@ -50,6 +50,26 @@
 
 /*-------------------------------------- INTERNAL STATE ----------------------*/
 
+/* If no assembly hint is specified when an application process joins the
+ * system, this is the hint used to construct an assembly.
+ */
+struct assembly_hint assembly_default_hint =
+{
+    .num_gpus = 1, /* per process */
+#if defined(NIC_SDP)
+    .nic_type = HINT_USE_SDP,
+#elif defined(NIC_ETHERNET)
+    .nic_type = HINT_USE_ETH,
+#else
+#error NIC_* not defined
+#endif
+    .mpi_group = 0, /* := unused, not an MPI app */
+    .policy = HINT_ENUM_POLICY_LOCALFIRST,
+    .batch_size = CUDA_BATCH_MAX
+};
+
+/*-------------------------------------- INTERNAL STATE ----------------------*/
+
 struct internals_state *internals = NULL;
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
@@ -603,6 +623,90 @@ __get_participant(const char *hostname)
 	return NULL;
 }
 
+static int
+__do_read_hint(const char *path, struct assembly_hint *hint)
+{
+    int err;
+    const int linesz = 256;
+    FILE *fptr = NULL;
+    char line[linesz], *field, *val, *saveptr;
+
+    memset(hint, 0, sizeof(*hint));
+    memset(line, 0, linesz * sizeof(*line));
+
+    err = access(path, R_OK);
+    if (err != 0) {
+        printd(DBG_INFO, "can't access %s for reading\n", path);
+        goto fail;
+    }
+
+    fptr = fopen(path, "r");
+    if (!fptr) {
+        printd(DBG_INFO, "can't open %s\n", path);
+        goto fail;
+    }
+
+    if (NULL == fgets(line, linesz, fptr)) {
+        printd(DBG_INFO, "emtpy file %s, ignoring\n", path);
+        return 0;
+    }
+
+    do {
+        if (HINT_COMMENT_CHAR == *line)
+            continue;
+
+        field = strtok_r(line, HINT_EQUAL_DELIM, &saveptr);
+        if (!field)
+            goto fail_malformed; /* line has no = */
+        val = strtok_r(NULL, HINT_EQUAL_DELIM, &saveptr);
+        if (!val)
+            goto fail_malformed; /* blabla= */
+
+        if (strcmp(field, HINT_FIELD_MPI) == 0) {
+            hint->mpi_group = atoi(val);
+        } else if (strcmp(field, HINT_FIELD_POLICY) == 0) {
+            hint->policy = assembly_hint_policy2enum(val);
+        } else if (strcmp(field, HINT_FIELD_BATCHSIZE) == 0) {
+            hint->batch_size = atoi(val);
+        } else if (strcmp(field, HINT_FIELD_NIC) == 0) {
+            /* TODO */
+        /* TODO read num_vgpus */
+        } else
+            fprintf(stderr, "> hint file: unknown field '%s'\n", field);
+    } while(NULL != fgets(line, linesz, fptr));
+
+    /* fix up the fields */
+    if (hint->policy == HINT_ENUM_POLICY_INVALID) {
+        fprintf(stderr, "> Policy value invalid\n");
+        goto fail_malformed;
+    }
+
+    if (hint->batch_size == 0)
+        hint->batch_size = CUDA_BATCH_MAX;
+
+    hint->num_gpus = 1; /* TODO don't do this once we read in num_vgpus */
+
+#if defined(NIC_SDP)
+    hint->nic_type = HINT_USE_SDP;
+#elif defined(NIC_ETHERNET)
+    hint->nic_type = HINT_USE_ETH;
+#else
+#error NIC_* not defined
+#endif
+
+    fclose(fptr);
+    return 0;
+
+fail_malformed:
+    fprintf(stderr, "> Malformed hint file, ignoring\n");
+    memset(hint, 0, sizeof(*hint));
+
+fail:
+    if (fptr)
+        fclose(fptr);
+    return -1;
+}
+
 /*-------------------------------------- EXTERNAL FUNCTIONS ------------------*/
 
 /*
@@ -887,9 +991,15 @@ void assembly_print(asmid_t id)
 				assm->mappings[dev].pgpu_id,
 				assm->mappings[dev].hostname);
 	}
-	printf("  Batch size   %lu\n", assm->hint.batch_size);
-	printf("  Drv API      %d\n", assm->driverVersion);
-	printf("  Runtime API  %d\n", assm->runtimeVersion);
+    printf("  Hint\n");
+    printf("    vGPUs      %04d\n", assm->hint.num_gpus);
+    if (assm->hint.mpi_group == 0)
+        printf("    MPI        n/a\n");
+    else
+        printf("    MPI        %04d\n", assm->hint.mpi_group);
+    printf("    Policy     %s\n",
+            assembly_hint_enum2policy(assm->hint.policy));
+    printf("    BatchSize  %04lu\n", assm->hint.batch_size);
 }
 
 // establish remote data paths, including vgpu ops
@@ -976,6 +1086,21 @@ int asssembly_vgpu_is_local(asmid_t id, int vgpu_id, bool *answer)
 
     *answer = (vgpu->fixation == VGPU_LOCAL);
     return 0;
+}
+
+int assembly_read_hint(struct assembly_hint *hint)
+{
+    const char *val = getenv(HINT_ENV_VAR);
+    if (!hint) {
+        printd(DBG_ERROR, "NULL argument\n");
+        return -1;
+    }
+    if (!val) {
+        printf("> No hint file specified. Using default\n");
+        memcpy(hint, &assembly_default_hint, sizeof(*hint));
+        return 0;
+    }
+    return __do_read_hint(val, hint);
 }
 
 /*******************************************************************************

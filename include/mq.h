@@ -33,7 +33,12 @@ typedef enum
 } msg_event;
 
 struct mq_state; /* forward declaration */
-typedef void (*msg_recv_callback)(msg_event e, pid_t pid);
+
+/* e = message kind / event
+ * pid = process sending daemon a message
+ * data = some data sent by app to daemon within message, depends on e
+ */
+typedef void (*msg_recv_callback)(msg_event e, pid_t pid, void *data);
 
 /* connection state */
 struct mq_state
@@ -59,7 +64,7 @@ int attach_tini(struct mq_state *recv, struct mq_state *send);
 int attach_send_connect(struct mq_state *recv, struct mq_state *send);
 int attach_send_disconnect(struct mq_state *recv, struct mq_state *send);
 int attach_send_request(struct mq_state *recv, struct mq_state *send,
-        assembly_key_uuid key);
+        struct assembly_hint *hint, assembly_key_uuid key);
 
 /* if code crashes, call this to remove files this interface may have created
  * which were not cleaned up */

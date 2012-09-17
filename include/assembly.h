@@ -9,6 +9,7 @@
 
 // System includes
 #include <uuid/uuid.h>
+#include <string.h>
 
 // Project includes
 #include <cuda/packet.h>
@@ -47,15 +48,85 @@ enum hint_nic_type
 #define HINT_ETH_STR    "eth"
 #define HINT_IB_STR     "ib"
 
+enum hint_policy
+{
+    HINT_ENUM_POLICY_INVALID = 0,
+    HINT_ENUM_POLICY_LOCALFIRST,
+    HINT_ENUM_POLICY_REMOTEONLY
+};
+
+#define HINT_COMMENT_CHAR               '#'
+#define HINT_EQUAL_DELIM                "="
+#define HINT_FIELD_MPI                  "mpi"
+#define HINT_FIELD_POLICY               "policy"
+    #define HINT_FIELD_POLICY_REMOTEONLY    "remote_only"
+    #define HINT_FIELD_POLICY_LOCALFIRST    "local_first"
+#define HINT_FIELD_BATCHSIZE            "batch_size"
+#define HINT_FIELD_NIC                  "nic"
+    #define HINT_FIELD_NIC_ETH          "eth"
+    #define HINT_FIELD_NIC_SDP          "sdp"
+
+/* set this env var to the full path of a hint file for it to be read */
+#define HINT_ENV_VAR                    "ASSEMBLY_HINT"
+
+static inline enum hint_nic_type
+assembly_hint_nic2enum(const char *nic)
+{
+    if (!nic)
+        return HINT_ENUM_POLICY_INVALID;
+
+    if (strstr(nic, HINT_FIELD_POLICY_REMOTEONLY))
+        return HINT_ENUM_POLICY_REMOTEONLY;
+
+    else if (strstr(nic, HINT_FIELD_POLICY_LOCALFIRST))
+        return HINT_ENUM_POLICY_LOCALFIRST;
+    /* TODO */
+    else
+        return HINT_ENUM_POLICY_INVALID;
+}
+
+static inline enum hint_policy
+assembly_hint_policy2enum(const char *policy)
+{
+    if (!policy)
+        return HINT_ENUM_POLICY_INVALID;
+
+    if (strstr(policy, HINT_FIELD_POLICY_REMOTEONLY))
+        return HINT_ENUM_POLICY_REMOTEONLY;
+
+    else if (strstr(policy, HINT_FIELD_POLICY_LOCALFIRST))
+        return HINT_ENUM_POLICY_LOCALFIRST;
+
+    else
+        return HINT_ENUM_POLICY_INVALID;
+}
+
+static inline const char *
+assembly_hint_enum2policy(enum hint_policy p)
+{
+    switch(p)
+    {
+        case HINT_ENUM_POLICY_LOCALFIRST:
+            return HINT_FIELD_POLICY_LOCALFIRST;
+        case HINT_ENUM_POLICY_REMOTEONLY:
+            return HINT_FIELD_POLICY_REMOTEONLY;
+        default:
+            return "unknown";
+    }
+}
+
 /**
  * Structure used by clients/apps/etc to specify how they want their assembly
  * cooked. Thus, 'hint'.
  */
 struct assembly_hint
 {
-    int num_gpus;
-    enum hint_nic_type nic_type;
-    size_t batch_size;
+    int num_gpus; /* XXX not used; vGPUs per process */
+    enum hint_nic_type nic_type; /* XXX not used; network for remote vGPU */
+
+    unsigned int mpi_group; /* 0 = not mpi, else some number > 0 */
+    enum hint_policy policy;
+    size_t batch_size; /* 0 = max, else some power of two */
 
     // TODO
 
@@ -65,6 +136,8 @@ struct assembly_hint
 
     // int num_cpus?
 };
+
+extern struct assembly_hint assembly_default_hint;
 
 /**
  * Data type representing a key used to export and import an assembly across
@@ -93,6 +166,8 @@ int assembly_teardown(asmid_t id);
 
 int assembly_num_vgpus(asmid_t id);
 
+int assembly_read_hint(struct assembly_hint *hint);
+
 /**
  * Implement an assembly on the cluster (construct the data paths). Must be
  * called on valid assembly IDs returned from assembly_request which have not
@@ -105,7 +180,6 @@ int assembly_num_vgpus(asmid_t id);
  *          zero        success
  */
 int assembly_map(asmid_t id);
-//int assembly_rpc(asmid_t id, int vgpu_id, struct cuda_packet *pkt);
 
 int assembly_vgpu_is_local(asmid_t id, int vgpu_id, bool *answer);
 

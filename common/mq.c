@@ -11,6 +11,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <assembly.h>
+
 #include <debug.h>
 
 #include <mq.h>
@@ -37,10 +39,10 @@ static struct mq_state daemon_mq;
 struct message
 {
     msg_event type;
+    pid_t pid; /* identify application process */
     union {
-        pid_t pid; /* to daemon ATTACH_CONNECT */
         bool allow; /* to pid ATTACH_CONNECT_ALLOW */
-        /* TODO to daemon ATTACH_REQUEST_ASSEMBLY */
+        struct assembly_hint hint; /* to daemon ATTACH_REQUEST_ASSEMBLY */
         assembly_key_uuid key; /* to pid ATTACH_ASSIGN_ASSEMBLY */
     } m; /* actual message data */
 };
@@ -155,7 +157,7 @@ process_messages(struct mq_state *state)
             return;
         }
 
-        state->notify(msg.type, msg.m.pid);
+        state->notify(msg.type, msg.pid, (void *)&msg.m);
     }
 }
 
@@ -223,7 +225,8 @@ try_again:
                 abort();
             } else {
                 if (tried_again) {
-                    fprintf(stderr, "> Failed to open MQ after removal. Aborting\n");
+                    fprintf(stderr, "> Failed to open MQ after removal."
+                            " Aborting\n");
                     abort();
                 }
                 tried_again = true;
@@ -355,7 +358,7 @@ int attach_send_connect(struct mq_state *recv, struct mq_state *send)
         return -1;
 
     msg.type = ATTACH_CONNECT;
-    msg.m.pid = getpid();
+    msg.pid = getpid();
     if (0 > send_message(send, &msg)) {
         fprintf(stderr, "Error sending message to daemon\n");
         return -1;
@@ -388,7 +391,7 @@ int attach_send_disconnect(struct mq_state *recv, struct mq_state *send)
         return -1;
 
     msg.type = ATTACH_DISCONNECT;
-    msg.m.pid = getpid();
+    msg.pid = getpid();
     if (0 > send_message(send, &msg)) {
         fprintf(stderr, "Error sending message to daemon\n");
         return -1;
@@ -399,9 +402,8 @@ int attach_send_disconnect(struct mq_state *recv, struct mq_state *send)
     return 0;
 }
 
-/* TODO convey assembly configuration file somewhere */
 int attach_send_request(struct mq_state *recv, struct mq_state *send,
-        assembly_key_uuid key)
+        struct assembly_hint *hint, assembly_key_uuid key)
 {
     struct message msg;
 
@@ -409,7 +411,8 @@ int attach_send_request(struct mq_state *recv, struct mq_state *send,
         return -1;
 
     msg.type = ATTACH_REQUEST_ASSEMBLY;
-    msg.m.pid = getpid(); /* so the runtime knows which return queue to use */
+    msg.pid = getpid(); /* so the runtime knows which return queue to use */
+    memcpy(&msg.m.hint, hint, sizeof(*hint));
     if (0 > send_message(send, &msg)) {
         fprintf(stderr, "Error sending message to daemon\n");
         return -1;

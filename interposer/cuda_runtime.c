@@ -104,6 +104,7 @@ static struct mq_state recv_mq, send_mq;
  * Assembly state
  */
 static asmid_t assm_id;
+static struct assembly_hint hint;
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
@@ -125,17 +126,32 @@ static int join_scheduler(void)
     memset(&recv_mq, 0, sizeof(recv_mq));
     memset(&send_mq, 0, sizeof(send_mq));
 
+    /* initialize interfaces */
     err = attach_init(&recv_mq, &send_mq);
     if (err < 0) {
         printd(DBG_ERROR, "Error attach_init: %d\n", err);
         return -1;
     }
+	err = assembly_runtime_init(NODE_TYPE_MAPPER, NULL);
+    if (err < 0) {
+        printd(DBG_ERROR, "Error initializing assembly state\n");
+        return -1;
+    }
+
+    /* tell daemon we wish to join */
     err = attach_send_connect(&recv_mq, &send_mq);
     if (err < 0) {
         printd(DBG_ERROR, "Error attach_send_connect: %d\n", err);
         return -1;
     }
-    err = attach_send_request(&recv_mq, &send_mq, assm_key);
+
+    /* read the hint then send it to the daemon */
+    err = assembly_read_hint(&hint);
+    if (err < 0) {
+        fprintf(stderr, "> Error reading hint file\n");
+        return -1;
+    }
+    err = attach_send_request(&recv_mq, &send_mq, &hint, assm_key);
     if (err < 0) {
         printd(DBG_ERROR, "Error attach_send_request: %d\n", err);
         return -1;
@@ -143,26 +159,21 @@ static int join_scheduler(void)
     uuid_unparse(assm_key, uuid_str);
     printd(DBG_INFO, "Importing assm key from scheduler: '%s'\n", uuid_str);
 
-	err = assembly_runtime_init(NODE_TYPE_MAPPER, NULL);
-    if (err < 0) {
-        printd(DBG_ERROR, "Error initializing assembly state\n");
-        return -1;
-    }
+    /* 'fix' the assembly on the network */
     err = assembly_import(&assm_id, assm_key);
     BUG(assm_id == INVALID_ASSEMBLY_ID);
     if (err < 0) {
         printd(DBG_ERROR, "Error assembly_import: %d\n", err);
         return -1;
     }
-
     err = assembly_map(assm_id);
     if (err < 0) {
         printd(DBG_ERROR, "Error assembly_map: %d\n", err);
         return -1;
     }
 
-    /* initialize the assembly/cuda_interface.c state AFTER the assembly
-     * interface has been initialized */
+    /* XXX initialize the assembly/cuda_interface.c state AFTER the assembly
+     * interface has been initialized AND an assembly has been imported */
     err = assm_cuda_init(assm_id);
     if (err < 0) {
         printd(DBG_ERROR, "Error initializing assembly cuda interface\n");
