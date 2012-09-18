@@ -339,6 +339,11 @@ remote_enable(void)
 	int err;
 	pid_t pid;
 
+    if (0 != access("remotesink", R_OK)) {
+        fprintf(stderr, "> remotesink not found in current directory\n");
+        return -1;
+    }
+
 	BUG(!internals);
 	pthread_mutex_lock(&internals->lock);
 	if (internals->rsink_pid > 0) {
@@ -514,6 +519,11 @@ node_minion_init(const char *main_ip)
 	internals->type = NODE_TYPE_MINION;
 	state = &internals->n.minion;
 
+	err = remote_enable();
+	if (err < 0) {
+        return -1;
+	}
+
 	// Connect to the main node
 	err = rpc_init_conn(&state->rpc_conn);
 	if (err < 0) {
@@ -558,11 +568,6 @@ node_minion_init(const char *main_ip)
 	}
 	free(p);
 	p = NULL;
-
-	err = remote_enable();
-	if (err < 0) {
-		goto fail;
-	}
 
 	return 0;
 
