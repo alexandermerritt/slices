@@ -40,10 +40,10 @@
  */
 struct global
 {
-	const struct assembly_hint *hint; //! Application-provided hints
-	const char *hostname; //! Host requesting an assembly
-	const struct list_head *nlist; //! Existing node_participants
-	const struct list_head *alist; //! Existing assemblies
+	struct assembly_hint *hint; //! Application-provided hints
+	char *hostname; //! Host requesting an assembly
+	struct list_head *nlist; //! Existing node_participants
+	struct list_head *alist; //! Existing assemblies
 };
 
 /**
@@ -52,7 +52,7 @@ struct global
 struct gpu
 {
 	int id; //! CUDA device ID
-	const struct node_participant *node; //! Points within global.nlist
+	struct node_participant *node; //! Points within global.nlist
 };
 
 /*-------------------------------------- FUNCTIONS ---------------------------*/
@@ -62,15 +62,47 @@ struct gpu
 // Find non-mapped assembly
 
 static inline bool
-vgpus_same_host(const struct vgpu_mapping *v1, const struct vgpu_mapping *v2)
+vgpus_same_host(struct vgpu_mapping *v1, struct vgpu_mapping *v2)
 {
 	return (strncmp(v1->hostname, v2->hostname, HOST_LEN) == 0);
 }
 
 static inline bool
-node_is_remote(const struct global *g, const struct node_participant *n)
+node_is_remote(struct global *g, struct node_participant *n)
 {
 	return (strncmp(g->hostname, n->hostname, HOST_LEN) != 0);
+}
+
+/* Search through all assemblies for the provided mpi_group to see if any remote
+ * vgpus within them map to the provided node. This search is to assist in
+ * avoiding mapping >1 remote vGPUs with the same mpi_group to the same node, as
+ * the remote sink is implemented as a single process.
+ */
+static bool
+remote_vgpu_mpi_group_conflict(struct global *global,
+        unsigned int mpi_group,
+        struct node_participant *node)
+{
+    struct assembly *assm;
+    struct vgpu_mapping *vgpu;
+    int id;
+    list_for_each_entry(assm, global->alist, link) {
+        if (assm->hint.mpi_group != mpi_group)
+            continue;
+        for (id = 0; id < assm->num_gpus; id++) {
+            vgpu = &assm->mappings[id];
+            if (!str_eq(vgpu->hostname, node->hostname, HOST_LEN))
+                continue; /* vgpu doesn't map to us */
+            if (vgpu->fixation == VGPU_LOCAL)
+                continue; /* only care about incoming vgpu mappings */
+            /* we found an assembly of the same MPI group which has a remote
+             * vGPU mapped to this node */
+            return true;
+        }
+    }
+    /* an exhaustive search of all assemblies of the provided MPI group shows
+     * none have remote vGPUs which map to this node */
+    return false;
 }
 
 /**
@@ -79,11 +111,11 @@ node_is_remote(const struct global *g, const struct node_participant *n)
  */
 static bool
 find_first_remote_node(
-		const struct global *global,
-		const struct node_participant **remote_node)
+		struct global *global,
+		struct node_participant **remote_node)
 {
 	bool node_found = false;
-	const struct node_participant *node = NULL;
+	struct node_participant *node = NULL;
 	for_each_node(node, global->nlist) {
 		if (node_is_remote(global, node)) {
 			node_found = true;
@@ -96,7 +128,6 @@ find_first_remote_node(
 	return true;
 }
 
-#if 0 // not used at the moment
 /**
  * Locate the first remote node we find in the cluster, relative
  * to whom is requesting the assembly. We assume the node list is not empty, and
@@ -106,16 +137,39 @@ find_first_remote_node(
  * 			false	No gpus are remote with respect to the requester
  */
 static bool
-find_first_remote_gpu(const struct global *global, struct gpu *gpu)
+find_first_remote_gpu(struct global *global, struct gpu *gpu,
+        unsigned int mpi_group)
 {
-	const struct node_participant *node = NULL;
-	if (!find_first_remote_node(global, &node))
-		return false;
-	gpu->id = 0; // first gpu in 'node'
-	gpu->node = node;
+	struct node_participant *node = NULL;
+
+	for_each_node(node, global->nlist) {
+		if (!node_is_remote(global, node))
+            continue;
+
+        /* if this is a multi-process program .. */
+        if (mpi_group != 0) {
+            printd(DBG_DEBUG, "this is a multi-process program\n");
+            /* .. additionally skip nodes which have remote vgpus mapped to it
+             * by other processes of the same program */
+            if (remote_vgpu_mpi_group_conflict(global, mpi_group, node)) {
+                printd(DBG_DEBUG, "grp %u has remote vgpu which"
+                       " maps to %s, skipping node\n",
+                        mpi_group, node->hostname);
+                continue;
+            }
+        }
+        goto found;
+    }
+
+    printd(DBG_INFO, "No node found\n");
+    return false; /* nerrrrp! */
+
+found:
+    printd(DBG_INFO, "Found 0@%s\n", node->hostname);
+    gpu->id = 0;
+    gpu->node = node;
 	return true;
 }
-#endif
 
 /**
  * Looks for N gpus on a single remote node. If the first remote node found does
@@ -126,10 +180,10 @@ find_first_remote_gpu(const struct global *global, struct gpu *gpu)
  * struct gpu able to store at least hint.num_gpus.
  */
 static bool
-find_first_N_remote_gpus(const struct global *global, struct gpu *gpus)
+find_first_N_remote_gpus(struct global *global, struct gpu *gpus)
 {
 	int N = global->hint->num_gpus;
-	const struct node_participant *node;
+	struct node_participant *node;
 	if (!find_first_remote_node(global, &node))
 		return false;
 	if (node->num_gpus < N)
@@ -144,11 +198,11 @@ find_first_N_remote_gpus(const struct global *global, struct gpu *gpus)
 
 static void
 find_local_node(
-		const struct global *global,
-		const struct node_participant **local_node)
+		struct global *global,
+		struct node_participant **local_node)
 {
 	bool node_found = false;
-	const struct node_participant *node = NULL;
+	struct node_participant *node = NULL;
 	for_each_node(node, global->nlist) {
 		if (!node_is_remote(global, node)) {
 			node_found = true;
@@ -164,23 +218,95 @@ find_local_node(
  * exist and to contain 1+ gpus.
  */
 static void
-find_first_local_gpu(const struct global *global, struct gpu *gpu)
+find_first_local_gpu(struct global *global, struct gpu *gpu)
 {
-	const struct node_participant *node = NULL;
+	struct node_participant *node = NULL;
 	find_local_node(global, &node);
 	gpu->id = 0;
 	gpu->node = node;
 }
 
+static inline bool
+find_unmapped_local_gpu(struct global *global, struct gpu *gpu)
+{
+	struct node_participant *node;
+    int id;
+
+	find_local_node(global, &node);
+
+    for (id = 0; id < node->num_gpus; id++)
+        if (node->gpu_mapped[id] == 0)
+            break;
+
+    if (id >= node->num_gpus)
+        return false; /* nerp! */
+
+    gpu->id = id;
+    gpu->node = node;
+
+    return true; /* yerp! */
+}
+
+/* mpi_group used to avoid creating >1 remote vGPUs to the same node. 0 means
+ * this restriction is ignored (non-MPI application). */
+static inline bool
+find_unmapped_remote_gpu(struct global *global, struct gpu *gpu,
+        unsigned int mpi_group)
+{
+    struct node_participant *node;
+    int id;
+
+    for_each_node(node, global->nlist) {
+        if (!node_is_remote(global, node))
+            continue;
+
+        /* if this is a multi-process program .. */
+        if (mpi_group != 0) {
+            printd(DBG_DEBUG, "this is a multi-process program\n");
+            /* .. additionally skip nodes which have remote vgpus mapped to it
+             * by other processes of the same program */
+            if (remote_vgpu_mpi_group_conflict(global, mpi_group, node)) {
+                printd(DBG_DEBUG, "grp %u has remote vgpu which"
+                        " maps to %s, skipping node\n",
+                        mpi_group, node->hostname);
+                continue;
+            }
+        }
+
+        /* locate a gpu on this node which has nothing mapped to it */
+        for (id = 0; id < node->num_gpus; id++)
+            if (node->gpu_mapped[id] == 0)
+                goto found;
+        printd(DBG_DEBUG, "node %s has no available GPUs\n", node->hostname);
+    }
+
+    printd(DBG_INFO, "No node found\n");
+    return false; /* nerrrrp! */
+
+found:
+    printd(DBG_INFO, "Found %d@%s\n", id, node->hostname);
+    gpu->id = id;
+    gpu->node = node;
+    return true;
+}
+
 /** May return false if request is too large. */
 static bool
-find_first_N_local_gpus(const struct global *global, struct gpu *gpus)
+find_first_N_local_gpus(struct global *global, struct gpu *gpus)
 {
 	int N = global->hint->num_gpus;
-	const struct node_participant *node;
+	struct node_participant *node;
 	find_local_node(global, &node);
-	if (node->num_gpus < N)
+    if (N == 0) {
+        printd(DBG_ERROR, "requesting 0 gpus?\n");
+        return false;
+    }
+	if (node->num_gpus < N) {
+        printd(DBG_WARNING, "node %s doesn't have enough GPUS (%d)"
+                " for request of %d\n",
+                node->hostname, node->num_gpus, N);
 		return false;
+    }
 	int vgpu_id = 0, gpu;
 	for (gpu = 0; gpu < N; gpu++) {
 		gpus[gpu].id = vgpu_id++;
@@ -204,20 +330,23 @@ fix_assm_size(int size)
 // caller is responsible for setting vgpu_id, as it depends on the assembly
 // composition
 static void
-set_vgpu_mapping(const struct global *global,
-		const struct gpu *gpu, struct vgpu_mapping *vgpu)
+set_vgpu_mapping(struct global *global,
+		struct gpu *gpu, struct vgpu_mapping *vgpu)
 {
-	const struct node_participant *node = gpu->node;
+	struct node_participant *node = gpu->node;
 	int nic;
 	vgpu->fixation =
 		(node_is_remote(global, node) ? VGPU_REMOTE : VGPU_LOCAL);
 	vgpu->pgpu_id = gpu->id;
+    node->gpu_mapped[gpu->id]++;
+    printd(DBG_DEBUG, "%d@%s has %d mappings\n", gpu->id, node->hostname,
+            node->gpu_mapped[gpu->id]);
 	strncpy(vgpu->hostname, node->hostname, HOST_LEN);
 	// find the NIC specified in the hint
 	// TODO find a better way to store this information
 	nic = 0;
 	enum hint_nic_type type = global->hint->nic_type;
-	const char *nic_str_cmp;
+	char *nic_str_cmp;
 	if (type == HINT_USE_ETH)
 		nic_str_cmp = HINT_ETH_STR;
 	else if (type == HINT_USE_IB)
@@ -227,7 +356,8 @@ set_vgpu_mapping(const struct global *global,
 	while (nic < PARTICIPANT_MAX_NICS || nic < (node->num_nics)) {
 		if (strncmp(node->nic_name[nic], nic_str_cmp, strlen(nic_str_cmp)) == 0) {
 			strncpy(vgpu->ip, node->ip[nic], HOST_LEN);
-			printd(DBG_DEBUG, "using %s on %s\n", vgpu->ip, node->hostname);
+			printd(DBG_DEBUG, "using pGPU %d on %s\n",
+                    vgpu->pgpu_id, node->hostname);
 			break;
 		}
 		nic++;
@@ -242,10 +372,10 @@ set_vgpu_mapping(const struct global *global,
 //! Entry point to this file, invoked from assembly.c::__compose_assembly.
 struct assembly *
 __do_compose_assembly(
-		const struct assembly_hint *hint,
-		const char *hostname,
-		const struct list_head *node_list,
-		const struct list_head *assembly_list)
+		struct assembly_hint *hint,
+		char *hostname,
+		struct list_head *node_list,
+		struct list_head *assembly_list)
 {
 	struct global global;
 	struct assembly *assm = NULL;
@@ -273,22 +403,43 @@ __do_compose_assembly(
 	global.alist = assembly_list;
 	gpus_granted = hint->num_gpus;
 
-	// NOTE: If no GPU can be found remotely, this function should always
-	// default to returning local GPUs in their place.
-
 	gpus = calloc(hint->num_gpus, sizeof(*gpus));
 	if (!gpus) goto fail;
 
-	if (!find_first_N_remote_gpus(&global, gpus)) {
-		printd(DBG_INFO, "No remote nodes available, or requested too many\n");
-		if (!find_first_N_local_gpus(&global, gpus)) {
-			fprintf(stderr, "Request for %d GPUs too large,"
-					" downgrading to 1 local vGPU\n",
-					hint->num_gpus);
-			find_first_local_gpu(&global, &gpus[0]);
-			gpus_granted = 1;
-		}
-	}
+    switch (hint->policy) {
+
+        case HINT_ENUM_POLICY_LOCALFIRST:
+        {
+            gpus_granted = 1;
+            if (find_unmapped_local_gpu(&global, &gpus[0]))
+                break;
+            printd(DBG_INFO, "No unmapped local GPUs available, trying remote\n");
+            if (find_unmapped_remote_gpu(&global, &gpus[0], hint->mpi_group))
+                break;
+            printd(DBG_INFO, "No unmapped remote GPUs available, assigning local\n");
+            find_first_local_gpu(&global, &gpus[0]); /* always succeeds */
+        }
+        break;
+
+        case HINT_ENUM_POLICY_REMOTEONLY:
+        {
+            gpus_granted = 1;
+            if (find_unmapped_remote_gpu(&global, &gpus[0], hint->mpi_group))
+                break;
+            printd(DBG_INFO, "No _unmapped_ remote GPUs available,"
+                    " trying any remote GPU\n");
+            if (find_first_remote_gpu(&global, &gpus[0], hint->mpi_group))
+                break;
+            /* TODO hm.. nothing available remotely.. avoid catastrophic failure
+            * by assigning a local gpu, but warn */
+            printd(DBG_INFO, "No _remote_ GPUs available, assigning local\n");
+            find_first_local_gpu(&global, &gpus[0]);
+        }
+        break;
+
+        default:
+            BUG(1);
+    }
 
 	// Determine assembly size
 	assm->num_gpus = gpus_granted;

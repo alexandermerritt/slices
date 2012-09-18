@@ -284,7 +284,7 @@ struct assembly* __do_compose_assembly(const struct assembly_hint*, const char*,
  *
  * This function assumes the caller holds any required locks.
  */
-static inline struct assembly *
+static struct assembly *
 __compose_assembly(const struct assembly_hint *hint, const char *hostname)
 {
 	struct assembly *assm = 
@@ -311,6 +311,24 @@ fail:
 	if (assm)
 		free(assm);
 	return NULL;
+}
+
+/* just decrement the pGPU counters for now */
+/* internals lock should be held */
+/* TODO maybe this code should be in assemble.c? */
+static void
+__decompose_assembly(struct assembly *assm)
+{
+    int vgpu_id;
+	struct node_participant *node = NULL;
+    struct vgpu_mapping *vgpu = NULL;
+    for (vgpu_id = 0; vgpu_id < assm->num_gpus; vgpu_id++) {
+        vgpu = &assm->mappings[vgpu_id];
+        list_for_each_entry(node, &internals->n.main.participants, link)
+            /* find node vgpu maps to */
+            if (str_eq(node->hostname, vgpu->hostname, HOST_LEN))
+                node->gpu_mapped[vgpu->pgpu_id]--;
+    }
 }
 
 // spawn the remotesink process that listens for and executes CUDA RPCs, acting
@@ -957,10 +975,15 @@ int assembly_teardown(asmid_t id)
 			goto fail;
 		}
 	}
+    else if (internals->type == NODE_TYPE_MAIN) {
+        __decompose_assembly(assm);
+    }
+
 	list_del(&assm->link);
 	//free(assm->cubins); // XXX this segvs
 	assm->cubins = NULL;
 	free(assm);
+
 	pthread_mutex_unlock(&internals->lock);
 	return 0;
 fail:

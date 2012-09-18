@@ -18,6 +18,8 @@
 
 #define ASSEMBLY_SHMGRP_KEY "cudarpc"
 
+#define MAX_GPUS_PER_NODE   8
+
 /**
  * Distinguish between the centralized location where state of all assemblies is
  * located, or an instance on another node (minion) that forwards RPCs to the
@@ -69,6 +71,59 @@ enum hint_policy
 /* set this env var to the full path of a hint file for it to be read */
 #define HINT_ENV_VAR                    "ASSEMBLY_HINT"
 
+/**
+ * Structure used by clients/apps/etc to specify how they want their assembly
+ * cooked. Thus, 'hint'.
+ */
+struct assembly_hint
+{
+    int num_gpus; /* XXX not used; vGPUs per process */
+    enum hint_nic_type nic_type; /* XXX not used; network for remote vGPU */
+
+    /* XXX What does this field assist with? I forgot already */
+    unsigned int mpi_group; /* 0 = not mpi, else some number > 0 */
+
+    enum hint_policy policy;
+    size_t batch_size; /* 0 = max, else some power of two */
+
+    // TODO
+
+    // Attribute descriptors
+    // Per GPU: ECC, mem size, mem bandwidth, mem clock, parallelization
+    // Per assembly: throughput, latency, capacity
+
+    // int num_cpus?
+};
+
+extern struct assembly_hint assembly_default_hint;
+
+/**
+ * Data type representing a key used to export and import an assembly across
+ * processes.
+ */
+typedef uuid_t assembly_key_uuid;
+
+/*-------------------------------------- FUNCTIONS ---------------------------*/
+
+static inline
+const char *node_type_str(enum node_type t)
+{
+    switch (t) {
+        case NODE_TYPE_MAIN: return "NODE_TYPE_MAIN";
+        case NODE_TYPE_MINION: return "NODE_TYPE_MINION";
+        case NODE_TYPE_MAPPER: return "NODE_TYPE_MAPPER";
+        default: return "NODE_TYPE Unknown or Invalid";
+    }
+}
+
+/* because i hate string operations in C
+ * why can't we just do string == string and be done with this nonsense */
+static inline bool
+str_eq(const char *a, const char *b, size_t len)
+{
+    return 0 == strncmp(a, b, len);
+}
+
 static inline enum hint_nic_type
 assembly_hint_nic2enum(const char *nic)
 {
@@ -112,49 +167,6 @@ assembly_hint_enum2policy(enum hint_policy p)
             return HINT_FIELD_POLICY_REMOTEONLY;
         default:
             return "unknown";
-    }
-}
-
-/**
- * Structure used by clients/apps/etc to specify how they want their assembly
- * cooked. Thus, 'hint'.
- */
-struct assembly_hint
-{
-    int num_gpus; /* XXX not used; vGPUs per process */
-    enum hint_nic_type nic_type; /* XXX not used; network for remote vGPU */
-
-    unsigned int mpi_group; /* 0 = not mpi, else some number > 0 */
-    enum hint_policy policy;
-    size_t batch_size; /* 0 = max, else some power of two */
-
-    // TODO
-
-    // Attribute descriptors
-    // Per GPU: ECC, mem size, mem bandwidth, mem clock, parallelization
-    // Per assembly: throughput, latency, capacity
-
-    // int num_cpus?
-};
-
-extern struct assembly_hint assembly_default_hint;
-
-/**
- * Data type representing a key used to export and import an assembly across
- * processes.
- */
-typedef uuid_t assembly_key_uuid;
-
-/*-------------------------------------- FUNCTIONS ---------------------------*/
-
-static inline
-const char *node_type_str(enum node_type t)
-{
-    switch (t) {
-        case NODE_TYPE_MAIN: return "NODE_TYPE_MAIN";
-        case NODE_TYPE_MINION: return "NODE_TYPE_MINION";
-        case NODE_TYPE_MAPPER: return "NODE_TYPE_MAPPER";
-        default: return "NODE_TYPE Unknown or Invalid";
     }
 }
 

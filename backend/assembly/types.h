@@ -107,6 +107,7 @@ struct node_participant
 
 	// GPU information
 	int num_gpus;
+    int gpu_mapped[MAX_GPUS_PER_NODE]; /* idx is true if a vgpu has mapped that gpu */
 	struct cudaDeviceProp dev_prop[PARTICIPANT_MAX_GPUS];
 	int driverVersion, runtimeVersion;
 };
