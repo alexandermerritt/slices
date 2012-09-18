@@ -339,7 +339,7 @@ set_vgpu_mapping(struct global *global,
 		(node_is_remote(global, node) ? VGPU_REMOTE : VGPU_LOCAL);
 	vgpu->pgpu_id = gpu->id;
     node->gpu_mapped[gpu->id]++;
-    printd(DBG_DEBUG, "%d@%s has %d mappings\n", gpu->id, node->hostname,
+    printd(DBG_DEBUG, "%d@%s now has %d mappings\n", gpu->id, node->hostname,
             node->gpu_mapped[gpu->id]);
 	strncpy(vgpu->hostname, node->hostname, HOST_LEN);
 	// find the NIC specified in the hint
