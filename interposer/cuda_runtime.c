@@ -166,6 +166,7 @@ static int join_scheduler(void)
         printd(DBG_ERROR, "Error assembly_import: %d\n", err);
         return -1;
     }
+    assembly_print(assm_id);
     err = assembly_map(assm_id);
     if (err < 0) {
         printd(DBG_ERROR, "Error assembly_map: %d\n", err);

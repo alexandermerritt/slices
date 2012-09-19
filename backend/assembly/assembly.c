@@ -915,7 +915,8 @@ fail:
 	return -1;
 }
 
-asmid_t assembly_request(const struct assembly_hint *hint)
+/* pid = process requesting the assembly (the app, not runtime.c) */
+asmid_t assembly_request(const struct assembly_hint *hint, pid_t pid)
 {
 	int err;
 	struct assembly *assm = NULL;
@@ -947,6 +948,8 @@ asmid_t assembly_request(const struct assembly_hint *hint)
 		}
 		assm = new_assm;
 	}
+
+    assm->pid = pid;
 
 	list_add(&assm->link, &internals->assembly_list);
 	pthread_mutex_unlock(&internals->lock);
@@ -1010,24 +1013,25 @@ void assembly_print(asmid_t id)
 	}
 	pthread_mutex_unlock(&internals->lock);
 
-	printf("Assembly --------\n");
-	printf("  ID           %04lu\n", assm->id);
-	printf("  vGPUs        %04d\n", assm->num_gpus);
+	printf("> Assembly --------\n");
+	printf(">   ID      %04lu\n", assm->id);
+	printf(">   PID     %04d\n", assm->pid);
+	printf(">   vGPUs   %04d\n", assm->num_gpus);
 	for (dev = 0; dev < assm->num_gpus; dev++) {
-	printf("         %02d maps to %d@%s\n",
+	printf(">       %02d maps to %d@%s\n",
 				assm->mappings[dev].vgpu_id,
 				assm->mappings[dev].pgpu_id,
 				assm->mappings[dev].hostname);
 	}
-    printf("  Hint\n");
-    printf("    vGPUs      %04d\n", assm->hint.num_gpus);
+    printf(">   Hint\n");
+    printf(">       vGPUs      %04d\n", assm->hint.num_gpus);
     if (assm->hint.mpi_group == 0)
-        printf("    MPI        n/a\n");
+        printf(">       MPI        n/a\n");
     else
-        printf("    MPI        %04d\n", assm->hint.mpi_group);
-    printf("    Policy     %s\n",
+        printf(">       MPI        %04d\n", assm->hint.mpi_group);
+    printf(">       Policy     %s\n",
             assembly_hint_enum2policy(assm->hint.policy));
-    printf("    BatchSize  %04lu\n", assm->hint.batch_size);
+    printf(">       BatchSize  %04lu\n", assm->hint.batch_size);
 }
 
 // establish remote data paths, including vgpu ops

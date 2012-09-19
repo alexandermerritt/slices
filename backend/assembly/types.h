@@ -70,6 +70,7 @@ struct assembly
 {
 	struct list_head link;
 	asmid_t id;
+    pid_t pid; /* of process receiving this assembly */
 	int num_gpus;
 	struct vgpu_mapping mappings[MAX_VGPUS];
 	int driverVersion, runtimeVersion;

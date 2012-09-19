@@ -173,7 +173,7 @@ assembly_hint_enum2policy(enum hint_policy p)
 int assembly_runtime_init(enum node_type type, const char *main_ip);
 int assembly_runtime_shutdown(void);
 
-asmid_t assembly_request(const struct assembly_hint *hint);
+asmid_t assembly_request(const struct assembly_hint *hint, pid_t pid);
 int assembly_teardown(asmid_t id);
 
 int assembly_num_vgpus(asmid_t id);

@@ -143,8 +143,7 @@ static void msg_received(msg_event e, pid_t pid, void *data)
         char uuid_str[64];
         struct assembly_hint *hint = data;
 
-        asmid = assembly_request(hint);
-        assembly_print(asmid);
+        asmid = assembly_request(hint, pid);
 
         /* hand off to interposer for mapping */
         err = assembly_export(asmid, key); /* modifies 'key' */
