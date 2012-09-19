@@ -574,6 +574,7 @@ node_minion_init(const char *main_ip)
 fail:
 	rpc_close(&state->rpc_conn);
 	if (p) free(p);
+    remote_disable();
 	return exit_errno;
 }
 
