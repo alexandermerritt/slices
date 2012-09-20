@@ -1033,6 +1033,8 @@ void assembly_print(asmid_t id)
     printf(">       Policy     %s\n",
             assembly_hint_enum2policy(assm->hint.policy));
     printf(">       BatchSize  %04lu\n", assm->hint.batch_size);
+    printf(">       NIC        %s\n",
+            assembly_hint_enum2nic(assm->hint.nic_type));
 }
 
 // establish remote data paths, including vgpu ops

@@ -140,6 +140,20 @@ assembly_hint_nic2enum(const char *nic)
         return HINT_ENUM_POLICY_INVALID;
 }
 
+static inline const char *
+assembly_hint_enum2nic(enum hint_nic_type t)
+{
+    switch(t)
+    {
+        case HINT_USE_ETH:
+            return HINT_ETH_STR;
+        case HINT_USE_IB:
+            return HINT_IB_STR;
+        default:
+            return "unknown";
+    }
+}
+
 static inline enum hint_policy
 assembly_hint_policy2enum(const char *policy)
 {
