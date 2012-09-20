@@ -57,7 +57,7 @@ struct assembly_hint assembly_default_hint =
 {
     .num_gpus = 1, /* per process */
 #if defined(NIC_SDP)
-    .nic_type = HINT_USE_SDP,
+    .nic_type = HINT_USE_IB,
 #elif defined(NIC_ETHERNET)
     .nic_type = HINT_USE_ETH,
 #else
@@ -711,7 +711,7 @@ __do_read_hint(const char *path, struct assembly_hint *hint)
     hint->num_gpus = 1; /* TODO don't do this once we read in num_vgpus */
 
 #if defined(NIC_SDP)
-    hint->nic_type = HINT_USE_SDP;
+    hint->nic_type = HINT_USE_IB;
 #elif defined(NIC_ETHERNET)
     hint->nic_type = HINT_USE_ETH;
 #else
