@@ -129,6 +129,12 @@ static void msg_received(msg_event e, pid_t pid, void *data)
                 printd(DBG_ERROR, "fail assembly_teardown asmid %lu\n",
                         app->asmid);
             }
+
+            /* close app's mqueue so it can unlink */
+            err = attach_dismiss(&app->mq);
+            if (err < 0)
+                fprintf(stderr, "Error dismissing attachment to PID %d\n", pid);
+
             free(app);
         }
         else
@@ -316,6 +322,12 @@ int main(int argc, char *argv[])
 	gethostname((log + strlen(log)), HOST_NAME_MAX);
 	strcat(log, ".log");
 
+    /* clean stray message queues so /dev/mqueue doesn't overflow */
+    if (0 > attach_clean()) {
+        fprintf(stderr, "> Error cleaning stray MQs\n");
+        return -1;
+    }
+
 	if (0 > daemonize())
 		return -1;
 
@@ -333,5 +345,6 @@ int main(int argc, char *argv[])
 	sigsuspend(&mask);
 
 	shutdown_runtime();
+    attach_clean();
 	return 0;
 }

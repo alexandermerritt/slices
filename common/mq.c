@@ -119,6 +119,19 @@ open_other_mq(struct mq_state *state)
     return 0;
 }
 
+static int
+close_other_mq(struct mq_state *state)
+{
+    int err;
+    printd(DBG_INFO, "mq name '%s'\n", state->name);
+    err = mq_close(state->id);
+    if (err < 0) {
+        perror("mq_close on departing process");
+        return -1;
+    }
+    return 0;
+}
+
 /* called by the mqueue layer on incoming messages */
 static void
 process_messages(struct mq_state *state)
@@ -193,6 +206,54 @@ fail:
 /*
  * daemon functions
  */
+
+/* Searches for all MQs previous failed launches may have left behind and
+ * unlinks them. Do NOT call this function AFTER initializing the MQ interface
+ * as it will remove the daemon's MQ. */
+int attach_clean(void)
+{
+    char pidmax_path[] = "/proc/sys/kernel/pid_max";
+    int maxpid;
+    FILE *fptr = NULL;
+    char line[32]; /* XXX 32 chosen arbitrarily */
+
+    int pid, num_cleaned = 0;
+    char name[MAX_LEN];
+
+    /* obtain system setting for maximum PID */
+    if (0 > access(pidmax_path, R_OK))
+        goto fail;
+    fptr = fopen(pidmax_path, "r");
+    if (!fptr)
+        goto fail;
+    if (NULL == fgets(line, 32, fptr))
+        goto fail_close;
+    fclose(fptr);
+    fptr = NULL;
+    maxpid = atoi(line);
+    printd(DBG_INFO, "maxpid=%d\n", maxpid);
+
+    /* 1 is init, MQ will never exist */
+    for (pid = 2; pid <= maxpid; pid++) {
+        snprintf(name, MAX_LEN, "%s%d", ATTACH_NAME_PREFIX, pid);
+        if (0 > mq_unlink(name)) {
+            if (errno == ENOENT)
+                continue;
+            fprintf(stderr, "> Error unlinking MQ %s: %s\n",
+                    name, strerror(errno));
+        }
+        num_cleaned++;
+    }
+    printf("> Cleaned %d stray message queues\n", num_cleaned);
+
+    return 0;
+
+fail_close:
+    if (fptr)
+        fclose(fptr);
+fail:
+    return -1;
+}
 
 int attach_open(msg_recv_callback notify)
 {
@@ -269,6 +330,12 @@ int attach_allow(struct mq_state *state, pid_t pid)
     if ( !state ) return -1;
     state->pid = pid;
     return open_other_mq(state);
+}
+
+int attach_dismiss(struct mq_state *state)
+{
+    if (!state) return -1;
+    return close_other_mq(state);
 }
 
 int attach_send_allow(struct mq_state *state, bool allow)

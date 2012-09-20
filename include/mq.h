@@ -51,9 +51,11 @@ struct mq_state
 };
 
 /* daemon functions */
+int attach_clean(void);
 int attach_open(msg_recv_callback notify);
 int attach_close(void);
 int attach_allow(struct mq_state *state, pid_t pid);
+int attach_dismiss(struct mq_state *state);
 int attach_send_allow(struct mq_state *state, bool allow);
 int attach_send_assembly(struct mq_state *state, assembly_key_uuid key);
 
