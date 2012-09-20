@@ -23,13 +23,14 @@ __email__ = "merritt.alex@gatech.edu"
 NODE_NAME = commands.getoutput('uname -n').split('.')[0]
 ENV = {}
 INSTALL_DIR = os.getcwd() + '/build'
+#INSTALL_DIR = os.environ['HOME'] + '/exp/' # keeneland
 
 #
 # Configure CUDA location
 #
 cuda_root=''
 if NODE_NAME.startswith('kid'):
-	cuda_root = '/sw/keeneland/cuda/4.1/linux_binary'
+	cuda_root = '/sw/keeneland/cuda/.3.2/linux_binary'
 	NODE_NAME = 'kid'
 elif NODE_NAME == 'prost':
 	cuda_root = '/opt/cuda/'
@@ -54,7 +55,7 @@ args['timing'] = ARGUMENTS.get('timing', 0)
 # XXX DO NOT run multi-threaded codes with timing_native
 args['timing_native'] = ARGUMENTS.get('timing_native', 0)
 args['network'] = ARGUMENTS.get('network', 'eth')
-args['daemon'] = ARGUMENTS.get('daemon', 1)
+args['daemon'] = ARGUMENTS.get('daemon', 0)
 
 #
 # Configure environment
