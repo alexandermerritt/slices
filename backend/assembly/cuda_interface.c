@@ -66,7 +66,7 @@ static struct tinfo *__lookup(pthread_t tid)
         ret->valid = true;
         ret->tid = tid;
         /* TODO only allocate if vgpu thread picks is remote */
-        ret->buffer = malloc(128UL << 20);
+        ret->buffer = malloc(768 << 20);
         ret->vgpu = &assm->mappings[0]; /* default 0 until setDevice called */
         if (!ret->buffer) {
             fprintf(stderr, "Out of memory\n");
@@ -115,8 +115,6 @@ int assm_cuda_tini(void)
 /*-------------------------------------- INTERPOSING API ---------------------*/
 
 /* lots of boilerplate code below here, tried to keep it short */
-
-/* TODO cudaSetDevice must update is_local on tinfo */
 
 /*
  * Preprocessor magic to reduce typing
@@ -212,6 +210,8 @@ cudaError_t assm_cudaGetDeviceProperties(struct cudaDeviceProp *prop,int device,
     init_buf(&buf, tinfo);
     if (device < 0 || device >= assm->num_gpus)
         return cudaErrorInvalidDevice;
+    /* don't need to translate vgpu to pgpu ID since the index into mappings is
+     * virtual IDs already */
     memcpy(prop, &assm->mappings[device].cudaDevProp, sizeof(*prop));
     TIMER_END(t, lat->lib.wait); /* XXX ?? */
     printd(DBG_DEBUG, "name=%s\n", assm->mappings[device].cudaDevProp.name);
@@ -224,12 +224,15 @@ cudaError_t assm_cudaSetDevice(int device, struct rpc_latencies *lat)
     if (device >= assm->num_gpus)
         return cudaErrorInvalidDevice;
     tinfo->vgpu = &assm->mappings[device];
+    /* translate vgpu device ID to physical ID */
+    device = tinfo->vgpu->pgpu_id;
     /* let it pass through so the driver makes the association */
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
         cerr = bypass.cudaSetDevice(device);
         TIMER_END(t, lat->lib.wait);
     } else {
         init_buf(&buf, tinfo);
+        /* XXX should we send a flushing call to clear the batch queue here? */
         pack_cudaSetDevice(buf, device);
         TIMER_END(t, lat->lib.setup);
         TIMER_START(t);
@@ -248,7 +251,7 @@ cudaError_t assm_cudaSetDeviceFlags(unsigned int flags, struct rpc_latencies *la
         cerr = bypass.cudaSetDeviceFlags(flags);
         TIMER_END(t, lat->lib.wait);
     } else {
-        init_buf(buf, tinfo);
+        init_buf(&buf, tinfo);
         pack_cudaSetDeviceFlags(buf, flags);
         TIMER_END(t, lat->lib.setup);
         TIMER_START(t);
@@ -264,6 +267,9 @@ cudaError_t assm_cudaSetValidDevices(int *device_arr, int len,
         struct rpc_latencies *lat)
 {
     FUNC_SETUP_CERR;
+
+    /* XXX This function is ignored from within cuda_runtime.c */
+
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
         cerr = bypass.cudaSetValidDevices(device_arr, len);
         TIMER_END(t, lat->lib.wait);
@@ -443,18 +449,26 @@ cudaError_t assm_cudaFreeHost(void *ptr, struct rpc_latencies *lat)
         cerr = bypass.cudaFreeHost(ptr);
         TIMER_END(t, lat->lib.wait);
     } else {
-        init_buf(&buf, tinfo);
-        pack_cudaFreeHost(buf, ptr);
+        buf = NULL; /* hush compiler, hush */
         TIMER_END(t, lat->lib.setup);
         TIMER_START(t);
-        rpc_ops.freeHost(buf, NULL, rpc(tinfo));
+        if (ptr) free(ptr);
         TIMER_END(t, lat->lib.wait);
-        cerr = cpkt_ret_err(buf);
+        cerr = cudaSuccess;
         LAT_UPDATE(lat, buf);
     }
     return cerr;
 }
 
+/* This function, according to the NVIDIA CUDA API specifications, seems to just
+ * be a combined malloc+mlock that is additionally made visible to the CUDA
+ * runtime and NVIDIA driver to optimize memory movements carried out in
+ * subsequent calls to cudaMemcpy. There's no point in forwarding this function:
+ * cudaHostAlloc returns an application virtual address, it is useless in the
+ * application if RPC'd.
+ *
+ * We ignore flags for now, it only specifies performance not correctness.
+ */
 cudaError_t assm_cudaHostAlloc(void **pHost, size_t size, unsigned int flags,
         struct rpc_latencies *lat)
 {
@@ -463,9 +477,15 @@ cudaError_t assm_cudaHostAlloc(void **pHost, size_t size, unsigned int flags,
         cerr = bypass.cudaHostAlloc(pHost, size, flags);
         TIMER_END(t, lat->lib.wait);
     } else {
-        fprintf(stderr, "> Error: cudaHostAlloc on remote vGPU.\n");
-        abort();
-        init_buf(&buf, tinfo);
+        buf = NULL; /* hush compiler, hush */
+        *pHost = malloc(size);
+        if (!*pHost) {
+            fprintf(stderr, "> Out of memory: %s\n", __func__);
+            return cudaErrorMemoryAllocation;
+        }
+        TIMER_END(t, lat->lib.wait);
+        cerr = cudaSuccess;
+        LAT_UPDATE(lat, buf);
     }
     return cerr;
 }

@@ -130,11 +130,13 @@ static int join_scheduler(void)
     err = attach_init(&recv_mq, &send_mq);
     if (err < 0) {
         printd(DBG_ERROR, "Error attach_init: %d\n", err);
+        fprintf(stderr, "Error attach_init: %d\n", err);
         return -1;
     }
 	err = assembly_runtime_init(NODE_TYPE_MAPPER, NULL);
     if (err < 0) {
         printd(DBG_ERROR, "Error initializing assembly state\n");
+        fprintf(stderr, "Error initializing assembly state\n");
         return -1;
     }
 
@@ -142,6 +144,7 @@ static int join_scheduler(void)
     err = attach_send_connect(&recv_mq, &send_mq);
     if (err < 0) {
         printd(DBG_ERROR, "Error attach_send_connect: %d\n", err);
+        fprintf(stderr, "Error attach_send_connect: %d\n", err);
         return -1;
     }
 
@@ -154,6 +157,7 @@ static int join_scheduler(void)
     err = attach_send_request(&recv_mq, &send_mq, &hint, assm_key);
     if (err < 0) {
         printd(DBG_ERROR, "Error attach_send_request: %d\n", err);
+        fprintf(stderr, "Error attach_send_request: %d\n", err);
         return -1;
     }
     uuid_unparse(assm_key, uuid_str);
@@ -164,12 +168,14 @@ static int join_scheduler(void)
     BUG(assm_id == INVALID_ASSEMBLY_ID);
     if (err < 0) {
         printd(DBG_ERROR, "Error assembly_import: %d\n", err);
+        fprintf(stderr, "Error assembly_import: %d\n", err);
         return -1;
     }
     assembly_print(assm_id);
     err = assembly_map(assm_id);
     if (err < 0) {
         printd(DBG_ERROR, "Error assembly_map: %d\n", err);
+        fprintf(stderr, "Error assembly_map: %d\n", err);
         return -1;
     }
 
@@ -178,6 +184,7 @@ static int join_scheduler(void)
     err = assm_cuda_init(assm_id);
     if (err < 0) {
         printd(DBG_ERROR, "Error initializing assembly cuda interface\n");
+        fprintf(stderr, "Error initializing assembly cuda interface\n");
         return -1;
     }
 
@@ -196,6 +203,7 @@ static int leave_scheduler(void)
     err = attach_send_disconnect(&recv_mq, &send_mq);
     if (err < 0) {
         printd(DBG_ERROR, "Error telling daemon disconnect\n");
+        fprintf(stderr, "Error telling daemon disconnect\n");
         return -1;
     }
 
@@ -203,24 +211,28 @@ static int leave_scheduler(void)
     err = assm_cuda_tini();
     if (err < 0) {
         printd(DBG_ERROR, "Error deinitializing assembly cuda interface\n");
+        fprintf(stderr, "Error deinitializing assembly cuda interface\n");
         return -1;
     }
 
     err = assembly_teardown(assm_id);
     if (err < 0) {
         printd(DBG_ERROR, "Error destroying assembly\n");
+        fprintf(stderr, "Error destroying assembly\n");
         return -1;
     }
 
     err = assembly_runtime_shutdown();
     if (err < 0) {
         printd(DBG_ERROR, "Error cleaning up assembly runtime\n");
+        fprintf(stderr, "Error cleaning up assembly runtime\n");
         return -1;
     }
 
     err = attach_tini(&recv_mq, &send_mq);
     if (err < 0) {
         printd(DBG_ERROR, "Error cleaning up attach state\n");
+        fprintf(stderr, "Error cleaning up attach state\n");
         return -1;
     }
 
@@ -472,8 +484,11 @@ cudaError_t cudaSetDeviceFlags(unsigned int flags)
 cudaError_t cudaSetValidDevices(int *device_arr, int len)
 {
 	cudaError_t cerr;
-	printd(DBG_DEBUG, "called\n");
+	printd(DBG_DEBUG, "called; IGNORING\n");
     LAT_DECLARE(lat);
+
+    /* XXX Ignore this stupid CUDA function */
+    return cudaSuccess;
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);

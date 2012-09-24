@@ -495,7 +495,7 @@ unpack_cudaFreeArray(struct cuda_packet *pkt,
 
 // TODO
 // 		cudaFreeHost
-// 		cudaHostAlloc
+// 		cudaHostAlloc - not an RPCable function
 
 static inline void
 pack_cudaFreeHost(struct cuda_packet *pkt, void *devPtr)
