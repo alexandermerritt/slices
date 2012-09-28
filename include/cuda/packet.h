@@ -233,7 +233,8 @@ typedef unsigned int offset_t;
 #define ZCPY_TRIGGER_SZ			(64 << 10)
 
 /** additional bytes needed in the header to trigger ZCopy */
-#define PADDING_BYTES			(ZCPY_TRIGGER_SZ - (sizeof(offset_t) * CUDA_BATCH_MAX))
+#define PADDING_DIFF			(ZCPY_TRIGGER_SZ - (sizeof(offset_t) * CUDA_BATCH_MAX))
+#define PADDING_BYTES			(ZCPY_TRIGGER_SZ < (sizeof(offset_t) * CUDA_BATCH_MAX) ? 0 : (PADDING_DIFF))
 
 struct cuda_pkt_batch {
 	struct {
