@@ -720,27 +720,33 @@ do_cuda_rpc(
 	}
 	TIMER_END(t, pkt->lat.remote.batch_exec);
 
-	// Always return one packet. Some RPCs don't need anything else. pkt must
-	// point to last RPC in the batch, as all prior cannot require return data
-	// (else those would have caused earlier batch flushes).
-	has_payload = cudarpc_has_payload(pkt, &direction, &data_size);
-	if (has_payload && (direction & TO_HOST)) {
-		pkt->len = sizeof(*pkt) + data_size.to_host;
-#if defined(NIC_SDP)
-		BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt) + ZCPY_TRIGGER_SZ) );
-		BAIL_ON_NW_ERR( conn_put(conn, (pkt + 1), (data_size.to_host) + ZCPY_TRIGGER_SZ) );
-#else
-		BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt)) );
-		BAIL_ON_NW_ERR( conn_put(conn, (pkt + 1), (data_size.to_host)) );
+#ifndef NO_PIPELINING
+    if (pkt->is_sync) { /* only send return packet if it is synchronous */
 #endif
-	} else {
-		pkt->len = sizeof(*pkt);
+	    // Return one packet. Some RPCs don't need anything else. pkt must
+	    // point to last RPC in the batch, as all prior cannot require return data
+	    // (else those would have caused earlier batch flushes).
+	    has_payload = cudarpc_has_payload(pkt, &direction, &data_size);
+	    if (has_payload && (direction & TO_HOST)) {
+		    pkt->len = sizeof(*pkt) + data_size.to_host;
 #if defined(NIC_SDP)
-		BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt) + ZCPY_TRIGGER_SZ) );
+		    BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt) + ZCPY_TRIGGER_SZ) );
+		    BAIL_ON_NW_ERR( conn_put(conn, (pkt + 1), (data_size.to_host) + ZCPY_TRIGGER_SZ) );
 #else
-		BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt)) );
+		    BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt)) );
+		    BAIL_ON_NW_ERR( conn_put(conn, (pkt + 1), (data_size.to_host)) );
 #endif
-	}
+	    } else {
+		    pkt->len = sizeof(*pkt);
+#if defined(NIC_SDP)
+		    BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt) + ZCPY_TRIGGER_SZ) );
+#else
+		    BAIL_ON_NW_ERR( conn_put(conn, pkt, sizeof(*pkt)) );
+#endif
+	    }
+#ifndef NO_PIPELINING
+    }
+#endif
 
 	// Update CUBIN registration counts. No need to lock as the assembly module
 	// ensures only one hidden call is sent to each node an assembly maps to

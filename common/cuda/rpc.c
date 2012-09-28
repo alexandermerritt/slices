@@ -102,7 +102,7 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 	// Need separate variables for some measurements because a cuda packet isn't
 	// available for writing until we pull in the return packet.
 	uint64_t put_time; // time spent sending batch
-	uint64_t wait_time; // = (wait on return pkt) + (receipt of pkt)
+	uint64_t wait_time = 0UL; // = (wait on return pkt) + (receipt of pkt)
 #endif	/* TIMING */
 
 	printd(DBG_INFO, "pkts = %lu size = %lu\n",
@@ -117,24 +117,34 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 #endif
 	TIMER_END(t, put_time);
 
-	TIMER_START(t); // time execution of batch and receipt of return packet
-#if defined(NIC_SDP)
-	FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt) + ZCPY_TRIGGER_SZ) );
-#else
-	FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt)) );
+#ifndef NO_PIPELINING
+    struct cuda_packet *last_pkt = NULL;
+    last_pkt = (struct cuda_packet*)
+        ((uintptr_t)batch->buffer +
+         (intptr_t)batch->header.offsets[batch->header.num_pkts - 1]);
+    if (last_pkt->is_sync) { /* only expect a return packet if last is sync */
 #endif
-	TIMER_END(t, wait_time);
+	    TIMER_START(t); // time execution of batch and receipt of return packet
+#if defined(NIC_SDP)
+	    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt) + ZCPY_TRIGGER_SZ) );
+#else
+	    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt)) );
+#endif
+	    TIMER_END(t, wait_time);
 
-	payload_len = return_pkt->len - sizeof(*return_pkt);
-	if (payload_len > 0) {
-		TIMER_START(t);
+	    payload_len = return_pkt->len - sizeof(*return_pkt);
+	    if (payload_len > 0) {
+		    TIMER_START(t);
 #if defined(NIC_SDP)
-		FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len + ZCPY_TRIGGER_SZ) );
+		    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len + ZCPY_TRIGGER_SZ) );
 #else
-		FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len) );
+		    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len) );
 #endif
-		TIMER_END(t, return_pkt->lat.rpc.recv);
-	}
+		    TIMER_END(t, return_pkt->lat.rpc.recv);
+	    }
+#ifndef NO_PIPELINING
+    }
+#endif
 
 #ifdef TIMING
 	// Restore measurements. Can't save them initially to the return packet
