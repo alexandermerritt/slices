@@ -56,6 +56,8 @@ args['timing'] = ARGUMENTS.get('timing', 0)
 args['timing_native'] = ARGUMENTS.get('timing_native', 0)
 args['network'] = ARGUMENTS.get('network', 'eth')
 args['daemon'] = ARGUMENTS.get('daemon', 0)
+# Options you'd want to turn off
+args['pipelining'] = ARGUMENTS.get('pipelining', 1)
 
 #
 # Configure environment
@@ -89,6 +91,9 @@ else:
 
 if not int(args['daemon']):
 	ccflags.append('-DNO_DAEMONIZE')
+
+if not int(args['pipelining']):
+    ccflags.append('-DNO_PIPELINING')
 
 # for anything you install locally, add/modify them here
 home = os.environ['HOME']
