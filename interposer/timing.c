@@ -128,11 +128,13 @@ print_latencies(void)
 	printf(TIMERMSG_PREFIX "exec.call %lu\n", lat.exec.call);
 #else
 	printf(TIMERMSG_PREFIX
+			"attach %lu detach %lu "
 			"lib.setup %lu lib.wait %lu "
 			"exec.setup %lu exec.call %lu "
 			"rpc.append %lu rpc.send %lu rpc.wait %lu rpc.recv %lu "
 			"remote.batch_exec %lu"
 			"\n",
+            attach, detach,
 			lat.lib.setup, lat.lib.wait,
 			lat.exec.setup, lat.exec.call,
 			lat.rpc.append, lat.rpc.send, lat.rpc.wait, lat.rpc.recv,
