@@ -117,7 +117,7 @@ timer_destroy(struct timer *tm)
 		free(tm);
 }
 
-static inline void
+static void
 timer_start(struct timer *tm)
 {
 	tm->accum.tv_sec = 0;
@@ -128,7 +128,7 @@ timer_start(struct timer *tm)
 	}
 }
 
-static inline void
+static void
 timer_reset(struct timer *tm)
 {
 	tm->accum.tv_sec = 0;

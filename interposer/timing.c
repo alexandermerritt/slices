@@ -70,6 +70,12 @@ timers_stop_detach(void)
 	detach = timer_end(&detach_timer, TIMER_ACCURACY);
 }
 
+inline void
+trace_timestamp(void)
+{
+    clock_gettime(CLOCK_REALTIME, &trace[num_calls_made].ts);
+}
+
 /**
  * Called at the end of every CUDA call made in the interposer.
  *
@@ -139,9 +145,10 @@ print_latencies(void)
 		api_counts[trace[c].id]++;
 		api_lat[trace[c].id] += trace[c].lat;
 		printf(TIMERMSG_PREFIX
-				"\t%lu %u %s %lu %lu %s\n",
+				"\t%lu %u %s %lu %lu %s %lu\n",
 				c, trace[c].id, method2str(trace[c].id), trace[c].bytes, trace[c].lat,
-				SYNC2STR(method_synctable[trace[c].id]));
+				SYNC2STR(method_synctable[trace[c].id]),
+                (trace[c].ts.tv_sec * 1000000000UL + trace[c].ts.tv_nsec));
 		c++;
 	}
 	printf(TIMERMSG_PREFIX " -- END TRACE DUMP --\n");

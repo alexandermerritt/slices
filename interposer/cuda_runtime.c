@@ -121,6 +121,11 @@ static int join_scheduler(void)
     if (scheduler_joined)
         return -1;
 
+#ifdef TIMING
+	timers_init();
+	timers_start_attach();
+#endif
+
     scheduler_joined = true;
 
     memset(&recv_mq, 0, sizeof(recv_mq));
@@ -188,6 +193,10 @@ static int join_scheduler(void)
         return -1;
     }
 
+#ifdef TIMING
+    timers_stop_attach();
+#endif
+
     return 0;
 }
 
@@ -197,6 +206,10 @@ static int leave_scheduler(void)
 
     if (!scheduler_joined)
         return -1;
+
+#ifdef TIMING
+    timers_start_detach();
+#endif
 
     scheduler_joined = false;
 
@@ -236,6 +249,10 @@ static int leave_scheduler(void)
         return -1;
     }
 
+#ifdef TIMING
+    timers_stop_detach();
+#endif
+
     return 0;
 }
 
@@ -262,6 +279,7 @@ cudaError_t cudaThreadExit(void)
 	cudaError_t cerr;
 	printd(DBG_DEBUG, "called\n");
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
@@ -282,6 +300,7 @@ cudaError_t cudaThreadSynchronize(void)
 	cudaError_t cerr;
 	printd(DBG_DEBUG, "called\n");
     LAT_DECLARE(lat);
+    trace_timestamp();
 	
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
@@ -386,6 +405,7 @@ cudaError_t cudaGetDevice(int *device)
 	cudaError_t cerr;
 	printd(DBG_DEBUG, "thread=%lu\n", pthread_self());
     LAT_DECLARE(lat);
+    trace_timestamp();
 	
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
@@ -405,13 +425,14 @@ cudaError_t cudaGetDeviceCount(int *count)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaGetDeviceCount(count);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaGetDeviceCount(count, lat);
 	printd(DBG_DEBUG, "%d\n", *count);
@@ -426,13 +447,14 @@ cudaError_t cudaGetDeviceProperties(struct cudaDeviceProp *prop, int device)
 	cudaError_t cerr;
 	printd(DBG_DEBUG, "dev=%d\n", device);
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaGetDeviceProperties(prop,device);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt) + sizeof(*prop);
+	lat->len = sizeof(struct cuda_packet) + sizeof(*prop);
 #else
 	cerr = assm_cudaGetDeviceProperties(prop, device, lat);
 #endif
@@ -446,13 +468,14 @@ cudaError_t cudaSetDevice(int device)
 	cudaError_t cerr;
 	printd(DBG_DEBUG, "device=%d\n", device);
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaSetDevice(device);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaSetDevice(device, lat);
 #endif
@@ -466,13 +489,14 @@ cudaError_t cudaSetDeviceFlags(unsigned int flags)
 	cudaError_t cerr;
 	printd(DBG_DEBUG, "flags=0x%x\n", flags);
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaSetDeviceFlags(flags);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaSetDeviceFlags(flags, lat);
 #endif
@@ -486,6 +510,7 @@ cudaError_t cudaSetValidDevices(int *device_arr, int len)
 	cudaError_t cerr;
 	printd(DBG_DEBUG, "called; IGNORING\n");
     LAT_DECLARE(lat);
+    trace_timestamp();
 
     /* XXX Ignore this stupid CUDA function */
     return cudaSuccess;
@@ -495,7 +520,7 @@ cudaError_t cudaSetValidDevices(int *device_arr, int len)
 	TIMER_START(t);
 	cerr = bypass.cudaThreadExit();
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt) + (len * sizeof(*device_arr));
+	lat->len = sizeof(struct cuda_packet) + (len * sizeof(*device_arr));
 #else
 	cerr = assm_cudaSetValidDevices(device_arr, len, lat);
 #endif
@@ -526,13 +551,14 @@ cudaError_t cudaStreamCreate(cudaStream_t *pStream)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaStreamCreate(pStream);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaStreamCreate(pStream, lat);
 #endif
@@ -554,8 +580,8 @@ cudaError_t cudaStreamDestroy(cudaStream_t stream)
 
 	TIMER_START(t);
 #if defined(TIMING) && defined(TIMING_NATIVE)
-	struct cuda_packet tpkt;
-	memset(&tpkt, 0, sizeof(tpkt));
+	struct cuda_packet struct cuda_packet;
+	memset(&tpkt, 0, sizeof(struct cuda_packet));
 	cerr = bypass.cudaStreamDestroy(stream);
 	TIMER_END(t, tpkt.lat.exec.call);
 	tpkt.len = sizeof(tpkt);
@@ -610,6 +636,7 @@ cudaError_t cudaStreamSynchronize(cudaStream_t stream)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	printd(DBG_DEBUG, "stream=%p\n", stream);
 
@@ -618,7 +645,7 @@ cudaError_t cudaStreamSynchronize(cudaStream_t stream)
 	TIMER_START(t);
 	cerr = bypass.cudaStreamSynchronize(stream);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaStreamSynchronize(stream, lat);
 #endif
@@ -635,6 +662,7 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 		size_t sharedMem  __dv(0), cudaStream_t stream  __dv(0)) {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	printd(DBG_DEBUG, "grid={%d,%d,%d} block={%d,%d,%d} shmem=%lu strm=%p\n",
 			gridDim.x, gridDim.y, gridDim.z,
@@ -646,7 +674,7 @@ cudaError_t cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 	TIMER_START(t);
 	cerr = bypass.cudaConfigureCall(gridDim,blockDim,sharedMem,stream);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaConfigureCall(gridDim, blockDim, sharedMem, stream, lat);
 #endif
@@ -718,6 +746,7 @@ cudaError_t cudaLaunch(const char *entry)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 	printd(DBG_DEBUG, "entry=%p\n", entry);
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
@@ -725,7 +754,7 @@ cudaError_t cudaLaunch(const char *entry)
 	TIMER_START(t);
 	cerr = bypass.cudaLaunch(entry);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaLaunch(entry, lat);
 #endif
@@ -738,6 +767,7 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	printd(DBG_DEBUG, "arg=%p size=%lu offset=%lu\n",
 			arg, size, offset);
@@ -747,7 +777,7 @@ cudaError_t cudaSetupArgument(const void *arg, size_t size, size_t offset)
 	TIMER_START(t);
 	cerr = bypass.cudaSetupArgument(arg,size,offset);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt) + size;
+	lat->len = sizeof(struct cuda_packet) + size;
 #else
 	cerr = assm_cudaSetupArgument(arg, size, offset, lat);
 #endif
@@ -764,6 +794,7 @@ cudaError_t cudaFree(void * devPtr)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 	printd(DBG_DEBUG, "devPtr=%p\n", devPtr);
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
@@ -771,7 +802,7 @@ cudaError_t cudaFree(void * devPtr)
 	TIMER_START(t);
 	cerr = bypass.cudaFree(devPtr);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaFree(devPtr, lat);
 #endif
@@ -784,6 +815,7 @@ cudaError_t cudaFreeArray(struct cudaArray * array)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 	printd(DBG_DEBUG, "array=%p\n", array);
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
@@ -791,7 +823,7 @@ cudaError_t cudaFreeArray(struct cudaArray * array)
 	TIMER_START(t);
 	cerr = bypass.cudaFreeArray(array);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaFreeArray(array, lat);
 #endif
@@ -804,6 +836,7 @@ cudaError_t cudaFreeHost(void * ptr)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
@@ -822,6 +855,7 @@ cudaError_t cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
@@ -842,13 +876,14 @@ cudaError_t cudaMalloc(void **devPtr, size_t size)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaMalloc(devPtr,size);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaMalloc(devPtr, size, lat);
 #endif
@@ -866,13 +901,14 @@ cudaError_t cudaMallocArray(
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaMallocArray(array,desc,width,height,flags);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaMallocArray(array, desc, width, height, flags, lat);
 #endif
@@ -887,13 +923,14 @@ cudaError_t cudaMallocPitch(
 		void **devPtr, size_t *pitch, size_t width, size_t height) {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaMallocPitch(devPtr,pitch,width,height);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaMallocPitch(devPtr, pitch, width, height, lat);
 #endif
@@ -908,6 +945,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d\n",
 			dst, src, count, kind);
@@ -928,7 +966,7 @@ cudaError_t cudaMemcpy(void *dst, const void *src,
 	TIMER_START(t);
 	cerr = bypass.cudaMemcpy(dst,src,count,kind);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt) + count;
+	lat->len = sizeof(struct cuda_packet) + count;
 #else
 	cerr = assm_cudaMemcpy(dst, src, count, kind, lat);
 #endif
@@ -942,6 +980,7 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	printd(DBG_DEBUG, "dst=%p src=%p count=%lu kind=%d stream=%p\n",
 			dst, src, count, kind, stream);
@@ -961,7 +1000,7 @@ cudaError_t cudaMemcpyAsync(void *dst, const void *src, size_t count,
 	TIMER_START(t);
 	cerr = bypass.cudaMemcpyAsync(dst,src,count,kind,stream);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt) + count;
+	lat->len = sizeof(struct cuda_packet) + count;
 #else
 	cerr = assm_cudaMemcpyAsync(dst, src, count, kind, stream, lat);
 #endif
@@ -978,6 +1017,7 @@ cudaError_t cudaMemcpyFromSymbol(
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	printd(DBG_DEBUG, "dst=%p symb=%p, count=%lu\n", dst, symbol, count);
 
@@ -992,7 +1032,7 @@ cudaError_t cudaMemcpyFromSymbol(
 	TIMER_START(t);
 	cerr = bypass.cudaMemcpyFromSymbol(dst,symbol,count,offset,kind);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt) + count;
+	lat->len = sizeof(struct cuda_packet) + count;
 #else
 	cerr = assm_cudaMemcpyFromSymbol(dst, symbol, count, offset, kind, lat);
 #endif
@@ -1009,6 +1049,7 @@ cudaError_t cudaMemcpyToArray(
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	printd(DBG_DEBUG, "dst=%p wOffset=%lu, hOffset=%lu, src=%p, count=%lu\n",
 			dst, wOffset, hOffset, src, count);
@@ -1025,7 +1066,7 @@ cudaError_t cudaMemcpyToArray(
 	TIMER_START(t);
 	cerr = bypass.cudaMemcpyToArray(dst,wOffset,hOffset,src,count,kind);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt) + count;
+	lat->len = sizeof(struct cuda_packet) + count;
 #else
 	cerr = assm_cudaMemcpyToArray(dst, wOffset, hOffset, src, count, kind, lat);
 #endif
@@ -1041,6 +1082,7 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	printd(DBG_DEBUG, "symb=%p src=%p count=%lu\n", symbol, src, count);
 
@@ -1055,7 +1097,7 @@ cudaError_t cudaMemcpyToSymbol(const char *symbol, const void *src, size_t count
 	TIMER_START(t);
 	cerr = bypass.cudaMemcpyToSymbol(symbol,src,count,offset,kind);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt) + count;
+	lat->len = sizeof(struct cuda_packet) + count;
 #else
 	cerr = assm_cudaMemcpyToSymbol(symbol, src, count, offset, kind, lat);
 #endif
@@ -1070,6 +1112,7 @@ cudaError_t cudaMemcpyToSymbolAsync(
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	printd(DBG_DEBUG, "symb %p\n", symbol);
 
@@ -1084,7 +1127,7 @@ cudaError_t cudaMemcpyToSymbolAsync(
 	TIMER_START(t);
 	cerr = bypass.cudaMemcpyToSymbolAsync(symbol,src,count,offset,kind,stream);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt) + count;
+	lat->len = sizeof(struct cuda_packet) + count;
 #else
 	cerr = assm_cudaMemcpyToSymbolAsync(symbol, src, count,
             offset, kind, stream, lat);
@@ -1098,13 +1141,14 @@ cudaError_t cudaMemGetInfo(size_t *free, size_t *total)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaMemGetInfo(free,total);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaMemGetInfo(free, total, lat);
 #endif
@@ -1119,13 +1163,14 @@ cudaError_t cudaMemset(void *devPtr, int value, size_t count)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaMemset(devPtr,value,count);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
 	cerr = assm_cudaMemset(devPtr, value, count, lat);
 #endif
@@ -1150,13 +1195,14 @@ cudaError_t cudaBindTexture(size_t *offset,
 	cudaError_t cerr;
 	printd(DBG_DEBUG, "called\n");
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaBindTexture(offset,texRef,devPtr,desc,size);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
     lat = NULL; /* compiler complains lat unused */
     abort(); /* XXX */
@@ -1175,14 +1221,14 @@ cudaError_t cudaBindTextureToArray(
 
 	printd(DBG_DEBUG, "called\n");
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaBindTextureToArray(texRef,array,desc);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
-	shmpkt = &tpkt;
+	lat->len = sizeof(struct cuda_packet);
 #else
     lat = NULL; /* compiler complains lat unused */
     abort(); /* XXX */
@@ -1274,13 +1320,14 @@ cudaError_t cudaDriverGetVersion(int *driverVersion)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaDriverGetVersion(driverVersion);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
     lat = NULL; /* compiler complains lat unused */
     abort(); /* XXX */
@@ -1294,13 +1341,14 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion)
 {
 	cudaError_t cerr;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
 	TIMER_DECLARE1(t);
 	TIMER_START(t);
 	cerr = bypass.cudaRuntimeGetVersion(runtimeVersion);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
     lat = NULL; /* compiler complains lat unused */
     abort(); /* XXX */
@@ -1319,6 +1367,7 @@ void** __cudaRegisterFatBinary(void* cubin)
 	void **handle;
 	//struct cuda_packet *shmpkt;
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	if (num_registered_cubins <= 0) {
         fill_bypass(&bypass);
@@ -1340,7 +1389,7 @@ void** __cudaRegisterFatBinary(void* cubin)
 	handle = bypass.__cudaRegisterFatBinary(cubin);
 	TIMER_END(t, lat->exec.call);
 	cache_num_entries_t _notused;
-	lat->len = sizeof(tpkt) + getFatRecPktSize(cubin, &_notused);
+	lat->len = sizeof(struct cuda_packet) + getFatRecPktSize(cubin, &_notused);
 #else
     handle = assm__cudaRegisterFatBinary(cubin, lat);
 	printd(DBG_DEBUG, "handle=%p\n", handle);
@@ -1353,6 +1402,7 @@ void** __cudaRegisterFatBinary(void* cubin)
 void __cudaUnregisterFatBinary(void** fatCubinHandle)
 {
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	printd(DBG_INFO, "handle=%p\n", fatCubinHandle);
 
@@ -1363,7 +1413,7 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle)
 	TIMER_START(t);
 	bypass.__cudaUnregisterFatBinary(fatCubinHandle);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt);
+	lat->len = sizeof(struct cuda_packet);
 #else
     assm__cudaUnregisterFatBinary(fatCubinHandle, lat);
 #endif
@@ -1385,6 +1435,7 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 		uint3* bid, dim3* bDim, dim3* gDim, int* wSize)
 {
     LAT_DECLARE(lat);
+    trace_timestamp();
 
 	printd(DBG_DEBUG, "handle=%p hostFun=%p deviceFun=%s deviceName=%s\n",
 			fatCubinHandle, hostFun, deviceFun, deviceName);
@@ -1395,7 +1446,7 @@ void __cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
 	bypass.__cudaRegisterFunction(fatCubinHandle,hostFun,deviceFun,deviceName,
 			thread_limit,tid,bid,bDim,gDim,wSize);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt) +
+	lat->len = sizeof(struct cuda_packet) +
 		getSize_regFuncArgs(fatCubinHandle, hostFun, deviceFun, deviceName,
 				thread_limit, tid, bid, bDim, gDim, wSize);
 #else
@@ -1415,6 +1466,7 @@ void __cudaRegisterVar(
 		int ext, int vsize, int constant, int global)
 {
     LAT_DECLARE(lat);
+    trace_timestamp();
 	printd(DBG_DEBUG, "symbol=%p\n", hostVar);
 
 #if defined(TIMING) && defined(TIMING_NATIVE)
@@ -1423,7 +1475,7 @@ void __cudaRegisterVar(
 	bypass.__cudaRegisterVar(fatCubinHandle,hostVar,deviceAddress,deviceName,
 			ext,vsize,constant,global);
 	TIMER_END(t, lat->exec.call);
-	lat->len = sizeof(tpkt) +
+	lat->len = sizeof(struct cuda_packet) +
 		getSize_regVar(fatCubinHandle, hostVar, deviceAddress, deviceName,
 				ext, vsize, constant, global);
 #else
