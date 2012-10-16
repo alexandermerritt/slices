@@ -3,7 +3,7 @@
 ## @date 2011-11-08
 ## @brief Makefile to build the shmgrp dynamic library
 
-PREFIX=/nics/b/home/merritt/local
+PREFIX=/usr/local/
 SONAME=libshmgrp.so
 
 CC=gcc

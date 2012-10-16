@@ -55,10 +55,12 @@ extern char **environ;
 
 /*-------------------------------------- INTERNAL STATE ----------------------*/
 
+#ifndef NO_DAEMONIZE
 // Daemon state
 static pid_t sid;
-static char *log; /** determined based on machine name */
 static FILE *logf = NULL;
+#endif
+static char *log; /** determined based on machine name */
 static const char wd[] = "."; //! working dir of runtime once exec'd
 
 // XXX We assume a single-process single-threaded CUDA application for now. Thus
@@ -481,9 +483,9 @@ static void print_usage(void)
 static int daemonize(void)
 {
 	struct sigaction action;
-	int logfd = -1;
 
 #ifndef NO_DAEMONIZE
+	int logfd = -1;
 	printf(">:[ daemonizing ... log file at %s/%s\n", wd, log);
 
 	pid_t pid = fork();
