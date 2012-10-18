@@ -455,7 +455,7 @@ cudaError_t assm_cudaFreeHost(void *ptr, struct rpc_latencies *lat)
         if (ptr) free(ptr);
         TIMER_END(t, lat->lib.wait);
         cerr = cudaSuccess;
-        LAT_UPDATE(lat, buf);
+        /*LAT_UPDATE(lat, buf);*/
     }
     return cerr;
 }
@@ -477,7 +477,8 @@ cudaError_t assm_cudaHostAlloc(void **pHost, size_t size, unsigned int flags,
         cerr = bypass.cudaHostAlloc(pHost, size, flags);
         TIMER_END(t, lat->lib.wait);
     } else {
-        buf = NULL; /* hush compiler, hush */
+        /*init_buf(&buf, tinfo);*/
+        buf = NULL; /* hush compiler, don't cry */
         *pHost = malloc(size);
         if (!*pHost) {
             fprintf(stderr, "> Out of memory: %s\n", __func__);
@@ -485,7 +486,7 @@ cudaError_t assm_cudaHostAlloc(void **pHost, size_t size, unsigned int flags,
         }
         TIMER_END(t, lat->lib.wait);
         cerr = cudaSuccess;
-        LAT_UPDATE(lat, buf);
+        /*LAT_UPDATE(lat, buf);*/
     }
     return cerr;
 }
