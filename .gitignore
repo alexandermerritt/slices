@@ -4,3 +4,4 @@
 *.sconsign.dblite
 *.swp
 cscope.out
+build
