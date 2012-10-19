@@ -17,6 +17,9 @@ struct call
 {
 	method_id_t id;
 	unsigned long lat; // (approx) latency of call from app's perspective
+    /* [remote vGPU] time taken to execute batch, measured on remote node. Does
+     * not include time spent on network. */
+    unsigned long nvexec;
 	size_t bytes; // cuda_packet.len
     struct timespec ts; // timestamp of call relative to others
 };
