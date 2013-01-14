@@ -125,4 +125,6 @@ ENV['gunn'] = ENV['shiva']
 # Execute the build
 #
 Export('NODE_NAME', 'ENV', 'INSTALL_DIR')
-SConscript(['interposer/SConstruct', 'backend/SConstruct'])
+SConscript(['interposer/SConstruct'])
+if 0 == int(args['timing_native']):
+    SConscript(['backend/SConstruct'])
