@@ -66,7 +66,7 @@ static struct tinfo *__lookup(pthread_t tid)
         ret->valid = true;
         ret->tid = tid;
         /* TODO only allocate if vgpu thread picks is remote */
-        ret->buffer = malloc(768 << 20);
+        ret->buffer = malloc(1UL << 30); /* XXX hardcoded... */
         ret->vgpu = &assm->mappings[0]; /* default 0 until setDevice called */
         if (!ret->buffer) {
             fprintf(stderr, "Out of memory\n");
