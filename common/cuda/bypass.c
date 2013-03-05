@@ -5,7 +5,7 @@
  * @brief Allow interposer to fall through to true CUDA implementation.
  */
 
-#include "bypass.h" // include first, as _GNU_SOURCE must be defined for dlsym
+#include <cuda/bypass.h> // include first, as _GNU_SOURCE must be defined for dlsym
 
 #include <stdio.h>
 #include <stdlib.h>

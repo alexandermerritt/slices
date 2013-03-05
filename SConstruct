@@ -23,19 +23,22 @@ __email__ = "merritt.alex@gatech.edu"
 NODE_NAME = commands.getoutput('uname -n').split('.')[0]
 ENV = {}
 INSTALL_DIR = os.getcwd() + '/build'
+#INSTALL_DIR = os.environ['HOME'] + '/exp/' # keeneland
 
 #
 # Configure CUDA location
 #
 cuda_root=''
 if NODE_NAME.startswith('kid'):
-	cuda_root = '/sw/keeneland/cuda/3.2/linux_binary'
+	cuda_root = '/sw/keeneland/cuda/.3.2/linux_binary'
 	NODE_NAME = 'kid'
 elif NODE_NAME == 'prost':
 	cuda_root = '/opt/cuda/'
 elif NODE_NAME == 'shiva':
 	cuda_root = '/usr/local/cuda'
 elif NODE_NAME == 'ifrit':
+	cuda_root = '/usr/local/cuda'
+elif NODE_NAME == 'gunn':
 	cuda_root = '/usr/local/cuda'
 else:
 	print("Build not configured for this node.")
@@ -52,7 +55,9 @@ args['timing'] = ARGUMENTS.get('timing', 0)
 # XXX DO NOT run multi-threaded codes with timing_native
 args['timing_native'] = ARGUMENTS.get('timing_native', 0)
 args['network'] = ARGUMENTS.get('network', 'eth')
-args['daemon'] = ARGUMENTS.get('daemon', 1)
+args['daemon'] = ARGUMENTS.get('daemon', 0)
+# Options you'd want to turn off
+args['pipelining'] = ARGUMENTS.get('pipelining', 1)
 
 #
 # Configure environment
@@ -87,6 +92,9 @@ else:
 if not int(args['daemon']):
 	ccflags.append('-DNO_DAEMONIZE')
 
+if not int(args['pipelining']):
+    ccflags.append('-DNO_PIPELINING')
+
 # for anything you install locally, add/modify them here
 home = os.environ['HOME']
 local_lpath = [home + '/local/lib']
@@ -97,23 +105,26 @@ gcc = 'gcc'
 # env values common across all files in project
 libpath = [cuda_root + '/lib64', '/lib64']
 cpath = [cuda_root + '/include', os.getcwd() + '/include']
-libs = ['rt', 'dl', 'shmgrp']
+libs = ['rt', 'dl']
 
 # machine-specific paths
-ENV['kid'] = Environment(CC = icc, CCFLAGS = ccflags, LIBS = libs)
+ENV['kid'] = Environment(CCFLAGS = ccflags, LIBS = libs)
 ENV['kid'].Append(CPPPATH = cpath + local_cpath)
 ENV['kid'].Append(LIBPATH = libpath + local_lpath)
 
 ENV['prost'] = ENV['kid']
 
-ENV['shiva'] = Environment(CC = gcc, CCFLAGS = ccflags, LIBS = libs)
+ENV['shiva'] = Environment(CCFLAGS = ccflags, LIBS = libs)
 ENV['shiva'].Append(CPPPATH = cpath)
 ENV['shiva'].Append(LIBPATH = libpath)
 
 ENV['ifrit'] = ENV['shiva']
+ENV['gunn'] = ENV['shiva']
 
 #
 # Execute the build
 #
 Export('NODE_NAME', 'ENV', 'INSTALL_DIR')
-SConscript(['interposer/SConstruct', 'backend/SConstruct'])
+SConscript(['interposer/SConstruct'])
+if 0 == int(args['timing_native']):
+    SConscript(['backend/SConstruct'])

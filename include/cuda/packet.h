@@ -30,6 +30,9 @@
 
 #define MAX_ARGS 6
 
+// forward declaration
+struct cuda_packet;
+
 // TODO Create macros to access and modify the value of 'flags' in a cuda packet
 // instead of having code manually do raw bit ops everywhere.
 enum cuda_packet_flags
@@ -137,26 +140,19 @@ typedef union ret_extra {
 	void **handle;	    // Used to return fatCubinHandle
 } ret_extra_t;
 
-#ifdef TIMING
 /**
  * Measurements of time spent by a cuda_packet RPC within each component of the
  * runtime. Only allocated/updated if macro TIMING is defined.
  */
 struct rpc_latencies {
-	// If you measure the total time of the application, then subtract from it
-	// the attach and detach latencies (joining/departing the runtime) as well
-	// as lib.setup and lib.wait, you end up approx. with the time in the
-	// application spent NOT using CUDA.
 	struct {
-		uint64_t setup; //! Time spent marshaling and misc setup
-		//! Time spent polling for result. Composed of all costs in the assembly
-		//! runtime executing the call, locally or remote.
-		uint64_t wait;
-	} lib; // interposer overhead
+		uint64_t setup; //! marshaling (always zero if local)
+		uint64_t wait;  //! lib waiting on NV CUDA (local) or RPC (remote)
+	} lib;
 	struct {
 		uint64_t setup; //! Argument setup and symbol/cubin lookup time
-		uint64_t call; //! Latency in the CUDA runtime/driver
-	} exec; // cuda/execute.c either local- or remote-tip execution
+		uint64_t call;  //! Latency in the CUDA runtime/driver
+	} exec; //! latencies on remote end, except if TIMING_NATIVE is defined
 	struct {
 		uint64_t append; //! Time squandered doing memcpy to the batch buffer
 		uint64_t send; //! Time spent sending the batch
@@ -171,8 +167,32 @@ struct rpc_latencies {
 		// batch_exec - exec.{setup|call} = batch unpacking
 		uint64_t batch_exec; //! Executing all RPCs in a batch
 	} remote; // on remote machine (all zeros if vgpu is not remote)
+    size_t len; // length of packet + data
 };
+#ifdef TIMING
+#define LAT_DECLARE(name) \
+    struct rpc_latencies _lat = LATENCIES_INIT; \
+    struct rpc_latencies *name = &_lat
+/* add all latency values within a cuda_packet to the provided lat structure */
+#define LAT_UPDATE(lat,cpkt) \
+{ \
+    (lat)->lib.setup  += ((struct cuda_packet*)cpkt)->lat.lib.setup; \
+    (lat)->lib.wait   += ((struct cuda_packet*)cpkt)->lat.lib.wait; \
+    (lat)->exec.setup += ((struct cuda_packet*)cpkt)->lat.exec.setup; \
+    (lat)->exec.call  += ((struct cuda_packet*)cpkt)->lat.exec.call; \
+    (lat)->rpc.append += ((struct cuda_packet*)cpkt)->lat.rpc.append; \
+    (lat)->rpc.send   += ((struct cuda_packet*)cpkt)->lat.rpc.send; \
+    (lat)->rpc.wait   += ((struct cuda_packet*)cpkt)->lat.rpc.wait; \
+    (lat)->rpc.recv   += ((struct cuda_packet*)cpkt)->lat.rpc.recv; \
+    (lat)->remote.batch_exec += ((struct cuda_packet*)cpkt)->lat.remote.batch_exec; \
+    (lat)->len += ((struct cuda_packet*)cpkt)->len; \
+}
+#else   /* !TIMING */
+#define LAT_DECLARE(name)   void *name = NULL
+#define LAT_UPDATE(lat,cpkt)
 #endif	/* TIMING */
+
+#define LATENCIES_INIT  { {0,0}, {0,0}, {0,0,0,0}, {0}, 0 }
 
 typedef struct cuda_packet {
 	method_id_t method_id;     // to identify which method
@@ -184,9 +204,21 @@ typedef struct cuda_packet {
 	bool is_sync; //! whether this func must be interposed/invoked synchronously
 	ret_extra_t ret_ex_val; // return value from call filled in response packet
 #ifdef TIMING
-	struct rpc_latencies lat;
+    struct rpc_latencies lat;
 #endif
 } cuda_packet_t;
+
+/* cudaError_t return value of RPC packet */
+static inline cudaError_t
+cpkt_ret_err(void *buf)
+{
+    return ((struct cuda_packet*)(buf))->ret_ex_val.err;
+}
+static inline void**
+cpkt_ret_hdl(void *buf)
+{
+    return ((struct cuda_packet*)(buf))->ret_ex_val.handle;
+}
 
 //! Data type describing an offset into the batch buffer. Cannot realistically
 //! be smaller than uint if the buffer size is anything reasonable.
@@ -194,14 +226,15 @@ typedef unsigned int offset_t;
 
 //! Absolute maximum number of packets a batch can hold, as the offset array is
 //! allocated at compile time and is included in the batch header.
-#define CUDA_BATCH_MAX			4096
-#define CUDA_BATCH_BUFFER_SZ	(512 << 20)
+#define CUDA_BATCH_MAX			8192 /* XXX hardcoded ... */
+#define CUDA_BATCH_BUFFER_SZ	(1UL << 30) /* XXX hardcoded ... */
 
 /** size at which SDP switches to ZCopy */
 #define ZCPY_TRIGGER_SZ			(64 << 10)
 
 /** additional bytes needed in the header to trigger ZCopy */
-#define PADDING_BYTES			(ZCPY_TRIGGER_SZ - (sizeof(offset_t) * CUDA_BATCH_MAX))
+#define PADDING_DIFF			(ZCPY_TRIGGER_SZ - (sizeof(offset_t) * CUDA_BATCH_MAX))
+#define PADDING_BYTES			(ZCPY_TRIGGER_SZ < (sizeof(offset_t) * CUDA_BATCH_MAX) ? 0 : (PADDING_DIFF))
 
 struct cuda_pkt_batch {
 	struct {

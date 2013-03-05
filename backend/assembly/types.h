@@ -70,6 +70,7 @@ struct assembly
 {
 	struct list_head link;
 	asmid_t id;
+    pid_t pid; /* of process receiving this assembly */
 	int num_gpus;
 	struct vgpu_mapping mappings[MAX_VGPUS];
 	int driverVersion, runtimeVersion;
@@ -107,6 +108,7 @@ struct node_participant
 
 	// GPU information
 	int num_gpus;
+    int gpu_mapped[MAX_GPUS_PER_NODE]; /* idx is true if a vgpu has mapped that gpu */
 	struct cudaDeviceProp dev_prop[PARTICIPANT_MAX_GPUS];
 	int driverVersion, runtimeVersion;
 };

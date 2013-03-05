@@ -70,35 +70,43 @@ timers_stop_detach(void)
 	detach = timer_end(&detach_timer, TIMER_ACCURACY);
 }
 
+inline void
+trace_timestamp(void)
+{
+    clock_gettime(CLOCK_REALTIME, &trace[num_calls_made].ts);
+}
+
 /**
  * Called at the end of every CUDA call made in the interposer.
  *
  * XXX This function is in NO WAY thread-safe.
  */
 inline void
-update_latencies(const struct rpc_latencies *l, method_id_t id, size_t call_size)
+update_latencies(const struct rpc_latencies *l, method_id_t id)
 {
 	// Trace values.
 	trace[num_calls_made].id = id;
-	trace[num_calls_made].bytes = call_size;
+	trace[num_calls_made].bytes = l->len;
 #if defined(TIMING_NATIVE)
 	trace[num_calls_made].lat = l->exec.call; // native has no handoff with sink
+	trace[num_calls_made].nvexec = l->exec.call;
 #else
 	trace[num_calls_made].lat = (l->lib.setup + l->lib.wait); // total cost
+	trace[num_calls_made].nvexec = l->remote.batch_exec;
 #endif
 
 #if !defined(TIMING_NATIVE)
 	// Aggregate values across the cluster.
-	lat.lib.setup += l->lib.setup;
-	lat.lib.wait += l->lib.wait;
-	lat.exec.setup += l->exec.setup;
-	lat.rpc.append += l->rpc.append;
-	lat.rpc.send += l->rpc.send;
-	lat.rpc.wait += l->rpc.wait;
-	lat.rpc.recv += l->rpc.recv;
-	lat.remote.batch_exec += l->remote.batch_exec;
+    lat.lib.setup          +=  l->lib.setup;
+    lat.lib.wait           +=  l->lib.wait;
+    lat.exec.setup         +=  l->exec.setup;
+    lat.rpc.append         +=  l->rpc.append;
+    lat.rpc.send           +=  l->rpc.send;
+    lat.rpc.wait           +=  l->rpc.wait;
+    lat.rpc.recv           +=  l->rpc.recv;
+    lat.remote.batch_exec  +=  l->remote.batch_exec;
 #endif
-	lat.exec.call += l->exec.call;
+	lat.exec.call          +=  l->exec.call;
 
 	// Update counter
 	num_calls_made++;
@@ -122,32 +130,36 @@ print_latencies(void)
 	printf(TIMERMSG_PREFIX "exec.call %lu\n", lat.exec.call);
 #else
 	printf(TIMERMSG_PREFIX
+			"attach %lu detach %lu "
 			"lib.setup %lu lib.wait %lu "
 			"exec.setup %lu exec.call %lu "
 			"rpc.append %lu rpc.send %lu rpc.wait %lu rpc.recv %lu "
 			"remote.batch_exec %lu"
 			"\n",
+            attach, detach,
 			lat.lib.setup, lat.lib.wait,
 			lat.exec.setup, lat.exec.call,
 			lat.rpc.append, lat.rpc.send, lat.rpc.wait, lat.rpc.recv,
 			lat.remote.batch_exec);
 #endif
 
-	// c used here as call number
-	printf(TIMERMSG_PREFIX " -- BEGIN TRACE DUMP -- num:id:id-name:size-bytes:lat-us\n");
+    // c used here as call number; latencies are whatever include/util/timer.h
+    // has configured, otherwise they are as specified in this line
+	printf(TIMERMSG_PREFIX " -- BEGIN TRACE DUMP -- num id name size lat sync time_ns execlat\n");
 	while (c < num_calls_made) {
 		api_counts[trace[c].id]++;
 		api_lat[trace[c].id] += trace[c].lat;
 		printf(TIMERMSG_PREFIX
-				"\t%lu %u %s %lu %lu %s\n",
+				"\t%lu %u %s %lu %lu %s %lu %lu\n",
 				c, trace[c].id, method2str(trace[c].id), trace[c].bytes, trace[c].lat,
-				SYNC2STR(method_synctable[trace[c].id]));
+				SYNC2STR(method_synctable[trace[c].id]),
+                (trace[c].ts.tv_sec * 1000000000UL + trace[c].ts.tv_nsec), trace[c].nvexec);
 		c++;
 	}
 	printf(TIMERMSG_PREFIX " -- END TRACE DUMP --\n");
 
 	// c used here as method_id
-	printf(TIMERMSG_PREFIX " -- BEGIN CALL COUNTS -- count:id:id-name:agg-lat-us:sync\n");
+	printf(TIMERMSG_PREFIX " -- BEGIN CALL COUNTS -- count id name lat sync\n");
 	for (c = (CUDA_INVALID_METHOD + 1); c < CUDA_METHOD_LIMIT; c++)
 		if (api_counts[c])
 			printf(TIMERMSG_PREFIX
