@@ -1,111 +1,72 @@
-/**
- * @file README.txt
- * @brief 
- *
- * @date Apr 12, 2011
- * @author Magda Slawinska (Magic MS), magg __at_ gatech __dot_ edu
- * @author Alex Merritt, merritt.alex@gatech.edu
- */
- 
- CONTRIBUTORS
- 
- This piece of software has been 'compiled' by Magic Magg (Magda Slawinska), 
- as part of the non-virtualized Keeneland standard software. 
- The software has been developed based on the software for the virtualized case
- Pegasus and Shadowfax for which credits go to:
- 
- Vishakha Gupta
- Alex Merritt
- Abhishek Verma
- 
-Alex Merritt and Magda Slawinska ported the virtualized-based software to a
-non-virtualized case. Magda's work targets supporting the actual deployment of
-this codebase on large-scale GPU clusters, as well as the networking code.
-Alex's work contributes to the assembly runtime, making it possible to map
-applications across the cluster.
- 
- 
- 1. DEPENDENCIES
- 
- a. Scons - the build system
- 
- b. Installed CUDA Toolkit for
-    - libcudart.a (or something)
-    - some includes cuda_runtime_api.h, __cuda_format.h
-    - nvcc compiler 
-  
- c. glib 
- 
- 	- glib-2.28.7 - developed with this version, at least requires the
- 	  decent version that supports key file  	
- 	  -- link with -lglib-2.0
- 	  -- include directories
- 	    GLIB20 + 'include/glib-2.0',
-        GLIB20 + 'include/gio-unix-2.0',
-        GLIB20 + 'lib/glib-2.0/include'      
- 
- 
- 2. BUILDING
- 
-To produce all binaries. All flags (below) default to zero if not specified.
-	scons
+0. About
 
-Build with debug output and debug symbols in binaries
-	scons dbg=1
+Shadowfax Distributed GPGPU Assembly Runtime
 
-Build with timing information
-	scons timing=1
+Author: Alexander Merritt, merritt.alex@gatech.edu (main author)
+
+Contributors (direct or indirect):
+    Magda Slawinska, magg@gatech.edu (some marshaling/RPC code, build system)
+    Abhishek Verma (MS - RPC protocol and paper in VTDC'11)
+    Vishakha Gupta (original marshaling code)
+
+This implementation of the 'Shadowfax' software is based on GViM developed by
+Vishakha Gupta (published in GPUVirt 2009) for virtualized systems, providing a
+distributed runtime for applications to transparently utilize GPUs across a
+cluster. Code originally in GViM is now scarce in Shadowfax (e.g. the
+cuda_packet specification).
+ 
+ 
+1. Building the code
+
+Dependencies: scons (python), NVIDIA CUDA, GNU GCC
+
+Produce build/bin/ and build/lib/
+
+    $ scons [dbg=1] [network=sdp]
+
+By default, Ethernet is selected.
+
+One instance of 'shadowfax' must be run on each node
+
+    node0 $ cd build/bin/; ./shadowfax main
+    node1 $ cd build/bin/; ./shadowfax minion ip-of-main
+    node2 $ cd build/bin/; ./shadowfax minion ip-of-main
+    [...]
 
 To clean
-	scons -c
 
-5. KNOWN ISSUES
+	$ scons -c
 
-* Right now it doesn't support CUDA 4.0 (you can have a newer driver, but
-  the support is for CUDA Tookit 3.2 and SDK 3.2).
-  
-6. INSTALLATION ON KEENELAND
+Keeneland - use the GNU Compiler toolchain and point the appropriate cuda
+variables in the SConstruct file to the location of the NVIDIA
+toolchain/libraries.
 
+2. Applications
 
-* Be aware what compiler is used and check if gcc
-  
-  module unload intel/2011.3.174
-  module unload PE-intel   # unload programming environment intel
-  module load PE-gnu       # load programming environment gnu
-  module load gcc/4.1.2    # developed on that compiler
+i.  Launch shadowfax daemons (master before slaves)
+ii. On each node where there is a process belonging to the application, create
+an 'assembly hint' file describing to the shadowfax system what properties of
+GPUs and assemblies are desired.
 
-* Open SConstruct and edit variables to the location of cuda, glib 
-  and cunit212
- 
-  CUDA_ROOT = '/sw/keeneland/cuda/3.2/linux_binary/'
-  CUNIT212 = '/nics/d/home/smagg/opt/cunit212'
-  GLIB20= '/nics/d/home/smagg/opt/glib-2.28.7/'
-  
-* If scons is missing
-  
-  wget -c http://prdownloads.sourceforge.net/scons/scons-2.0.1.tar.gz
-  module load python/2.7
-  tar xfvz scons-2.0.1.tar.gz
-  cd scons-2.0.1
-  # this installs to the directory you specify
-  python setup.py install --prefix=~/opt/scons
-  export PATH=~/opt/scons/bin/:$PATH
-  
-* if driver_types.h and vector_types.h are not found
-  
-  You need to change path to for CUDA in the following files:
-  
-  /sw/keeneland/cuda/3.2/linux_binary/
-  
-  (Set variable CUDA_ROOT in main SConstruct file)
-   	
-     
-7. RUNNING EXAMPLES ON KEENELAND
+mpi=N
+policy=[local_first|remote_only]
+batch_size=M
 
-* allocate the node in the interactive mode
+N=0 -> not an MPI program
+N>0 -> all hints with equal N specify process belongs to same program
 
-[smagg@kidlogin1 kidron-utils-remote-cuda-exec-2]$ qlogin -I -l nodes=1:ppn=1
+M=0 -> use default batch size (8192 packets)
+M>0 -> set batch to flush when full or on M RPC packets (M <= 8192)
 
-* allocate the second node in the interactive mode
+local_first ->  for each vGPU given to process
+                    find first unmapped GPU, else
+                    share some local GPU
+remote_only ->  for each vGPU given to process
+                    find first unmapped remote GPU, else
+                    share some remote GPU, else
+                    fallback to local_first policy
 
-[smagg@kidlogin2 kidron-utils-remote-cuda-exec-2]$ qlogin -I -l nodes=1:ppn=1
+3. Issues
+
+Compatibility for CUDA 4.x under development
+
