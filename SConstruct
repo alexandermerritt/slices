@@ -48,7 +48,7 @@ else:
 # Extract arguments
 #
 args = {}
-args['debug'] = ARGUMENTS.get('dbg', 0)
+args['debug'] = ARGUMENTS.get('debug', 0)
 # Perform latency measurements of the code.
 args['timing'] = ARGUMENTS.get('timing', 0)
 # Timing, but without use of the backend; native passthrough only.
