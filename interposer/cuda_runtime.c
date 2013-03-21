@@ -97,164 +97,16 @@ static unsigned int num_registered_cubins = 0;
  * Scheduler state
  */
 
-static bool scheduler_joined = false;
-static struct mq_state recv_mq, send_mq;
+bool scheduler_joined = false;
+struct mq_state recv_mq, send_mq;
 
 /*
  * Assembly state
  */
-static asmid_t assm_id;
-static struct assembly_hint hint;
+asmid_t assm_id;
+struct assembly_hint hint;
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
-
-/* forward delcaration into assembly/cuda_interface.c */
-extern int assm_cuda_init(asmid_t id);
-extern int assm_cuda_tini(void);
-
-static int join_scheduler(void)
-{
-    int err;
-    char uuid_str[64];
-    assembly_key_uuid assm_key;
-
-    if (scheduler_joined)
-        return -1;
-
-#ifdef TIMING
-	timers_init();
-	timers_start_attach();
-#endif
-
-    scheduler_joined = true;
-
-    memset(&recv_mq, 0, sizeof(recv_mq));
-    memset(&send_mq, 0, sizeof(send_mq));
-
-    /* initialize interfaces */
-    err = attach_init(&recv_mq, &send_mq);
-    if (err < 0) {
-        printd(DBG_ERROR, "Error attach_init: %d\n", err);
-        fprintf(stderr, "Error attach_init: %d\n", err);
-        return -1;
-    }
-	err = assembly_runtime_init(NODE_TYPE_MAPPER, NULL);
-    if (err < 0) {
-        printd(DBG_ERROR, "Error initializing assembly state\n");
-        fprintf(stderr, "Error initializing assembly state\n");
-        return -1;
-    }
-
-    /* tell daemon we wish to join */
-    err = attach_send_connect(&recv_mq, &send_mq);
-    if (err < 0) {
-        printd(DBG_ERROR, "Error attach_send_connect: %d\n", err);
-        fprintf(stderr, "Error attach_send_connect: %d\n", err);
-        return -1;
-    }
-
-    /* read the hint then send it to the daemon */
-    err = assembly_read_hint(&hint);
-    if (err < 0) {
-        fprintf(stderr, "> Error reading hint file\n");
-        return -1;
-    }
-    err = attach_send_request(&recv_mq, &send_mq, &hint, assm_key);
-    if (err < 0) {
-        printd(DBG_ERROR, "Error attach_send_request: %d\n", err);
-        fprintf(stderr, "Error attach_send_request: %d\n", err);
-        return -1;
-    }
-    uuid_unparse(assm_key, uuid_str);
-    printd(DBG_INFO, "Importing assm key from scheduler: '%s'\n", uuid_str);
-
-    /* 'fix' the assembly on the network */
-    err = assembly_import(&assm_id, assm_key);
-    BUG(assm_id == INVALID_ASSEMBLY_ID);
-    if (err < 0) {
-        printd(DBG_ERROR, "Error assembly_import: %d\n", err);
-        fprintf(stderr, "Error assembly_import: %d\n", err);
-        return -1;
-    }
-    assembly_print(assm_id);
-    err = assembly_map(assm_id);
-    if (err < 0) {
-        printd(DBG_ERROR, "Error assembly_map: %d\n", err);
-        fprintf(stderr, "Error assembly_map: %d\n", err);
-        return -1;
-    }
-
-    /* XXX initialize the assembly/cuda_interface.c state AFTER the assembly
-     * interface has been initialized AND an assembly has been imported */
-    err = assm_cuda_init(assm_id);
-    if (err < 0) {
-        printd(DBG_ERROR, "Error initializing assembly cuda interface\n");
-        fprintf(stderr, "Error initializing assembly cuda interface\n");
-        return -1;
-    }
-
-#ifdef TIMING
-    timers_stop_attach();
-#endif
-
-    return 0;
-}
-
-static int leave_scheduler(void)
-{
-    int err;
-
-    if (!scheduler_joined)
-        return -1;
-
-#ifdef TIMING
-    timers_start_detach();
-#endif
-
-    scheduler_joined = false;
-
-    err = attach_send_disconnect(&recv_mq, &send_mq);
-    if (err < 0) {
-        printd(DBG_ERROR, "Error telling daemon disconnect\n");
-        fprintf(stderr, "Error telling daemon disconnect\n");
-        return -1;
-    }
-
-    /* remove state associated with the assembly cuda interface */
-    err = assm_cuda_tini();
-    if (err < 0) {
-        printd(DBG_ERROR, "Error deinitializing assembly cuda interface\n");
-        fprintf(stderr, "Error deinitializing assembly cuda interface\n");
-        return -1;
-    }
-
-    err = assembly_teardown(assm_id);
-    if (err < 0) {
-        printd(DBG_ERROR, "Error destroying assembly\n");
-        fprintf(stderr, "Error destroying assembly\n");
-        return -1;
-    }
-
-    err = assembly_runtime_shutdown();
-    if (err < 0) {
-        printd(DBG_ERROR, "Error cleaning up assembly runtime\n");
-        fprintf(stderr, "Error cleaning up assembly runtime\n");
-        return -1;
-    }
-
-    err = attach_tini(&recv_mq, &send_mq);
-    if (err < 0) {
-        printd(DBG_ERROR, "Error cleaning up attach state\n");
-        fprintf(stderr, "Error cleaning up attach state\n");
-        return -1;
-    }
-
-#ifdef TIMING
-    timers_stop_detach();
-#endif
-
-    return 0;
-}
 
 //! This appears in some values of arguments. I took this from
 //! opt/cuda/include/cuda_runtime_api.h It looks as this comes from a default
@@ -1262,11 +1114,6 @@ cudaCreateChannelDesc(int x, int y, int z, int w,
 	return f(x,y,z,w,format);
 #else
 	int err;
-	err = join_scheduler(); // will return if already done
-	if (err < 0) {
-		fprintf(stderr, "Error attaching to assembly runtime\n");
-		assert(0);
-	}
 
 	struct cuda_packet *shmpkt;
 	printd(DBG_DEBUG, "x=%d y=%d z=%d w=%d format=%u\n",
@@ -1371,14 +1218,6 @@ void** __cudaRegisterFatBinary(void* cubin)
 
 	if (num_registered_cubins <= 0) {
         fill_bypass(&bypass);
-#if defined(TIMING) && defined(TIMING_NATIVE)
-        /* nothing */
-#else
-		if (0 > join_scheduler()) {
-			fprintf(stderr, "Error attaching to assembly runtime\n");
-			assert(0);
-		}
-#endif
 	}
 
 	num_registered_cubins++;
@@ -1421,9 +1260,6 @@ void __cudaUnregisterFatBinary(void** fatCubinHandle)
 	update_latencies(lat, __CUDA_UNREGISTER_FAT_BINARY);
 
 	if (num_registered_cubins <= 0) { // only detach on last unregister
-#if !(defined(TIMING) && defined(TIMING_NATIVE))
-		leave_scheduler();
-#endif
 		print_latencies();
 	}
 
