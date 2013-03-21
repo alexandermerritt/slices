@@ -103,7 +103,7 @@ int conn_localbind(struct sockconn *conn, const char *bind_port, bool use_sdp)
 	int serverfd = -1; /* parent socket */
 	int optval; /* flag value for setsockopt */
 
-	struct addrinfo hints, *servaddrinfo;
+	struct addrinfo hints, *servaddrinfo = NULL;
 	char servername[255];
 
 	if(!conn || !bind_port) {

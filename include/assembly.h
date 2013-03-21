@@ -124,22 +124,6 @@ str_eq(const char *a, const char *b, size_t len)
     return 0 == strncmp(a, b, len);
 }
 
-static inline enum hint_nic_type
-assembly_hint_nic2enum(const char *nic)
-{
-    if (!nic)
-        return HINT_ENUM_POLICY_INVALID;
-
-    if (strstr(nic, HINT_FIELD_POLICY_REMOTEONLY))
-        return HINT_ENUM_POLICY_REMOTEONLY;
-
-    else if (strstr(nic, HINT_FIELD_POLICY_LOCALFIRST))
-        return HINT_ENUM_POLICY_LOCALFIRST;
-    /* TODO */
-    else
-        return HINT_ENUM_POLICY_INVALID;
-}
-
 static inline const char *
 assembly_hint_enum2nic(enum hint_nic_type t)
 {

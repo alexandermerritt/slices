@@ -109,7 +109,7 @@ ENV['kid'].Append(LIBPATH = libpath + local_lpath)
 
 ENV['prost'] = ENV['kid']
 
-ENV['shiva'] = Environment(CC = 'gcc', CCFLAGS = ccflags, LIBS = libs)
+ENV['shiva'] = Environment(CC = 'clang', CCFLAGS = ccflags, LIBS = libs)
 ENV['shiva'].Append(CPPPATH = cpath)
 ENV['shiva'].Append(LIBPATH = libpath)
 
