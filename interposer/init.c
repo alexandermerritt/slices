@@ -1,3 +1,13 @@
+/**
+ * @file: init.c
+ * @author: Alexander Merritt, merritt.alex@gatech.edu
+ * @desc library initialization code
+ */
+
+//===----------------------------------------------------------------------===//
+// Includes
+//===----------------------------------------------------------------------===//
+
 // System includes
 #include <assert.h>
 #include <dlfcn.h>
@@ -29,6 +39,10 @@
 #include <util/compiler.h>
 #include <util/x86_system.h>
 
+//===----------------------------------------------------------------------===//
+// Forward declarations
+//===----------------------------------------------------------------------===//
+
 extern bool scheduler_joined;
 extern struct mq_state recv_mq, send_mq;
 
@@ -38,6 +52,10 @@ extern struct assembly_hint hint;
 /* forward delcaration into assembly/cuda_interface.c */
 extern int assm_cuda_init(asmid_t id);
 extern int assm_cuda_tini(void);
+
+//===----------------------------------------------------------------------===//
+// Daemon-attachment functions
+//===----------------------------------------------------------------------===//
 
 static int join_scheduler(void)
 {
@@ -182,6 +200,10 @@ static int leave_scheduler(void)
 
     return 0;
 }
+
+//===----------------------------------------------------------------------===//
+// Library constructors
+//===----------------------------------------------------------------------===//
 
 __attribute__((constructor)) void init(void)
 {

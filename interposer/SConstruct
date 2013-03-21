@@ -19,6 +19,12 @@ for src in files:
 	if '.c' == ext.lower():
 		sources.append(src)
 
+files = os.listdir('api/')
+for src in files:
+	(name,ext) = os.path.splitext(src)
+	if '.c' == ext.lower():
+		sources.append('api/' + src)
+
 files = os.listdir('../backend/assembly/')
 for src in files:
 	(name,ext) = os.path.splitext(src)
