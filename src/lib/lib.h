@@ -41,9 +41,6 @@
 #include <util/compiler.h>
 #include <util/x86_system.h>
 
-// Directory-immediate includes
-#include "timing.h"
-
 #define USERMSG_PREFIX "=== INTERPOSER === "
 
 //===----------------------------------------------------------------------===//
