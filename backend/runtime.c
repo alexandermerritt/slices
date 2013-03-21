@@ -33,17 +33,6 @@
 #include <mq.h>
 #include <util/timer.h>
 
-//#define VARIABLE_BATCHING
-
-#ifdef VARIABLE_BATCHING
-// Temporary code for varying the batch size. The idea is to allow
-// an application to run multiple iterations, over time varying the
-// batch size to observe the performance impact.
-static size_t bsize = 1; //! Current batch size.
-static size_t incr_on_mod = 1; //! # app entries between batch size increments
-static size_t count = 0; //! internal counter of app entries for use with incr
-#endif	/* VARIABLE_BATCHING */
-
 /*-------------------------------------- EXTERNAL VARIABLES ------------------*/
 
 /*-------------------------------------- INTERNAL STATE ----------------------*/
@@ -61,14 +50,6 @@ static LIST_HEAD(apps);
 #define for_each_app(app, apps) \
     list_for_each_entry(app, &apps, link)
 static pthread_mutex_t apps_lock = PTHREAD_MUTEX_INITIALIZER;
-
-// Daemon state
-#ifndef NO_DAEMONIZE
-static pid_t sid;
-static FILE *logf = NULL;
-#endif
-static char *log; /** determined based on machine name */
-static const char wd[] = "."; //! working dir of runtime once exec'd
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
@@ -253,35 +234,9 @@ static void print_usage(void)
 	fprintf(stderr, usage_str);
 }
 
-static int daemonize(void)
+static int setsignals(void)
 {
 	struct sigaction action;
-#ifndef NO_DAEMONIZE
-	int logfd = -1;
-
-	printf(">:[ daemonizing ... log file at %s/%s\n", wd, log);
-
-	pid_t pid = fork();
-	if (pid < 0)
-		return -(errno);
-	if (pid > 0)
-		_exit(0);
-
-	umask(0);
-	chdir(wd);
-
-	if (0 > (logf = fopen(log, "w")))
-		return -(errno);
-	logfd = fileno(logf);
-	if (0 > dup2(logfd, 0))
-		return -(errno);
-	if (0 > dup2(logfd, 1))
-		return -(errno);
-
-	if (0 > (sid = setsid()))
-		return -(errno);
-	printf("Send SIGINT to pid %d to terminate daemon.\n", getpid());
-#endif	/* !NO_DAEMONIZE */
 
 	memset(&action, 0, sizeof(action));
 	action.sa_handler = sigint_handler;
@@ -309,23 +264,13 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	/** configure log file name */
-	log = calloc(1, HOST_NAME_MAX << 1);
-	if (!log) {
-		fprintf(stderr, "No memory left\n");
-		exit(1);
-	}
-	strcat(log, "runtime-");
-	gethostname((log + strlen(log)), HOST_NAME_MAX);
-	strcat(log, ".log");
-
     /* clean stray message queues so /dev/mqueue doesn't overflow */
     if (0 > attach_clean()) {
         fprintf(stderr, "> Error cleaning stray MQs\n");
         return -1;
     }
 
-	if (0 > daemonize())
+	if (0 > setsignals())
 		return -1;
 
 	if (argc == 2)

@@ -55,7 +55,6 @@ args['timing'] = ARGUMENTS.get('timing', 0)
 # XXX DO NOT run multi-threaded codes with timing_native
 args['timing_native'] = ARGUMENTS.get('timing_native', 0)
 args['network'] = ARGUMENTS.get('network', 'eth')
-args['daemon'] = ARGUMENTS.get('daemon', 0)
 # Options you'd want to turn off
 args['pipelining'] = ARGUMENTS.get('pipelining', 1)
 
@@ -88,9 +87,6 @@ elif args['network'] == 'sdp':
 else:
 	print('--> network flag invalid')
 	sys.exit(1)
-
-if not int(args['daemon']):
-	ccflags.append('-DNO_DAEMONIZE')
 
 if not int(args['pipelining']):
     ccflags.append('-DNO_PIPELINING')
