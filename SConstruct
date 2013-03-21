@@ -100,7 +100,6 @@ home = os.environ['HOME']
 local_lpath = [home + '/local/lib']
 local_cpath = [home + '/local/include']
 icc = '/opt/intel/composer_xe_2011_sp1.8.273/bin/intel64/icc'
-gcc = 'gcc'
 
 # env values common across all files in project
 libpath = [cuda_root + '/lib64', '/lib64']
@@ -114,7 +113,7 @@ ENV['kid'].Append(LIBPATH = libpath + local_lpath)
 
 ENV['prost'] = ENV['kid']
 
-ENV['shiva'] = Environment(CCFLAGS = ccflags, LIBS = libs)
+ENV['shiva'] = Environment(CC = 'gcc', CCFLAGS = ccflags, LIBS = libs)
 ENV['shiva'].Append(CPPPATH = cpath)
 ENV['shiva'].Append(LIBPATH = libpath)
 

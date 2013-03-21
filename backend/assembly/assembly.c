@@ -331,14 +331,13 @@ __decompose_assembly(struct assembly *assm)
     }
 }
 
-// spawn the remotesink process that listens for and executes CUDA RPCs, acting
-// as the sink-tip of remote vgpus in assemblies
+extern int start_remote_sink(void);
+
 static int
 remote_enable(void)
 {
-	int err;
-	pid_t pid;
-
+    return start_remote_sink();
+#if 0
     if (0 != access("remotesink", R_OK)) {
         fprintf(stderr, "> remotesink not found in current directory\n");
         return -1;
@@ -369,8 +368,10 @@ remote_enable(void)
 	// We're the child. Exec the remote sink.
 	err = execl("remotesink", REMOTE_EXEC_NAME, NULL);
 	_exit(-1); // execl only returns on error
+#endif
 }
 
+#if 0
 static int
 remote_disable(void)
 {
@@ -398,6 +399,7 @@ remote_disable(void)
 	pthread_mutex_unlock(&internals->lock);
 	return 0;
 }
+#endif
 
 // forward declaration
 int add_participant(struct node_participant *p);
@@ -454,7 +456,7 @@ node_main_init(void)
 
 fail:
 	rpc_disable();
-	remote_disable();
+	//remote_disable();
 	if (p) free(p);
 	return -1;
 }
@@ -462,7 +464,7 @@ fail:
 static int
 node_main_shutdown(void)
 {
-	int err, exit_errno = 0;
+	int exit_errno = 0;
 	struct node_participant *node_pos = NULL, *node_tmp = NULL;
 
 	rpc_disable();
@@ -489,11 +491,13 @@ node_main_shutdown(void)
 		fprintf(stderr, "Assemblies still exist!\n");
 	}
 
+#if 0
 	err = remote_disable();
 	if (err < 0) {
 		fprintf(stderr, "Could not shutdown remotesink PID %d\n",
 				internals->rsink_pid);
 	}
+#endif
 
 	free(internals);
 	internals = NULL;
@@ -574,7 +578,7 @@ node_minion_init(const char *main_ip)
 fail:
 	rpc_close(&state->rpc_conn);
 	if (p) free(p);
-    remote_disable();
+    //remote_disable();
 	return exit_errno;
 }
 
@@ -608,11 +612,13 @@ node_minion_shutdown(void)
 		exit_errno = err;
 		goto fail;
 	}
+#if 0
 	err = remote_disable();
 	if (err < 0) {
 		fprintf(stderr, "Could not shutdown remotesink PID %d\n",
 				internals->rsink_pid);
 	}
+#endif
 	return 0;
 fail:
 	return exit_errno;

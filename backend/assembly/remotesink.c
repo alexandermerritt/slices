@@ -786,6 +786,7 @@ setup(void)
 	if (err < 0)
 		return -1;
 
+#if 0
 	// Install a handler for our term sig so it doesn't kill us
 	struct sigaction action;
 	memset(&action, 0, sizeof(action));
@@ -796,10 +797,12 @@ setup(void)
 		printd(DBG_ERROR, "Could not install sig handler.\n");
 		return -1;
 	}
+#endif
 
 	return 0;
 }
 
+#if 0
 static void
 wait_for_termination(void)
 {
@@ -822,9 +825,16 @@ teardown(void)
 	halt_rpc_thread(admin_thread);
 	_exit(0);
 }
+#endif
 
 /*-------------------------------------- PUBLIC FUNCTIONS --------------------*/
 
+int start_remote_sink(void)
+{
+    return setup();
+}
+
+#if 0
 int main(int argc, char *argv[])
 {
 	int err;
@@ -845,3 +855,4 @@ int main(int argc, char *argv[])
 
 	teardown(); // doesn't return
 }
+#endif

@@ -33,9 +33,6 @@
 #include <mq.h>
 #include <util/timer.h>
 
-// Directory-immediate includes
-#include "sinks.h"
-
 //#define VARIABLE_BATCHING
 
 #ifdef VARIABLE_BATCHING

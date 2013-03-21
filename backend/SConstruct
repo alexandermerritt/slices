@@ -27,8 +27,6 @@ for src in files:
 files = os.listdir('assembly/')
 for src in files:
 	(name,ext) = os.path.splitext(src)
-	if 'remotesink' in name:
-		continue
 	if '.c' == ext.lower():
 		sources.append('assembly/' + src)
 
@@ -43,5 +41,5 @@ sources.append('../common/mq.c')
 biny = env.Program('shadowfax', ['runtime.c', sources])
 env.Install(INSTALL_DIR + '/bin', biny)
 
-biny = env.Program('remotesink', ['assembly/remotesink.c', sources])
-env.Install(INSTALL_DIR + '/bin', biny)
+#biny = env.Program('remotesink', ['assembly/remotesink.c', sources])
+#env.Install(INSTALL_DIR + '/bin', biny)
