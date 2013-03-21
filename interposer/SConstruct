@@ -25,7 +25,6 @@ for src in files:
 	if '.c' == ext.lower():
 		sources.append('../backend/assembly/' + src)
 
-sources.remove('shm.c');
 sources.append('../common/cuda/execute.c')
 sources.append('../common/cuda/marshal_hidden.c')
 sources.append('../common/cuda/rpc.c')
