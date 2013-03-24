@@ -1,4 +1,5 @@
 #include "glob.h"
+#include <precudart.h>
 
 /* XXX must be called before first cuda call is made
  * Interposer connects to runtime and queries for an assembly. runtime exports
@@ -28,4 +29,38 @@ int assm_cuda_tini(void)
 
 void cudaJmpTblConstructor(void)
 {
+    preCudaJmp.cudaGetDevice                = assm_cudaGetDevice;
+    preCudaJmp.cudaGetDeviceCount           = assm_cudaGetDeviceCount;
+    preCudaJmp.cudaGetDeviceProperties      = assm_cudaGetDeviceProperties;
+    preCudaJmp.cudaSetDevice                = assm_cudaSetDevice;
+    preCudaJmp.cudaSetDeviceFlags           = assm_cudaSetDeviceFlags;
+    preCudaJmp.cudaSetValidDevices          = assm_cudaSetValidDevices;
+
+    preCudaJmp.cudaConfigureCall            = assm_cudaConfigureCall;
+    preCudaJmp.cudaLaunch                   = assm_cudaLaunch;
+    preCudaJmp.cudaSetupArgument            = assm_cudaSetupArgument;
+
+    preCudaJmp.__cudaRegisterFatBinary      = assm__cudaRegisterFatBinary;
+    preCudaJmp.__cudaRegisterFunction       = assm__cudaRegisterFunction;
+    preCudaJmp.__cudaRegisterVar            = assm__cudaRegisterVar;
+    preCudaJmp.__cudaUnregisterFatBinary    = assm__cudaUnregisterFatBinary;
+
+    preCudaJmp.cudaFree                     = assm_cudaFree;
+    preCudaJmp.cudaFreeArray                = assm_cudaFreeArray;
+    preCudaJmp.cudaFreeHost                 = assm_cudaFreeHost;
+    preCudaJmp.cudaHostAlloc                = assm_cudaHostAlloc;
+    preCudaJmp.cudaMalloc                   = assm_cudaMalloc;
+    preCudaJmp.cudaMallocArray              = assm_cudaMallocArray;
+    preCudaJmp.cudaMallocPitch              = assm_cudaMallocPitch;
+    preCudaJmp.cudaMemcpy                   = assm_cudaMemcpy;
+    preCudaJmp.cudaMemcpyAsync              = assm_cudaMemcpyAsync;
+    preCudaJmp.cudaMemcpyFromSymbol         = assm_cudaMemcpyFromSymbol;
+    preCudaJmp.cudaMemcpyToArray            = assm_cudaMemcpyToArray;
+    preCudaJmp.cudaMemcpyToSymbol           = assm_cudaMemcpyToSymbol;
+
+    preCudaJmp.cudaStreamCreate             = assm_cudaStreamCreate;
+    preCudaJmp.cudaStreamSynchronize        = assm_cudaStreamSynchronize;
+
+    preCudaJmp.cudaThreadExit               = assm_cudaThreadExit;
+    preCudaJmp.cudaThreadSynchronize        = assm_cudaThreadSynchronize;
 }

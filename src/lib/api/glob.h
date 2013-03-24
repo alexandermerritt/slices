@@ -9,7 +9,8 @@
 
 #include <cuda/bypass.h>
 #include <assembly.h>
-#include "internals.h"
+#include <util/compiler.h>
+#include "../../assembly/internals.h"
 
 /* Things to know
  * - thread/vgpu association; if none exist, must put thread into some vgpu
@@ -36,6 +37,11 @@ struct tinfo *__lookup(pthread_t tid);
 #define VGPU_IS_LOCAL(vgpu) ((vgpu)->fixation == VGPU_LOCAL)
 
 extern struct assembly * assembly_find(asmid_t id);
+extern struct assembly *assm;
+extern struct tinfo tinfos[32];
+extern pthread_mutex_t tinfo_lock;
+extern asmid_t assm_id;
+extern int num_tids;
 
 /*
  * Preprocessor magic to reduce typing
@@ -44,7 +50,9 @@ extern struct assembly * assembly_find(asmid_t id);
 #define FUNC_SETUP \
     void *buf = NULL; \
     struct tinfo *tinfo; \
-    tinfo = __lookup(pthread_self())
+    tinfo = __lookup(pthread_self()); \
+    BUG(!tinfo); \
+    BUG(!assm)
 
 #define FUNC_SETUP_CERR \
     FUNC_SETUP; \

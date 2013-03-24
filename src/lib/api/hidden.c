@@ -4,12 +4,30 @@
 // CUDA Runtime API - Hidden Registration
 //===----------------------------------------------------------------------===//
 
+static int num_binaries = 0;
+
+int join_scheduler(void);
+int leave_scheduler(void);
+extern bool scheduler_joined;
+
+/* TODO duplicate call */
 void**
 assm__cudaRegisterFatBinary(void *cubin)
 {
-    /* TODO duplicate call */
-    FUNC_SETUP;
+    void *buf = NULL;
+    struct tinfo *tinfo;
     void** ret;
+
+    if (!scheduler_joined) {
+        if (join_scheduler()) {
+            fprintf(stderr, ">> Error attaching to daemon\n");
+            exit(1);
+        }
+        fill_bypass(&bypass);
+    }
+    num_binaries++;
+
+    BUG(!(tinfo = __lookup(pthread_self())));
 
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
         ret = bypass.__cudaRegisterFatBinary(cubin);
@@ -19,6 +37,7 @@ assm__cudaRegisterFatBinary(void *cubin)
         rpc_ops.registerFatBinary(buf, NULL, rpc(tinfo));
         ret = cpkt_ret_hdl(buf);
     }
+    printd(DEBUG_INFO, "ret %p\n", ret);
     return ret;
 }
 
@@ -51,6 +70,10 @@ void assm__cudaUnregisterFatBinary(void** fatCubinHandle)
         pack_cudaUnregisterFatBinary(buf, fatCubinHandle);
         rpc_ops.unregisterFatBinary(buf, NULL, rpc(tinfo));
     }
+
+    if (scheduler_joined && --num_binaries == 0)
+        if (leave_scheduler())
+            fprintf(stderr, ">> Error detaching to daemon\n");
 }
 
 void assm__cudaRegisterVar(void **fatCubinHandle, char *hostVar, char
