@@ -5,26 +5,37 @@ Shadowfax Distributed GPGPU Assembly Runtime
 Author: Alexander Merritt, merritt.alex@gatech.edu (main author)
 
 Contributors (direct or indirect):
-    Magda Slawinska, magg@gatech.edu (some marshaling/RPC code, build system)
+    Magda Slawinska, magg@gatech.edu (some marshaling/RPC code, old build system)
     Abhishek Verma (MS - RPC protocol and paper in VTDC'11)
-    Vishakha Gupta (original marshaling code)
+    Vishakha Gupta (original marshaling code and virtualization work)
 
 This implementation of the 'Shadowfax' software is based on GViM developed by
 Vishakha Gupta (published in GPUVirt 2009) for virtualized systems, providing a
 distributed runtime for applications to transparently utilize GPUs across a
 cluster. Code originally in GViM is now scarce in Shadowfax (e.g. the
-cuda_packet specification).
- 
+cuda_packet specification) and will continue to disappear.
  
 1. Building the code
 
-Dependencies: scons (python), NVIDIA CUDA, GNU GCC
+Dependencies: scons (python), NVIDIA CUDA, GNU GCC, LLVM Clang, gpu-remote
 
-Produce build/bin/ and build/lib/
+gpu-remote provides an interposer (and soon marshaling code) as a separate
+project. Obtain here:
 
-    $ scons [dbg=1] [network=sdp]
+    $ git clone https://bitbucket.org/alex_merritt/gpu-remote.git
+    $ cd src/CUDA/vX.Y/preload
+    $ scons
+    # scons install
+    # ldconfig
 
-By default, Ethernet is selected.
+Build Shadowfax. This produces two binaries: src/shadowfax and
+src/lib/libsfcuda.so
+
+    $ scons [debug=1] [network=sdp]
+
+By default, Ethernet is selected. If CUDA is installed in another location
+
+    $ CUDA_ROOT=/path/to/cuda scons [debug=1] [network=sdp]
 
 One instance of 'shadowfax' must be run on each node
 
@@ -37,8 +48,8 @@ To clean
 
 	$ scons -c
 
-Keeneland - use the GNU Compiler toolchain and point the appropriate cuda
-variables in the SConstruct file to the location of the NVIDIA
+Keeneland - use the GNU Compiler toolchain (instead of ICC or PGC) and point the
+appropriate cuda variables in the SConstruct file to the location of the NVIDIA
 toolchain/libraries.
 
 2. Applications
@@ -53,18 +64,28 @@ policy=[local_first|remote_only]
 batch_size=M
 
 N=0 -> not an MPI program
-N>0 -> all hints with equal N specify process belongs to same program
+N>0 -> all hints with same N-value indicate process belongs to same program
 
 M=0 -> use default batch size (8192 packets)
 M>0 -> set batch to flush when full or on M RPC packets (M <= 8192)
 
 local_first ->  for each vGPU given to process
-                    find first unmapped GPU, else
+                    find first unmapped local GPU, else
                     share some local GPU
 remote_only ->  for each vGPU given to process
                     find first unmapped remote GPU, else
                     share some remote GPU, else
                     fallback to local_first policy
+
+Run applications which were linked against NVIDIA's libraries using the
+following method:
+
+    $ LD_LIBRARY_PATH=src/lib LD_PRELOAD=libsfcuda.so:libprecudart.so ./app
+
+If you specify an assembly hint:
+
+    $ ASSEMBLY_HINT=$(pwd)/hintfile \
+        LD_LIBRARY_PATH=src/lib LD_PRELOAD=libsfcuda.so:libprecudart.so ./app
 
 3. Issues
 
