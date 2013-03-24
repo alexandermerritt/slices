@@ -5,9 +5,10 @@
 //===----------------------------------------------------------------------===//
 
 cudaError_t
-assm_cudaGetDevice(int *device);
+assm_cudaGetDevice(int *device)
 {
     struct tinfo *tinfo = __lookup(pthread_self());
+    BUG(!tinfo);
     *device = tinfo->vgpu->vgpu_id;
     return cudaSuccess;
 }
@@ -15,6 +16,7 @@ assm_cudaGetDevice(int *device);
 cudaError_t
 assm_cudaGetDeviceCount(int *count)
 {
+    BUG(!assm);
     *count = assm->num_gpus;
     return cudaSuccess;
 }

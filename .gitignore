@@ -5,3 +5,5 @@
 *.swp
 cscope.out
 build
+shadowfax
+core.*

@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <util/compiler.h>
 
 //////////////////////////////////////
 //
@@ -44,21 +45,19 @@
  */
 #define BUG(expr)						\
 	do {								\
-		if (expr) {						\
-			printd(DBG_ERROR, "BUG\n");	\
-			assert(0);					\
+		if (unlikely(expr)) {			\
+			printd(DBG_ERROR, "BUG '%s'\n", #expr);	\
+            abort();                    \
 		}								\
 	} while(0)							\
 
 #define printd(level, fmt, args...)                                     \
     do {                                                                \
-        if((level) <= DBG_LEVEL) {                                      \
-            printf("<%d> (%d:%d) %s::%s[%d]: ",							\
-					(level), getpid(),(pid_t)syscall(SYS_gettid),		\
-					__FILE__, __func__, __LINE__);   					\
-            printf(fmt, ##args);                                        \
-            fflush(stdout);                                             \
-        }                                                               \
+        printf("(%d:%d) %s::%s[%d]: ",							\
+				getpid(),(pid_t)syscall(SYS_gettid),		\
+				__FILE__, __func__, __LINE__);   					\
+        printf(fmt, ##args);                                        \
+        fflush(stdout);                                             \
     } while(0)
 
 /**
