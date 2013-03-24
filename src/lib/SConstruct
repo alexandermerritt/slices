@@ -7,36 +7,22 @@ import os
 __author__ = 'Alex Merritt'
 __email__ = 'merritt.alex@gatech.edu'
 
-Import('NODE_NAME', 'ENV', 'INSTALL_DIR')
-
-env = ENV[NODE_NAME]
+Import('env')
 
 sources = []
 
-files = os.listdir('./')
-for src in files:
-	(name,ext) = os.path.splitext(src)
-	if '.c' == ext.lower():
-		sources.append(src)
+def find_sources(paths):
+    global sources
+    for dir in paths:
+        files = os.listdir(dir)
+        for src in files:
+            (name,ext) = os.path.splitext(src)
+            if '.c' == ext.lower():
+                sources.append(dir + src)
 
-files = os.listdir('api/')
-for src in files:
-	(name,ext) = os.path.splitext(src)
-	if '.c' == ext.lower():
-		sources.append('api/' + src)
-
-files = os.listdir('../backend/assembly/')
-for src in files:
-	(name,ext) = os.path.splitext(src)
-	if '.c' == ext.lower():
-		sources.append('../backend/assembly/' + src)
-
-sources.append('../common/cuda/execute.c')
-sources.append('../common/cuda/marshal_hidden.c')
-sources.append('../common/cuda/rpc.c')
-sources.append('../common/cuda/bypass.c')
-sources.append('../common/io/sock.c')
-sources.append('../common/mq.c')
+find_sources(['./', 'api/', '../assembly/', '../cuda/', '../io/', '../'])
+sources.remove('../runtime.c')
+sources.remove('../assembly/remotesink.c')
 
 lib = env.SharedLibrary('libsfcuda.so', sources)
-env.Install(INSTALL_DIR + '/lib', lib)
+#env.Install(INSTALL_DIR + '/lib', lib)

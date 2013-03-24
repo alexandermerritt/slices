@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 
-""" Build file for the backend code. """
+""" Build file for the daemon. """
 
 import os
 import commands
@@ -9,37 +9,24 @@ import sys
 __author__ = 'Alex Merritt'
 __email__ = 'merritt.alex@gatech.edu'
 
-Import('NODE_NAME', 'ENV', 'INSTALL_DIR')
+Import('env')
 
-env = ENV[NODE_NAME]
 env.Append(LIBS = ['pthread', 'uuid', 'cudart', 'cuda'])
 
 sources = []
 
-files = os.listdir('./')
-for src in files:
-	(name,ext) = os.path.splitext(src)
-	if name in ['runtime', 'localsink']:
-		continue
-	if '.c' == ext.lower():
-		sources.append(src)
+def find_sources(paths):
+    global sources
+    for dir in paths:
+        files = os.listdir(dir)
+        for src in files:
+            (name,ext) = os.path.splitext(src)
+            if '.c' == ext.lower():
+                sources.append(dir + src)
 
-files = os.listdir('assembly/')
-for src in files:
-	(name,ext) = os.path.splitext(src)
-	if '.c' == ext.lower():
-		sources.append('assembly/' + src)
+find_sources(['./', 'cuda/', 'io/', 'assembly/'])
 
-sources.append('../common/cuda/execute.c')
-sources.append('../common/cuda/marshal_hidden.c')
-sources.append('../common/cuda/rpc.c')
-sources.append('../common/cuda/bypass.c')
-sources.append('../common/io/sock.c')
-sources.append('../common/util/rbtree.c')
-sources.append('../common/mq.c')
+prog = env.Program('shadowfax', sources)
+#env.Install(INSTALL_DIR + '/bin', prog)
 
-biny = env.Program('shadowfax', ['runtime.c', sources])
-env.Install(INSTALL_DIR + '/bin', biny)
-
-#biny = env.Program('remotesink', ['assembly/remotesink.c', sources])
-#env.Install(INSTALL_DIR + '/bin', biny)
+SConscript(['lib/SConstruct'])
