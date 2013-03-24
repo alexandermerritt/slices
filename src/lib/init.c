@@ -57,19 +57,14 @@ extern int assm_cuda_tini(void);
 // Daemon-attachment functions
 //===----------------------------------------------------------------------===//
 
-static int join_scheduler(void)
+int join_scheduler(void)
 {
     int err;
     char uuid_str[64];
     assembly_key_uuid assm_key;
 
     if (scheduler_joined)
-        return -1;
-
-#ifdef TIMING
-	timers_init();
-	timers_start_attach();
-#endif
+        return 0;
 
     scheduler_joined = true;
 
@@ -138,23 +133,15 @@ static int join_scheduler(void)
         return -1;
     }
 
-#ifdef TIMING
-    timers_stop_attach();
-#endif
-
     return 0;
 }
 
-static int leave_scheduler(void)
+int leave_scheduler(void)
 {
     int err;
 
     if (!scheduler_joined)
         return -1;
-
-#ifdef TIMING
-    timers_start_detach();
-#endif
 
     scheduler_joined = false;
 
@@ -194,10 +181,6 @@ static int leave_scheduler(void)
         return -1;
     }
 
-#ifdef TIMING
-    timers_stop_detach();
-#endif
-
     return 0;
 }
 
@@ -205,16 +188,29 @@ static int leave_scheduler(void)
 // Library constructors
 //===----------------------------------------------------------------------===//
 
-__attribute__((constructor)) void init(void)
+#if 0
+__attribute__((constructor)) void sfinit(void)
 {
-    if (join_scheduler()) {
-        fprintf(stderr, ">> Error joining runtime\n");
-        abort();
-    }
+    if (strstr(getenv("_"), "gdb"))
+        return;
+    if (scheduler_joined)
+        return;
+    fill_bypass(&bypass);
+    if (join_scheduler())
+        fprintf(stderr, ">> Error attaching to daemon\n");
+    else
+        printf(">> Attached to daemon.\n");
 }
 
-__attribute__((destructor)) void deinit(void)
+__attribute__((destructor)) void sftini(void)
 {
+    if (strstr(getenv("_"), "gdb"))
+        return;
+    if (!scheduler_joined)
+        return;
     if (leave_scheduler())
-        fprintf(stderr, ">> Error leaving runtime.\n");
+        fprintf(stderr, ">> Error leaving daemon\n");
+    else
+        printf(">> Detached from daemon.\n");
 }
+#endif

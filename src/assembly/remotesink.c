@@ -689,7 +689,6 @@ do_cuda_rpc(
 {
 	int retval = 0;
 	struct cuda_packet *pkt = NULL;
-	TIMER_DECLARE1(t);
 
 	BUG(!batch->buffer);
 
@@ -708,7 +707,6 @@ do_cuda_rpc(
 	pthread_testcancel();
 
 	// execute them in-place
-	TIMER_START(t);
 	printd(DBG_INFO, "executing %lu RPCs\n", batch->header.num_pkts);
 	size_t pkt_num;
 	for (pkt_num = 0; pkt_num < batch->header.num_pkts; pkt_num++) {
@@ -718,7 +716,6 @@ do_cuda_rpc(
 			return -1;
 		}
 	}
-	TIMER_END(t, pkt->lat.remote.batch_exec);
 
 #ifndef NO_PIPELINING
     if (pkt->is_sync) { /* only send return packet if it is synchronous */

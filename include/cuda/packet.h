@@ -26,7 +26,6 @@
 // Project includes
 #include <cuda/method_id.h>
 #include <util/list.h>
-#include <util/timer.h>
 
 #define MAX_ARGS 6
 
@@ -140,60 +139,6 @@ typedef union ret_extra {
 	void **handle;	    // Used to return fatCubinHandle
 } ret_extra_t;
 
-/**
- * Measurements of time spent by a cuda_packet RPC within each component of the
- * runtime. Only allocated/updated if macro TIMING is defined.
- */
-struct rpc_latencies {
-	struct {
-		uint64_t setup; //! marshaling (always zero if local)
-		uint64_t wait;  //! lib waiting on NV CUDA (local) or RPC (remote)
-	} lib;
-	struct {
-		uint64_t setup; //! Argument setup and symbol/cubin lookup time
-		uint64_t call;  //! Latency in the CUDA runtime/driver
-	} exec; //! latencies on remote end, except if TIMING_NATIVE is defined
-	struct {
-		uint64_t append; //! Time squandered doing memcpy to the batch buffer
-		uint64_t send; //! Time spent sending the batch
-		//! Time spent waiting for the return packet (and receipt of said
-		//! packet). Includes time spent at remote machine executing RPCs
-		//! (exec.setup + exec.call).
-		uint64_t wait;
-		uint64_t recv; //! Time spent receiving return data (if required)
-	} rpc; // cuda/rpc.c (all zeros if vgpu is not remote)
-	struct {
-		// rpc.{send|wait|recv} - batch_exec = time on network
-		// batch_exec - exec.{setup|call} = batch unpacking
-		uint64_t batch_exec; //! Executing all RPCs in a batch
-	} remote; // on remote machine (all zeros if vgpu is not remote)
-    size_t len; // length of packet + data
-};
-#ifdef TIMING
-#define LAT_DECLARE(name) \
-    struct rpc_latencies _lat = LATENCIES_INIT; \
-    struct rpc_latencies *name = &_lat
-/* add all latency values within a cuda_packet to the provided lat structure */
-#define LAT_UPDATE(lat,cpkt) \
-{ \
-    (lat)->lib.setup  += ((struct cuda_packet*)cpkt)->lat.lib.setup; \
-    (lat)->lib.wait   += ((struct cuda_packet*)cpkt)->lat.lib.wait; \
-    (lat)->exec.setup += ((struct cuda_packet*)cpkt)->lat.exec.setup; \
-    (lat)->exec.call  += ((struct cuda_packet*)cpkt)->lat.exec.call; \
-    (lat)->rpc.append += ((struct cuda_packet*)cpkt)->lat.rpc.append; \
-    (lat)->rpc.send   += ((struct cuda_packet*)cpkt)->lat.rpc.send; \
-    (lat)->rpc.wait   += ((struct cuda_packet*)cpkt)->lat.rpc.wait; \
-    (lat)->rpc.recv   += ((struct cuda_packet*)cpkt)->lat.rpc.recv; \
-    (lat)->remote.batch_exec += ((struct cuda_packet*)cpkt)->lat.remote.batch_exec; \
-    (lat)->len += ((struct cuda_packet*)cpkt)->len; \
-}
-#else   /* !TIMING */
-#define LAT_DECLARE(name)   void *name = NULL
-#define LAT_UPDATE(lat,cpkt)
-#endif	/* TIMING */
-
-#define LATENCIES_INIT  { {0,0}, {0,0}, {0,0,0,0}, {0}, 0 }
-
 typedef struct cuda_packet {
 	method_id_t method_id;     // to identify which method
 	uint16_t req_id;        // to identify which request is the response for in case async
@@ -203,9 +148,6 @@ typedef struct cuda_packet {
 	size_t len; //! total bytes of marshalled packet incl appended data
 	bool is_sync; //! whether this func must be interposed/invoked synchronously
 	ret_extra_t ret_ex_val; // return value from call filled in response packet
-#ifdef TIMING
-    struct rpc_latencies lat;
-#endif
 } cuda_packet_t;
 
 /* cudaError_t return value of RPC packet */

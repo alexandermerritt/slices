@@ -97,25 +97,15 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 	struct cuda_pkt_batch *batch = &rpc->batch;
 	size_t payload_len = 0UL;
 
-	TIMER_DECLARE1(t);
-#ifdef TIMING
-	// Need separate variables for some measurements because a cuda packet isn't
-	// available for writing until we pull in the return packet.
-	uint64_t put_time; // time spent sending batch
-	uint64_t wait_time = 0UL; // = (wait on return pkt) + (receipt of pkt)
-#endif	/* TIMING */
-
 	printd(DBG_INFO, "pkts = %lu size = %lu\n",
 			batch->header.num_pkts, batch->header.bytes_used);
 
-	TIMER_START(t);
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, &batch->header, sizeof(batch->header)) );
 #if defined(NIC_SDP)
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->buffer, batch->header.bytes_used + ZCPY_TRIGGER_SZ) );
 #else
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->buffer, batch->header.bytes_used) );
 #endif
-	TIMER_END(t, put_time);
 
 #ifndef NO_PIPELINING
     struct cuda_packet *last_pkt = NULL;
@@ -124,34 +114,24 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
          (intptr_t)batch->header.offsets[batch->header.num_pkts - 1]);
     if (last_pkt->is_sync) { /* only expect a return packet if last is sync */
 #endif
-	    TIMER_START(t); // time execution of batch and receipt of return packet
+
 #if defined(NIC_SDP)
 	    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt) + ZCPY_TRIGGER_SZ) );
 #else
 	    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt)) );
 #endif
-	    TIMER_END(t, wait_time);
 
 	    payload_len = return_pkt->len - sizeof(*return_pkt);
 	    if (payload_len > 0) {
-		    TIMER_START(t);
 #if defined(NIC_SDP)
 		    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len + ZCPY_TRIGGER_SZ) );
 #else
 		    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len) );
 #endif
-		    TIMER_END(t, return_pkt->lat.rpc.recv);
 	    }
 #ifndef NO_PIPELINING
     }
 #endif
-
-#ifdef TIMING
-	// Restore measurements. Can't save them initially to the return packet
-	// because it is overwritten upon actual receipt of the packet.
-	return_pkt->lat.rpc.send = put_time;
-	return_pkt->lat.rpc.wait = wait_time;
-#endif	/* TIMING */
 
 	return 0;
 fail:
@@ -169,9 +149,6 @@ batch_clear(struct cuda_pkt_batch *batch)
 static int
 batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 {
-	TIMER_DECLARE1(t);
-	TIMER_START(t);
-
 	// We append unless we do not have space or the packet holds state for a
 	// synchronous function call
 
@@ -196,8 +173,6 @@ batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 
 	memcpy((void*)buf_ptr, pkt, rpc_size);
 	batch->header.bytes_used += rpc_size;
-
-	TIMER_END(t, pkt->lat.rpc.append);
 
 	if (pkt->is_sync || (batch->header.num_pkts >= batch->max)) {
 		printd(DBG_INFO, "\t--> flushing\n");
