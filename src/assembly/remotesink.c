@@ -437,11 +437,7 @@ admission_thread(void *arg)
 #else
 #error NIC_* not defined
 #endif
-	if (err < 0) {
-        printd(DBG_ERROR, "could not bind local port\n");
-		state->exit_code = -ENETDOWN;
-		pthread_exit(NULL);
-	}
+    BUG(err < 0 && "could not bind local port");
 
 	while (1) {
 		struct sockconn new_conn;
