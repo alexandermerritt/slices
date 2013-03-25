@@ -19,6 +19,15 @@ typedef cudaError_t (*fn_cudaBindTexture)(size_t*, const struct textureReference
 typedef cudaError_t (*fn_cudaBindTextureToArray)(const struct textureReference*, const struct cudaArray*,const struct cudaChannelFormatDesc*);
 typedef cudaError_t (*fn_cudaConfigureCall)(dim3 gridDim, dim3 blockDim, size_t, cudaStream_t);
 typedef cudaError_t (*fn_cudaDriverGetVersion)(int*);
+
+typedef cudaError_t (*fn_cudaEventCreate)(cudaEvent_t*);
+typedef cudaError_t (*fn_cudaEventCreateWithFlags)(cudaEvent_t*, unsigned int);
+typedef cudaError_t (*fn_cudaEventRecord)(cudaEvent_t, cudaStream_t);
+typedef cudaError_t (*fn_cudaEventQuery)(cudaEvent_t);
+typedef cudaError_t (*fn_cudaEventSynchronize)(cudaEvent_t);
+typedef cudaError_t (*fn_cudaEventDestroy)(cudaEvent_t);
+typedef cudaError_t (*fn_cudaEventElapsedTime)(float*, cudaEvent_t, cudaEvent_t);
+
 typedef cudaError_t (*fn_cudaFreeArray)(struct cudaArray*);
 typedef cudaError_t (*fn_cudaFreeHost)(void*);
 typedef cudaError_t (*fn_cudaFree)(void*);
@@ -33,6 +42,7 @@ typedef cudaError_t (*fn_cudaLaunch)(const char*);
 typedef cudaError_t (*fn_cudaMallocArray)(struct cudaArray**, const struct cudaChannelFormatDesc*, size_t, size_t, unsigned int);
 typedef cudaError_t (*fn_cudaMallocPitch)(void**, size_t*, size_t, size_t);
 typedef cudaError_t (*fn_cudaMalloc)(void**, size_t);
+typedef cudaError_t (*fn_cudaMallocHost)(void**, size_t);
 typedef cudaError_t (*fn_cudaMemcpyAsync)(void*, const void*, size_t, enum cudaMemcpyKind, cudaStream_t);
 typedef cudaError_t (*fn_cudaMemcpyFromSymbol)(void*, const char*, size_t, size_t, enum cudaMemcpyKind);
 typedef cudaError_t (*fn_cudaMemcpyToArray)(struct cudaArray*, size_t, size_t, const void*, size_t, enum cudaMemcpyKind);
@@ -70,6 +80,13 @@ struct bypass
 	fn_cudaConfigureCall       	cudaConfigureCall;
 	fn_cudaCreateChannelDesc   	cudaCreateChannelDesc;
 	fn_cudaDriverGetVersion    	cudaDriverGetVersion;
+	fn_cudaEventCreate			cudaEventCreate;
+	fn_cudaEventCreateWithFlags	cudaEventCreateWithFlags;
+	fn_cudaEventDestroy			cudaEventDestroy;
+	fn_cudaEventElapsedTime		cudaEventElapsedTime;
+	fn_cudaEventRecord			cudaEventRecord;
+	fn_cudaEventQuery			cudaEventQuery;
+	fn_cudaEventSynchronize		cudaEventSynchronize;
 	fn_cudaFreeArray           	cudaFreeArray;
 	fn_cudaFree                	cudaFree;
 	fn_cudaFreeHost            	cudaFreeHost;
@@ -84,6 +101,7 @@ struct bypass
 	fn_cudaLaunch              	cudaLaunch;
 	fn_cudaMallocArray         	cudaMallocArray;
 	fn_cudaMalloc              	cudaMalloc;
+	fn_cudaMallocHost          	cudaMallocHost;
 	fn_cudaMallocPitch         	cudaMallocPitch;
 	fn_cudaMemcpyAsync         	cudaMemcpyAsync;
 	fn_cudaMemcpy              	cudaMemcpy;

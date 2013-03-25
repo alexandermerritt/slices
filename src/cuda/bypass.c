@@ -34,6 +34,12 @@ void fill_bypass(struct bypass *bypass)
 	bypass->cudaConfigureCall          =  dlsym(cuda_handle,  "cudaConfigureCall");
 	bypass->cudaCreateChannelDesc      =  dlsym(cuda_handle,  "cudaCreateChannelDesc");
 	bypass->cudaDriverGetVersion       =  dlsym(cuda_handle,  "cudaDriverGetVersion");
+	bypass->cudaEventCreate            =  dlsym(cuda_handle,  "cudaEventCreate");
+	bypass->cudaEventCreateWithFlags   =  dlsym(cuda_handle,  "cudaEventCreateWithFlags");
+	bypass->cudaEventDestroy           =  dlsym(cuda_handle,  "cudaEventDestroy");
+	bypass->cudaEventElapsedTime       =  dlsym(cuda_handle,  "cudaEventElapsedTime");
+	bypass->cudaEventRecord            =  dlsym(cuda_handle,  "cudaEventRecord");
+	bypass->cudaEventSynchronize       =  dlsym(cuda_handle,  "cudaEventSynchronize");
 	bypass->cudaFreeArray              =  dlsym(cuda_handle,  "cudaFreeArray");
 	bypass->cudaFree                   =  dlsym(cuda_handle,  "cudaFree");
 	bypass->cudaFreeHost               =  dlsym(cuda_handle,  "cudaFreeHost");
@@ -48,6 +54,7 @@ void fill_bypass(struct bypass *bypass)
 	bypass->cudaLaunch                 =  dlsym(cuda_handle,  "cudaLaunch");
 	bypass->cudaMallocArray            =  dlsym(cuda_handle,  "cudaMallocArray");
 	bypass->cudaMalloc                 =  dlsym(cuda_handle,  "cudaMalloc");
+	bypass->cudaMallocHost             =  dlsym(cuda_handle,  "cudaMallocHost");
 	bypass->cudaMallocPitch            =  dlsym(cuda_handle,  "cudaMallocPitch");
 	bypass->cudaMemcpyAsync            =  dlsym(cuda_handle,  "cudaMemcpyAsync");
 	bypass->cudaMemcpy                 =  dlsym(cuda_handle,  "cudaMemcpy");

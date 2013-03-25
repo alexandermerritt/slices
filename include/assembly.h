@@ -240,6 +240,7 @@ cudaError_t assm_cudaLaunch(const char*);
 cudaError_t assm_cudaMallocArray(struct cudaArray**, const struct cudaChannelFormatDesc*, size_t, size_t, unsigned int);
 cudaError_t assm_cudaMallocPitch(void**, size_t*, size_t, size_t);
 cudaError_t assm_cudaMalloc(void**, size_t);
+cudaError_t assm_cudaMallocHost(void**, size_t);
 cudaError_t assm_cudaMemcpyAsync(void*, const void*, size_t, enum cudaMemcpyKind, cudaStream_t);
 cudaError_t assm_cudaMemcpyFromSymbol(void*, const char*, size_t, size_t, enum cudaMemcpyKind);
 cudaError_t assm_cudaMemcpyToArray(struct cudaArray*, size_t, size_t, const void*, size_t, enum cudaMemcpyKind);
@@ -259,6 +260,14 @@ cudaError_t assm_cudaStreamQuery(cudaStream_t);
 cudaError_t assm_cudaStreamSynchronize(cudaStream_t);
 cudaError_t assm_cudaThreadExit(void);
 cudaError_t assm_cudaThreadSynchronize(void);
+
+cudaError_t assm_cudaEventCreate(cudaEvent_t*);
+cudaError_t assm_cudaEventCreateWithFlags(cudaEvent_t*, unsigned int);
+cudaError_t assm_cudaEventRecord(cudaEvent_t, cudaStream_t);
+cudaError_t assm_cudaEventQuery(cudaEvent_t);
+cudaError_t assm_cudaEventSynchronize(cudaEvent_t);
+cudaError_t assm_cudaEventDestroy(cudaEvent_t);
+cudaError_t assm_cudaEventElapsedTime(float*, cudaEvent_t, cudaEvent_t);
 
 void** assm__cudaRegisterFatBinary(void*);
 void   assm__cudaRegisterFunction(void**, const char*, char*, const char*, int, uint3*, uint3*, dim3*, dim3*, int*);

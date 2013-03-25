@@ -87,6 +87,22 @@ cudaError_t assm_cudaMalloc(void **devPtr, size_t size)
     return cerr;
 }
 
+cudaError_t assm_cudaMallocHost(void **devPtr, size_t size)
+{
+    FUNC_SETUP_CERR;
+    if (VGPU_IS_LOCAL(tinfo->vgpu)) {
+        cerr = bypass.cudaMallocHost(devPtr, size);
+    } else {
+        BUG("not implemented");
+        init_buf(&buf, tinfo);
+        //pack_cudaMallocHost(buf, size);
+        //rpc_ops.mallocHost(buf, NULL, rpc(tinfo));
+        //extract_cudaMalloc(buf, devPtr); /* XXX include in timing */
+        //cerr = cpkt_ret_err(buf);
+    }
+    return cerr;
+}
+
 cudaError_t assm_cudaMallocArray(
         struct cudaArray **array,
         const struct cudaChannelFormatDesc *desc,

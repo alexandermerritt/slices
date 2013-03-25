@@ -40,6 +40,13 @@ void cudaJmpTblConstructor(void)
     preCudaJmp.cudaLaunch                   = assm_cudaLaunch;
     preCudaJmp.cudaSetupArgument            = assm_cudaSetupArgument;
 
+    preCudaJmp.cudaEventCreate              = assm_cudaEventCreate;
+    preCudaJmp.cudaEventCreateWithFlags     = assm_cudaEventCreateWithFlags;
+    preCudaJmp.cudaEventDestroy             = assm_cudaEventDestroy;
+    preCudaJmp.cudaEventElapsedTime         = assm_cudaEventElapsedTime;
+    preCudaJmp.cudaEventRecord              = assm_cudaEventRecord;
+    preCudaJmp.cudaEventSynchronize         = assm_cudaEventSynchronize;
+
     preCudaJmp.__cudaRegisterFatBinary      = assm__cudaRegisterFatBinary;
     preCudaJmp.__cudaRegisterFunction       = assm__cudaRegisterFunction;
     preCudaJmp.__cudaRegisterVar            = assm__cudaRegisterVar;
@@ -50,6 +57,7 @@ void cudaJmpTblConstructor(void)
     preCudaJmp.cudaFreeHost                 = assm_cudaFreeHost;
     preCudaJmp.cudaHostAlloc                = assm_cudaHostAlloc;
     preCudaJmp.cudaMalloc                   = assm_cudaMalloc;
+    preCudaJmp.cudaMallocHost               = assm_cudaMallocHost;
     preCudaJmp.cudaMallocArray              = assm_cudaMallocArray;
     preCudaJmp.cudaMallocPitch              = assm_cudaMallocPitch;
     preCudaJmp.cudaMemcpy                   = assm_cudaMemcpy;
@@ -59,6 +67,7 @@ void cudaJmpTblConstructor(void)
     preCudaJmp.cudaMemcpyToSymbol           = assm_cudaMemcpyToSymbol;
 
     preCudaJmp.cudaStreamCreate             = assm_cudaStreamCreate;
+    preCudaJmp.cudaStreamDestroy            = assm_cudaStreamDestroy;
     preCudaJmp.cudaStreamSynchronize        = assm_cudaStreamSynchronize;
 
     preCudaJmp.cudaThreadExit               = assm_cudaThreadExit;
