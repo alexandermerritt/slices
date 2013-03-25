@@ -133,6 +133,19 @@ int cleanFatCubinInfo(struct cuda_fatcubin_info * pFatCInfo);
  *
  * The functions below don't assume the cuda_packet is stored in the memory
  * buffer, as they accept a separate argument for the marshaled argument data.
+ *
+ * Protocol
+ *
+ *      Client          Server
+ *      ------          ------
+ *      pack_()
+ *      [send]   ---->  [recv]
+ *                      unpack_()
+ *                      [issue call to nv]
+ *                      insert_()
+ *      [recv]   <----  [send]
+ *      extract_()
+ *      [ret to caller]
  */
 
 //
@@ -381,6 +394,169 @@ unpack_cudaStreamSynchronize(struct cuda_packet *pkt,
 }
 
 //
+// Event Management API
+//
+
+static inline void
+pack_cudaEventCreate(struct cuda_packet *pkt)
+{
+	pkt->method_id = CUDA_EVENT_CREATE;
+	pkt->thr_id = pthread_self();
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = method_synctable[pkt->method_id];
+}
+
+// no unpack required
+
+static inline void
+insert_cudaEventCreate(struct cuda_packet *pkt, cudaEvent_t event)
+{
+	pkt->args[0].event = event;
+}
+
+static inline void
+extract_cudaEventCreate(struct cuda_packet *pkt, cudaEvent_t *eventPtr)
+{
+	*eventPtr = pkt->args[0].event;
+}
+
+static inline void
+pack_cudaEventCreateWithFlags(struct cuda_packet *pkt, unsigned int flags)
+{
+	pkt->method_id = CUDA_EVENT_CREATE_WITH_FLAGS;
+	pkt->thr_id = pthread_self();
+	pkt->args[0].arr_arguii[0] = flags;
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = method_synctable[pkt->method_id];
+}
+
+static inline void
+unpack_cudaEventCreateWithFlags(struct cuda_packet *pkt, unsigned int *flags)
+{
+	*flags = pkt->args[0].arr_arguii[0];
+}
+
+static inline void
+insert_cudaEventCreateWithFlags(struct cuda_packet *pkt, cudaEvent_t event)
+{
+	pkt->args[1].event = event;
+}
+
+static inline void
+extract_cudaEventCreateWithFlags(struct cuda_packet *pkt, cudaEvent_t *eventPtr)
+{
+	*eventPtr = pkt->args[1].event;
+}
+
+static inline void
+pack_cudaEventDestroy(struct cuda_packet *pkt, cudaEvent_t event)
+{
+	pkt->method_id = CUDA_EVENT_DESTROY;
+	pkt->thr_id = pthread_self();
+	pkt->args[0].event = event;
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = method_synctable[pkt->method_id];
+}
+
+static inline void
+unpack_cudaEventDestroy(struct cuda_packet *pkt, cudaEvent_t *eventPtr)
+{
+    *eventPtr = pkt->args[0].event;
+}
+
+// no insert or extract needed
+
+static inline void
+pack_cudaEventElapsedTime(struct cuda_packet *pkt,
+        cudaEvent_t start, cudaEvent_t end)
+{
+	pkt->method_id = CUDA_EVENT_ELAPSED_TIME;
+	pkt->thr_id = pthread_self();
+	pkt->args[0].event = start;
+	pkt->args[1].event = end;
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = method_synctable[pkt->method_id];
+}
+
+static inline void
+unpack_cudaEventElapsedTime(struct cuda_packet *pkt,
+        cudaEvent_t *startPtr, cudaEvent_t *endPtr)
+{
+    *startPtr   = pkt->args[0].event;
+    *endPtr     = pkt->args[1].event;
+}
+
+static inline void
+insert_cudaEventElapsedTime(struct cuda_packet *pkt, float ms)
+{
+    pkt->args[2].argf = ms;
+}
+
+static inline void
+extract_cudaEventElapsedTime(struct cuda_packet *pkt, float * ms)
+{
+    *ms = pkt->args[2].argf;
+}
+
+static inline void
+pack_cudaEventQuery(struct cuda_packet *pkt, cudaEvent_t event)
+{
+	pkt->method_id = CUDA_EVENT_QUERY;
+	pkt->thr_id = pthread_self();
+	pkt->args[0].event = event;
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = method_synctable[pkt->method_id];
+}
+
+static inline void
+unpack_cudaEventQuery(struct cuda_packet *pkt, cudaEvent_t *eventPtr)
+{
+    *eventPtr = pkt->args[0].event;
+}
+
+// no insert or extract needed
+
+static inline void
+pack_cudaEventRecord(struct cuda_packet *pkt,
+        cudaEvent_t event, cudaStream_t stream)
+{
+	pkt->method_id = CUDA_EVENT_RECORD;
+	pkt->thr_id = pthread_self();
+	pkt->args[0].event = event;
+	pkt->args[1].stream = stream;
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = method_synctable[pkt->method_id];
+}
+
+static inline void
+unpack_cudaEventRecord(struct cuda_packet *pkt,
+        cudaEvent_t *eventPtr, cudaStream_t *streamPtr)
+{
+    *eventPtr = pkt->args[0].event;
+    *streamPtr = pkt->args[1].stream;
+}
+
+// no insert or extract needed
+
+static inline void
+pack_cudaEventSynchronize(struct cuda_packet *pkt, cudaEvent_t event)
+{
+	pkt->method_id = CUDA_EVENT_SYNCHRONIZE;
+	pkt->thr_id = pthread_self();
+	pkt->args[0].event = event;
+	pkt->len = sizeof(*pkt);
+	pkt->is_sync = method_synctable[pkt->method_id];
+}
+
+static inline void
+unpack_cudaEventSynchronize(struct cuda_packet *pkt, cudaEvent_t *eventPtr)
+{
+    *eventPtr = pkt->args[0].event;
+}
+
+// no insert or extract needed
+
+//
 // Execution Control API
 //
 
@@ -496,22 +672,6 @@ unpack_cudaFreeArray(struct cuda_packet *pkt,
 // TODO
 // 		cudaFreeHost
 // 		cudaHostAlloc - not an RPCable function
-
-static inline void
-pack_cudaFreeHost(struct cuda_packet *pkt, void *devPtr)
-{
-	pkt->method_id = CUDA_FREE_HOST;
-	pkt->thr_id = pthread_self();
-	pkt->args[0].argp = devPtr;
-	pkt->len = sizeof(*pkt);
-	pkt->is_sync = method_synctable[pkt->method_id];
-}
-
-static inline void
-unpack_cudaFreeHost(struct cuda_packet *pkt, void **devPtr)
-{
-	*devPtr = pkt->args[0].argp;
-}
 
 static inline void
 pack_cudaMalloc(struct cuda_packet *pkt, size_t size)

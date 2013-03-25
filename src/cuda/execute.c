@@ -85,7 +85,7 @@
 
 #define EXAMINE_CUDAERROR(pkt)									\
 	do {														\
-		if ((pkt)->ret_ex_val.err != cudaSuccess) {				\
+		if (unlikely((pkt)->ret_ex_val.err != cudaSuccess)) {	\
 			printd(DBG_ERROR, "returned non-success: %s\n",		\
 					cudaGetErrorString((pkt)->ret_ex_val.err));	\
 			BUG(1);												\
@@ -218,6 +218,88 @@ static OPS_FN_PROTO(CudaStreamSynchronize)
 
 	EXAMINE_CUDAERROR(pkt);
 	return 0;
+}
+
+//
+// Event Management API
+//
+
+static OPS_FN_PROTO(CudaEventCreate)
+{
+    cudaEvent_t event;
+    pkt->ret_ex_val.err = cudaEventCreate(&event);
+    printd(DBG_DEBUG, "event=%p ret=%u\n", event, pkt->ret_ex_val.err);
+    insert_cudaEventCreate(pkt, event);
+    EXAMINE_CUDAERROR(pkt);
+    return 0;
+}
+
+static OPS_FN_PROTO(CudaEventCreateWithFlags)
+{
+    cudaEvent_t event;
+    unsigned int flags;
+    unpack_cudaEventCreateWithFlags(pkt, &flags);
+    pkt->ret_ex_val.err = cudaEventCreateWithFlags(&event, flags);
+    printd(DBG_DEBUG, "flags=%x event=%p ret=%u\n",
+            flags, event, pkt->ret_ex_val.err);
+    insert_cudaEventCreateWithFlags(pkt, event);
+    EXAMINE_CUDAERROR(pkt);
+    return 0;
+}
+
+static OPS_FN_PROTO(CudaEventDestroy)
+{
+    cudaEvent_t event;
+    unpack_cudaEventDestroy(pkt, &event);
+    pkt->ret_ex_val.err = cudaEventDestroy(event);
+    printd(DBG_DEBUG, "event=%p ret=%u\n", event, pkt->ret_ex_val.err);
+    EXAMINE_CUDAERROR(pkt);
+    return 0;
+}
+
+static OPS_FN_PROTO(CudaEventElapsedTime)
+{
+    float ms;
+    cudaEvent_t start, end;
+    unpack_cudaEventElapsedTime(pkt, &start, &end);
+    pkt->ret_ex_val.err = cudaEventElapsedTime(&ms, start, end);
+    insert_cudaEventElapsedTime(pkt, ms);
+    printd(DBG_DEBUG, "start=%p end=%p ms=%f ret=%u\n",
+            start, end, ms, pkt->ret_ex_val.err);
+    EXAMINE_CUDAERROR(pkt);
+    return 0;
+}
+
+static OPS_FN_PROTO(CudaEventQuery)
+{
+    cudaEvent_t event;
+    unpack_cudaEventQuery(pkt, &event);
+    pkt->ret_ex_val.err = cudaEventQuery(event);
+    printd(DBG_DEBUG, "event=%p ret=%u\n", event, pkt->ret_ex_val.err);
+    EXAMINE_CUDAERROR(pkt);
+    return 0;
+}
+
+static OPS_FN_PROTO(CudaEventRecord)
+{
+    cudaEvent_t event;
+    cudaStream_t stream;
+    unpack_cudaEventRecord(pkt, &event, &stream);
+    pkt->ret_ex_val.err = cudaEventRecord(event, stream);
+    printd(DBG_DEBUG, "event=%p stream=%p ret=%u\n",
+            event, stream, pkt->ret_ex_val.err);
+    EXAMINE_CUDAERROR(pkt);
+    return 0;
+}
+
+static OPS_FN_PROTO(CudaEventSynchronize)
+{
+    cudaEvent_t event;
+    unpack_cudaEventSynchronize(pkt, &event);
+    pkt->ret_ex_val.err = cudaEventSynchronize(event);
+    printd(DBG_DEBUG, "event=%p ret=%u\n", event, pkt->ret_ex_val.err);
+    EXAMINE_CUDAERROR(pkt);
+    return 0;
 }
 
 //
@@ -942,6 +1024,15 @@ const struct cuda_ops exec_ops =
 	.freeHost = CudaFreeHost,
 	.funcGetAttributes = CudaFuncGetAttributes,
 	.getTextureReference = CudaGetTextureReference,
+
+	.eventCreate            = CudaEventCreate,
+	.eventCreateWithFlags   = CudaEventCreateWithFlags,
+	.eventDestroy           = CudaEventDestroy,
+	.eventElapsedTime       = CudaEventElapsedTime,
+	.eventQuery             = CudaEventQuery,
+	.eventRecord            = CudaEventRecord,
+	.eventSynchronize       = CudaEventSynchronize,
+
 	.hostAlloc = CudaHostAlloc,
 	.mallocArray = CudaMallocArray,
 	.malloc = CudaMalloc,

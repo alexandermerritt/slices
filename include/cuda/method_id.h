@@ -73,6 +73,13 @@ typedef enum METHOD_ID {
 	CUDA_STREAM_QUERY,
 	CUDA_STREAM_SYNCHRONIZE,
 	CUDA_CREATE_CHANNEL_DESC,
+	CUDA_EVENT_CREATE,
+	CUDA_EVENT_CREATE_WITH_FLAGS,
+	CUDA_EVENT_RECORD,
+	CUDA_EVENT_QUERY,
+	CUDA_EVENT_SYNCHRONIZE,
+	CUDA_EVENT_DESTROY,
+	CUDA_EVENT_ELAPSED_TIME,
 	CUDA_METHOD_LIMIT
 } method_id_t;
 
@@ -139,7 +146,14 @@ method_synctable[CUDA_METHOD_LIMIT] = {
 	[CUDA_STREAM_DESTROY]                =  false,
 	[CUDA_STREAM_QUERY]                  =  false,
 	[CUDA_STREAM_SYNCHRONIZE]            =  true,
-	[CUDA_CREATE_CHANNEL_DESC]           =  true
+	[CUDA_CREATE_CHANNEL_DESC]           =  true,
+	[CUDA_EVENT_CREATE]                  =  true,
+	[CUDA_EVENT_CREATE_WITH_FLAGS]       =  true,
+	[CUDA_EVENT_RECORD]                  =  true,
+	[CUDA_EVENT_QUERY]                   =  true,
+	[CUDA_EVENT_SYNCHRONIZE]             =  true,
+	[CUDA_EVENT_DESTROY]                 =  false,
+	[CUDA_EVENT_ELAPSED_TIME]            =  true
 };
 
 static const char *

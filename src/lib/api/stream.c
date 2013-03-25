@@ -14,7 +14,7 @@ cudaError_t assm_cudaStreamCreate(cudaStream_t *pStream)
         init_buf(&buf, tinfo);
         pack_cudaStreamCreate(buf);
         rpc_ops.streamCreate(buf, NULL, rpc(tinfo));
-        extract_cudaStreamCreate(buf, pStream); /* XXX include in timing */
+        extract_cudaStreamCreate(buf, pStream);
         cerr = cpkt_ret_err(buf);
     }
     return cerr;
@@ -28,10 +28,9 @@ cudaError_t assm_cudaStreamDestroy(cudaStream_t stream)
         bypass.cudaStreamDestroy(stream);
     } else {
         init_buf(&buf, tinfo);
-        BUG("not implemented");
-        //pack_cudaStreamSynchronize(buf, stream);
-        //rpc_ops.streamSynchronize(buf, NULL, rpc(tinfo));
-        //cerr = cpkt_ret_err(buf);
+        pack_cudaStreamDestroy(buf, stream);
+        rpc_ops.streamDestroy(buf, NULL, rpc(tinfo));
+        cerr = cpkt_ret_err(buf);
     }
     return cerr;
 }

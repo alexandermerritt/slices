@@ -121,6 +121,7 @@ typedef union args {
 	size_t arr_argi[2];
 	unsigned long long arr_argui[2];
 	dim3 arg_dim;                       // 3D point
+	cudaEvent_t event;
 	cudaStream_t stream;
 	struct cudaArray *cudaArray; // this is an opaque type; contains a handle
 	struct cudaChannelFormatDesc desc;

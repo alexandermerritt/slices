@@ -4,34 +4,33 @@
 // CUDA Runtime API - Event Management
 //===----------------------------------------------------------------------===//
 
-cudaError_t assm_cudaEventCreate(cudaEvent_t * event)
+cudaError_t assm_cudaEventCreate(cudaEvent_t * eventPtr)
 {
     FUNC_SETUP_CERR;
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
-        cerr = bypass.cudaEventCreate(event);
+        cerr = bypass.cudaEventCreate(eventPtr);
     } else {
-        BUG("not implemented");
         init_buf(&buf, tinfo);
-        //pack_cudaMallocHost(buf, size);
-        //rpc_ops.mallocHost(buf, NULL, rpc(tinfo));
-        //extract_cudaMalloc(buf, devPtr); /* XXX include in timing */
-        //cerr = cpkt_ret_err(buf);
+        pack_cudaEventCreate(buf);
+        rpc_ops.eventCreate(buf, NULL, rpc(tinfo));
+        extract_cudaEventCreate(buf, eventPtr);
+        cerr = cpkt_ret_err(buf);
     }
     return cerr;
 }
 
-cudaError_t assm_cudaEventCreateWithFlags(cudaEvent_t * event, unsigned int flags)
+cudaError_t assm_cudaEventCreateWithFlags(cudaEvent_t * eventPtr,
+        unsigned int flags)
 {
     FUNC_SETUP_CERR;
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
-        cerr = bypass.cudaEventCreateWithFlags(event, flags);
+        cerr = bypass.cudaEventCreateWithFlags(eventPtr, flags);
     } else {
-        BUG("not implemented");
         init_buf(&buf, tinfo);
-        //pack_cudaMallocHost(buf, size);
-        //rpc_ops.mallocHost(buf, NULL, rpc(tinfo));
-        //extract_cudaMalloc(buf, devPtr); /* XXX include in timing */
-        //cerr = cpkt_ret_err(buf);
+        pack_cudaEventCreateWithFlags(buf, flags);
+        rpc_ops.eventCreateWithFlags(buf, NULL, rpc(tinfo));
+        extract_cudaEventCreateWithFlags(buf, eventPtr);
+        cerr = cpkt_ret_err(buf);
     }
     return cerr;
 }
@@ -42,12 +41,10 @@ cudaError_t assm_cudaEventRecord(cudaEvent_t event, cudaStream_t stream)
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
         cerr = bypass.cudaEventRecord(event, stream);
     } else {
-        BUG("not implemented");
         init_buf(&buf, tinfo);
-        //pack_cudaMallocHost(buf, size);
-        //rpc_ops.mallocHost(buf, NULL, rpc(tinfo));
-        //extract_cudaMalloc(buf, devPtr); /* XXX include in timing */
-        //cerr = cpkt_ret_err(buf);
+        pack_cudaEventRecord(buf, event, stream);
+        rpc_ops.eventRecord(buf, NULL, rpc(tinfo));
+        cerr = cpkt_ret_err(buf);
     }
     return cerr;
 }
@@ -58,12 +55,10 @@ cudaError_t assm_cudaEventQuery(cudaEvent_t event)
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
         cerr = bypass.cudaEventQuery(event);
     } else {
-        BUG("not implemented");
         init_buf(&buf, tinfo);
-        //pack_cudaMallocHost(buf, size);
-        //rpc_ops.mallocHost(buf, NULL, rpc(tinfo));
-        //extract_cudaMalloc(buf, devPtr); /* XXX include in timing */
-        //cerr = cpkt_ret_err(buf);
+        pack_cudaEventQuery(buf, event);
+        rpc_ops.eventQuery(buf, NULL, rpc(tinfo));
+        cerr = cpkt_ret_err(buf);
     }
     return cerr;
 }
@@ -74,12 +69,10 @@ cudaError_t assm_cudaEventSynchronize(cudaEvent_t event)
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
         cerr = bypass.cudaEventSynchronize(event);
     } else {
-        BUG("not implemented");
         init_buf(&buf, tinfo);
-        //pack_cudaMallocHost(buf, size);
-        //rpc_ops.mallocHost(buf, NULL, rpc(tinfo));
-        //extract_cudaMalloc(buf, devPtr); /* XXX include in timing */
-        //cerr = cpkt_ret_err(buf);
+        pack_cudaEventSynchronize(buf, event);
+        rpc_ops.eventSynchronize(buf, NULL, rpc(tinfo));
+        cerr = cpkt_ret_err(buf);
     }
     return cerr;
 }
@@ -90,28 +83,26 @@ cudaError_t assm_cudaEventDestroy(cudaEvent_t event)
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
         cerr = bypass.cudaEventDestroy(event);
     } else {
-        BUG("not implemented");
         init_buf(&buf, tinfo);
-        //pack_cudaMallocHost(buf, size);
-        //rpc_ops.mallocHost(buf, NULL, rpc(tinfo));
-        //extract_cudaMalloc(buf, devPtr); /* XXX include in timing */
-        //cerr = cpkt_ret_err(buf);
+        pack_cudaEventDestroy(buf, event);
+        rpc_ops.eventDestroy(buf, NULL, rpc(tinfo));
+        cerr = cpkt_ret_err(buf);
     }
     return cerr;
 }
 
-cudaError_t assm_cudaEventElapsedTime(float * ms, cudaEvent_t start, cudaEvent_t end)
+cudaError_t assm_cudaEventElapsedTime(float * ms,
+        cudaEvent_t start, cudaEvent_t end)
 {
     FUNC_SETUP_CERR;
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
         cerr = bypass.cudaEventElapsedTime(ms, start, end);
     } else {
-        BUG("not implemented");
         init_buf(&buf, tinfo);
-        //pack_cudaMallocHost(buf, size);
-        //rpc_ops.mallocHost(buf, NULL, rpc(tinfo));
-        //extract_cudaMalloc(buf, devPtr); /* XXX include in timing */
-        //cerr = cpkt_ret_err(buf);
+        pack_cudaEventElapsedTime(buf, start, end);
+        rpc_ops.eventElapsedTime(buf, NULL, rpc(tinfo));
+        extract_cudaEventElapsedTime(buf, ms);
+        cerr = cpkt_ret_err(buf);
     }
     return cerr;
 }

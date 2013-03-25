@@ -54,20 +54,31 @@ cudaError_t assm_cudaFreeHost(void *ptr)
  *
  * We ignore flags for now, it only specifies performance not correctness.
  */
-cudaError_t assm_cudaHostAlloc(void **pHost, size_t size, unsigned int flags)
+cudaError_t assm_cudaHostAlloc(void **hostPtr, size_t size, unsigned int flags)
 {
     FUNC_SETUP_CERR;
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
-        cerr = bypass.cudaHostAlloc(pHost, size, flags);
+        cerr = bypass.cudaHostAlloc(hostPtr, size, flags);
     } else {
-        /*init_buf(&buf, tinfo);*/
         buf = NULL; /* hush compiler, don't cry */
-        *pHost = malloc(size);
-        if (!*pHost) {
-            fprintf(stderr, "> Out of memory: %s\n", __func__);
-            return cudaErrorMemoryAllocation;
-        }
         cerr = cudaSuccess;
+		if (!(*hostPtr = malloc(size)))
+			cerr = cudaErrorMemoryAllocation;
+    }
+    return cerr;
+}
+
+// this is the 'old' version of the newer cudaHostAlloc
+cudaError_t assm_cudaMallocHost(void **hostPtr, size_t size)
+{
+    FUNC_SETUP_CERR;
+    if (VGPU_IS_LOCAL(tinfo->vgpu)) {
+        cerr = bypass.cudaMallocHost(hostPtr, size);
+    } else {
+        buf = NULL; /* hush compiler, don't cry */
+        cerr = cudaSuccess;
+		if (!(*hostPtr = malloc(size)))
+			cerr = cudaErrorMemoryAllocation;
     }
     return cerr;
 }
@@ -83,22 +94,6 @@ cudaError_t assm_cudaMalloc(void **devPtr, size_t size)
         rpc_ops.malloc(buf, NULL, rpc(tinfo));
         extract_cudaMalloc(buf, devPtr); /* XXX include in timing */
         cerr = cpkt_ret_err(buf);
-    }
-    return cerr;
-}
-
-cudaError_t assm_cudaMallocHost(void **devPtr, size_t size)
-{
-    FUNC_SETUP_CERR;
-    if (VGPU_IS_LOCAL(tinfo->vgpu)) {
-        cerr = bypass.cudaMallocHost(devPtr, size);
-    } else {
-        BUG("not implemented");
-        init_buf(&buf, tinfo);
-        //pack_cudaMallocHost(buf, size);
-        //rpc_ops.mallocHost(buf, NULL, rpc(tinfo));
-        //extract_cudaMalloc(buf, devPtr); /* XXX include in timing */
-        //cerr = cpkt_ret_err(buf);
     }
     return cerr;
 }

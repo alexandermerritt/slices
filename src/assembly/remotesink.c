@@ -507,6 +507,15 @@ demux(struct cuda_packet *pkt, struct fatcubins *cubins)
 		case CUDA_MEMCPY_H2D:
 			exec_ops.memcpyH2D(pkt);
 			break;
+		case CUDA_MEMCPY_ASYNC_D2D:
+			exec_ops.memcpyAsyncD2D(pkt);
+			break;
+		case CUDA_MEMCPY_ASYNC_D2H:
+			exec_ops.memcpyAsyncD2H(pkt);
+			break;
+		case CUDA_MEMCPY_ASYNC_H2D:
+			exec_ops.memcpyAsyncH2D(pkt);
+			break;
 		case CUDA_MEMSET:
 			exec_ops.memset(pkt);
 			break;
@@ -548,6 +557,28 @@ demux(struct cuda_packet *pkt, struct fatcubins *cubins)
 			break;
 		case CUDA_STREAM_SYNCHRONIZE:
 			exec_ops.streamSynchronize(pkt);
+			break;
+
+		case CUDA_EVENT_CREATE:
+			exec_ops.eventCreate(pkt);
+			break;
+		case CUDA_EVENT_CREATE_WITH_FLAGS:
+			exec_ops.eventCreateWithFlags(pkt);
+			break;
+		case CUDA_EVENT_DESTROY:
+			exec_ops.eventDestroy(pkt);
+			break;
+		case CUDA_EVENT_ELAPSED_TIME:
+			exec_ops.eventElapsedTime(pkt);
+			break;
+		case CUDA_EVENT_QUERY:
+			exec_ops.eventQuery(pkt);
+			break;
+		case CUDA_EVENT_RECORD:
+			exec_ops.eventRecord(pkt);
+			break;
+		case CUDA_EVENT_SYNCHRONIZE:
+			exec_ops.eventSynchronize(pkt);
 			break;
 
 			// Functions which take a cuda_packet* and fatcubins*

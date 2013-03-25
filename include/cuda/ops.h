@@ -44,6 +44,15 @@ struct cuda_ops
 	OPS_FN_PROTO_PTR(getMemInfo);
 	OPS_FN_PROTO_PTR(getTextureReference);
 	OPS_FN_PROTO_PTR(hostAlloc);
+
+	OPS_FN_PROTO_PTR(eventCreate);
+	OPS_FN_PROTO_PTR(eventCreateWithFlags);
+	OPS_FN_PROTO_PTR(eventDestroy);
+	OPS_FN_PROTO_PTR(eventElapsedTime);
+	OPS_FN_PROTO_PTR(eventQuery);
+	OPS_FN_PROTO_PTR(eventRecord);
+	OPS_FN_PROTO_PTR(eventSynchronize);
+
 	OPS_FN_PROTO_PTR(malloc);
 	OPS_FN_PROTO_PTR(mallocArray);
 	OPS_FN_PROTO_PTR(mallocPitch);
@@ -82,6 +91,6 @@ struct cuda_ops
 };
 
 extern const struct cuda_ops exec_ops;
-extern const struct cuda_ops rpc_ops;
+extern struct cuda_ops rpc_ops;
 
 #endif	/* _CUDA_OPS_H */

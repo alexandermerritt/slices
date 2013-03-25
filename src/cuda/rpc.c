@@ -238,36 +238,29 @@ fail:
 	return exit_errno;
 }
 
-const struct cuda_ops rpc_ops =
+struct cuda_ops rpc_ops;
+
+// XXX HACK
+//
+// Need to set all members of rpc_ops to same function, but because it is a
+// struct, there doesn't seem to be a clean compile-time method for this. Even
+// no clean runtime method :) It's problematic when new functions are added to
+// struct rpc_ops and are not updated in either exec_ops or rpc_ops. This is a
+// dynamic library constructor which is called once when libsfcuda.so is loaded,
+// allowing new members to be added to point to the same function without having
+// to change this code.
+//
+// TODO Since all rpc_ops point to the same function, I might as well just not
+// use the structure... It was around originally because we used a generic
+// rpc_ops pointer depending on local/remote vGPU state to avoid knowing which
+// it was underneath.
+//
+// This assumes ALL members in rpc_ops are of the SAME TYPE/SIZE.
+__attribute__((constructor)) void init_rpc_ops(void)
 {
-	.setupArgument			= CudaDoRPC,
-	.configureCall			= CudaDoRPC,
-	.launch					= CudaDoRPC,
-	.freeArray				= CudaDoRPC,
-	.free					= CudaDoRPC,
-	//.freeHost				= CudaDoRPC,
-	.funcGetAttributes		= CudaDoRPC,
-	.malloc					= CudaDoRPC,
-	.threadSynchronize		= CudaDoRPC,
-	.mallocPitch			= CudaDoRPC,
-	.memcpyD2D				= CudaDoRPC,
-	.memcpyD2H				= CudaDoRPC,
-	.memcpyFromSymbolD2H	= CudaDoRPC,
-	.memcpyH2D				= CudaDoRPC,
-	.memcpyToSymbolH2D		= CudaDoRPC,
-	.memcpyToSymbolAsyncH2D	= CudaDoRPC,
-	.memset					= CudaDoRPC,
-	.memGetInfo				= CudaDoRPC,
-	.registerFatBinary		= CudaDoRPC,
-	.registerFunction		= CudaDoRPC,
-	.registerVar			= CudaDoRPC,
-	.setDevice				= CudaDoRPC,
-	.setDeviceFlags			= CudaDoRPC,
-	.setValidDevices		= CudaDoRPC,
-	.streamCreate			= CudaDoRPC,
-	.streamDestroy			= CudaDoRPC,
-	.streamQuery			= CudaDoRPC,
-	.streamSynchronize		= CudaDoRPC,
-	.threadExit				= CudaDoRPC,
-	.unregisterFatBinary	= CudaDoRPC
-};
+    typedef OPS_FN_PROTO_PTR(ops_t);
+    ops_t *ops_ptr = (ops_t*) &rpc_ops;
+    int count = sizeof(struct cuda_ops) / sizeof(ops_t);
+    while (--count >= 0)
+        *ops_ptr++ = CudaDoRPC;
+}
