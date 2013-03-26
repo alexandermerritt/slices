@@ -4,8 +4,6 @@
 // Global variables
 //===----------------------------------------------------------------------===//
 
-cudaError_t cuda_err = cudaSuccess;
-
 unsigned int num_registered_cubins = 0;
 
 bool scheduler_joined = false;

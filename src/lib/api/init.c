@@ -72,4 +72,7 @@ void cudaJmpTblConstructor(void)
 
     preCudaJmp.cudaThreadExit               = assm_cudaThreadExit;
     preCudaJmp.cudaThreadSynchronize        = assm_cudaThreadSynchronize;
+
+    preCudaJmp.cudaGetErrorString           = assm_cudaGetErrorString;
+    preCudaJmp.cudaGetLastError             = assm_cudaGetLastError;
 }
