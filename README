@@ -91,3 +91,7 @@ If you specify an assembly hint:
 
 Compatibility for CUDA 4.x under development
 
+Keeneland - If your CUDA root directory is not /usr/local/cuda you can specify
+it as:
+
+    export CUDA_ROOT=$(cd path/to/root && pwd)

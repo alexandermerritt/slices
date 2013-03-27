@@ -7,7 +7,8 @@ import sys
 __author__ = "Alex Merritt"
 __email__ = "merritt.alex@gatech.edu"
 
-cuda_root = os.environ.get('CUDA_ROOT', '/usr/local/cuda')
+cc          = os.environ.get('CC', 'clang')
+cuda_root   = os.environ.get('CUDA_ROOT', '/usr/local/cuda')
 
 arg_debug       = int(ARGUMENTS.get('debug', 0))
 arg_network     = ARGUMENTS.get('network', 'eth')
@@ -21,8 +22,8 @@ home = os.environ['HOME']
 local_lpath = [home + '/local/lib']
 local_cpath = [home + '/local/include']
 
-libpath = [cuda_root + '/lib64', '/lib64']
-cpath = [cuda_root + '/include', os.getcwd() + '/include']
+libpath = [cuda_root + '/lib64', '/lib64', local_lpath]
+cpath = [cuda_root + '/include', os.getcwd() + '/include', local_cpath]
 libs = ['rt', 'dl']
 
 if arg_debug:
@@ -44,7 +45,7 @@ else:
 if not arg_pipelining:
     ccflags.append('-DNO_PIPELINING')
 
-env = Environment(CC = 'clang', CCFLAGS = ccflags, LIBS = libs)
+env = Environment(CC = cc, CCFLAGS = ccflags, LIBS = libs)
 env.Append(CPPPATH = cpath)
 env.Append(LIBPATH = libpath)
 
