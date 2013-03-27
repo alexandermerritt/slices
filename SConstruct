@@ -31,7 +31,7 @@ if arg_debug:
     ccflags.append('-O0')
     #libs.append('mcheck')
 else:
-    ccflags.append('-O2')
+    ccflags.append('-O3')
 
 if arg_network == 'eth':
     ccflags.append('-DNIC_ETHERNET')
