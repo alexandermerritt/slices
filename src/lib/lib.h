@@ -20,7 +20,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <uuid/uuid.h>
 
 // CUDA includes
 #include <__cudaFatFormat.h>

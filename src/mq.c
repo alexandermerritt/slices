@@ -43,7 +43,7 @@ struct message
     union {
         bool allow; /* to pid ATTACH_CONNECT_ALLOW */
         struct assembly_hint hint; /* to daemon ATTACH_REQUEST_ASSEMBLY */
-        assembly_key_uuid key; /* to pid ATTACH_ASSIGN_ASSEMBLY */
+        assembly_key key; /* to pid ATTACH_ASSIGN_ASSEMBLY */
     } m; /* actual message data */
 };
 
@@ -350,11 +350,11 @@ int attach_send_allow(struct mq_state *state, bool allow)
     return 0;
 }
 
-int attach_send_assembly(struct mq_state *state, assembly_key_uuid key)
+int attach_send_assembly(struct mq_state *state, assembly_key key)
 {
     struct message msg;
     msg.type = ATTACH_ASSIGN_ASSEMBLY;
-    memcpy(msg.m.key, key, sizeof(assembly_key_uuid));
+    msg.m.key = key;
     if (0 > send_message(state, &msg)) {
         fprintf(stderr, "Error sending message to PID %d\n", state->pid);
         return -1;
@@ -470,7 +470,7 @@ int attach_send_disconnect(struct mq_state *recv, struct mq_state *send)
 }
 
 int attach_send_request(struct mq_state *recv, struct mq_state *send,
-        struct assembly_hint *hint, assembly_key_uuid key)
+        struct assembly_hint *hint, assembly_key *key)
 {
     struct message msg;
 
@@ -491,7 +491,7 @@ int attach_send_request(struct mq_state *recv, struct mq_state *send,
         return -1;
     }
     if (msg.type == ATTACH_ASSIGN_ASSEMBLY) {
-        memcpy(key, msg.m.key, sizeof(assembly_key_uuid));
+        *key = msg.m.key;
     } else {
         fprintf(stderr, "Unexpected message recieved: %d\n", msg.type);
         return -1;

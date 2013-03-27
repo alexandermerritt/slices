@@ -1153,13 +1153,11 @@ int assembly_read_hint(struct assembly_hint *hint)
  * The idea of exporting and importing was a suggestion by Hrishikesh Amur.
  */
 
-// the uuid can be converted to a string using uuid_unparse(3)
-extern int export_assembly(const uuid_t, const struct assembly *assm);
-int assembly_export(asmid_t id, assembly_key_uuid key_uuid)
+extern int export_assembly(assembly_key key, const struct assembly *assm);
+int assembly_export(asmid_t id, assembly_key *key)
 {
 	int err, exit_errno;
 	struct assembly *assm = NULL;
-	uuid_t uuid;
 
 	BUG(!internals);
 
@@ -1178,13 +1176,12 @@ int assembly_export(asmid_t id, assembly_key_uuid key_uuid)
 	}
 
 	// TODO should I keep the lock while exporting?
-	uuid_generate(uuid);
-	err = export_assembly(uuid, assm);
+    *key = getpid();
+	err = export_assembly(*key, assm);
 	if (err < 0) {
 		exit_errno = -EIO;
 		goto fail;
 	}
-	memcpy(key_uuid, uuid, sizeof(uuid_t));
 	return 0;
 
 fail:
@@ -1192,9 +1189,8 @@ fail:
 	return exit_errno;
 }
 
-// the uuid can be converted from a string using uuid_parse(3)
-extern int import_assembly(const uuid_t, struct assembly *assm);
-int assembly_import(asmid_t *id, const assembly_key_uuid uuid)
+extern int import_assembly(assembly_key key, struct assembly *assm);
+int assembly_import(asmid_t *id, assembly_key key)
 {
 	int err, exit_errno;
 	struct assembly *assm = NULL;
@@ -1206,7 +1202,7 @@ int assembly_import(asmid_t *id, const assembly_key_uuid uuid)
 		exit_errno = -ENOMEM;
 		goto fail;
 	}
-	err = import_assembly(uuid, assm);
+	err = import_assembly(key, assm);
 	if (err < 0) {
 		if (err == -ENOENT)
 			exit_errno = -EINVAL;

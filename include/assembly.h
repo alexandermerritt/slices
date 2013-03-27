@@ -8,7 +8,6 @@
 #define _ASSEMBLY_H
 
 // System includes
-#include <uuid/uuid.h>
 #include <string.h>
 
 // Project includes
@@ -101,7 +100,7 @@ extern struct assembly_hint assembly_default_hint;
  * Data type representing a key used to export and import an assembly across
  * processes.
  */
-typedef uuid_t assembly_key_uuid;
+typedef pid_t assembly_key;
 
 /*-------------------------------------- FUNCTIONS ---------------------------*/
 
@@ -198,23 +197,23 @@ int assembly_vgpu_is_local(asmid_t id, int vgpu_id, bool *answer);
  * process. Assemblies can only be exported once.
  *
  * @param   id      ID of the assembly to export
- * @param   uuid    UUID identifying the export instance
+ * @param   key     key identifying the export instance
  * @return  zero    success
  *          -EIO    Couldn't complete the export
  */
-int assembly_export(asmid_t id, assembly_key_uuid uuid);
+int assembly_export(asmid_t id, assembly_key *key);
 
 /**
  * Import an assembly that was exported by another process.
  *
- * @param   id      UUID identifying the exported instance
- * @param   uuid    Assembly returned by a previous call to export. Unique to a
+ * @param   id      key (pid) identifying the exported instance
+ * @param   key     Assembly returned by a previous call to export. Unique to a
  *                  specific assembly.
  * @return  -EINVAL Invalid key or bad pointer
  *          -EIO    Couldn't complete the import
  *          zero    success
  */
-int assembly_import(asmid_t *id, const assembly_key_uuid uuid);
+int assembly_import(asmid_t *id, const assembly_key key);
 
 //! Print human-readable format of an assembly configuration.
 void assembly_print(asmid_t id);

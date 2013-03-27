@@ -18,7 +18,6 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <uuid/uuid.h>
 
 // Project includes
 #include <assembly.h>
@@ -28,10 +27,7 @@
 
 /*-------------------------------------- DEFINITIONS -------------------------*/
 
-//! Minimum len of a char[] needed to hold the string representation of a UUID 
-#define UUID_STR_LEN		64
-
-#define EXPORT_KEY_FMT		"assm-export-key-%s"
+#define EXPORT_KEY_FMT		"assm-export-key-%d"
 #define EXPORT_KEY_LEN		255
 #define EXPORT_SHM_FLAGS	(O_RDWR | O_CREAT | O_EXCL)
 #define EXPORT_SHM_MODE		0660	// -rw-rw----
@@ -45,19 +41,15 @@
 
 /*-------------------------------------- EXTERNAL FUNCTIONS ------------------*/
 
-int export_assembly(const uuid_t uuid, struct assembly *assm)
+int export_assembly(assembly_key key, struct assembly *assm)
 {
 	int err;
-	char uuid_str[UUID_STR_LEN];
 	char shm_file[EXPORT_KEY_LEN];
 	void *shm = NULL;
 	int shm_fd = -1;
 
-	memset(uuid_str, 0, UUID_STR_LEN);
 	memset(shm_file, 0, EXPORT_KEY_LEN);
-
-	uuid_unparse(uuid, uuid_str);
-	snprintf(shm_file, EXPORT_KEY_LEN, EXPORT_KEY_FMT, uuid_str);
+	snprintf(shm_file, EXPORT_KEY_LEN, EXPORT_KEY_FMT, key);
 
 	// create the shm file and map it in
 	shm_fd = shm_open(shm_file, EXPORT_SHM_FLAGS, EXPORT_SHM_MODE);
@@ -90,19 +82,16 @@ fail:
 	return -1;
 }
 
-int import_assembly(const uuid_t uuid, struct assembly *assm)
+int import_assembly(assembly_key key, struct assembly *assm)
 {
 	int err, exit_errno = -1;
-	char uuid_str[UUID_STR_LEN];
 	char shm_file[EXPORT_KEY_LEN];
 	void *shm = NULL;
 	int shm_fd = -1;
 
-	memset(uuid_str, 0, UUID_STR_LEN);
 	memset(shm_file, 0, EXPORT_KEY_LEN);
 
-	uuid_unparse(uuid, uuid_str);
-	snprintf(shm_file, EXPORT_KEY_LEN, EXPORT_KEY_FMT, uuid_str);
+	snprintf(shm_file, EXPORT_KEY_LEN, EXPORT_KEY_FMT, key);
 
 	// open the shm file and map it in
 	shm_fd = shm_open(shm_file, IMPORT_SHM_FLAGS, EXPORT_SHM_MODE);

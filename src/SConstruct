@@ -11,7 +11,7 @@ __email__ = 'merritt.alex@gatech.edu'
 
 Import('env')
 
-env.Append(LIBS = ['pthread', 'uuid', 'cudart', 'cuda'])
+env.Append(LIBS = ['pthread', 'cudart', 'cuda'])
 
 sources = []
 

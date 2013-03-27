@@ -58,7 +58,7 @@ static void msg_received(msg_event e, pid_t pid, void *data)
     int err;
     struct app *app = NULL;
     asmid_t asmid;
-    assembly_key_uuid key;
+    assembly_key key;
 
     switch ( e )
     {
@@ -124,20 +124,18 @@ static void msg_received(msg_event e, pid_t pid, void *data)
     case ATTACH_REQUEST_ASSEMBLY:
     {
         printd(DBG_INFO, "msg ATTACH_REQUEST_ASSEMBLY PID %d\n", pid);
-        char uuid_str[64];
         struct assembly_hint *hint = data;
 
         asmid = assembly_request(hint, pid);
 
         /* hand off to interposer for mapping */
-        err = assembly_export(asmid, key); /* modifies 'key' */
+        err = assembly_export(asmid, &key);
         if (err < 0) {
             fprintf(stderr, "Error exporting assm\n");
             break;
         }
 
-        uuid_unparse(key, uuid_str);
-        printd(DBG_INFO, "exported key '%s'\n", uuid_str);
+        printd(DBG_INFO, "exported key %d\n", key);
 
         /* add application to our list to track */
         pthread_mutex_lock(&apps_lock);

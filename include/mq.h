@@ -57,7 +57,7 @@ int attach_close(void);
 int attach_allow(struct mq_state *state, pid_t pid);
 int attach_dismiss(struct mq_state *state);
 int attach_send_allow(struct mq_state *state, bool allow);
-int attach_send_assembly(struct mq_state *state, assembly_key_uuid key);
+int attach_send_assembly(struct mq_state *state, assembly_key key);
 
 /* interposer functions */
 /* interposer does not receive asynchronous message notification from daemon */
@@ -66,7 +66,7 @@ int attach_tini(struct mq_state *recv, struct mq_state *send);
 int attach_send_connect(struct mq_state *recv, struct mq_state *send);
 int attach_send_disconnect(struct mq_state *recv, struct mq_state *send);
 int attach_send_request(struct mq_state *recv, struct mq_state *send,
-        struct assembly_hint *hint, assembly_key_uuid key);
+        struct assembly_hint *hint, assembly_key *key);
 
 /* if code crashes, call this to remove files this interface may have created
  * which were not cleaned up */

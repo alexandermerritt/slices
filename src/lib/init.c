@@ -18,7 +18,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <uuid/uuid.h>
 
 // CUDA includes
 #include <__cudaFatFormat.h>
@@ -60,8 +59,7 @@ extern int assm_cuda_tini(void);
 int join_scheduler(void)
 {
     int err;
-    char uuid_str[64];
-    assembly_key_uuid assm_key;
+    assembly_key assm_key;
 
     if (scheduler_joined)
         return 0;
@@ -99,14 +97,13 @@ int join_scheduler(void)
         fprintf(stderr, "> Error reading hint file\n");
         return -1;
     }
-    err = attach_send_request(&recv_mq, &send_mq, &hint, assm_key);
+    err = attach_send_request(&recv_mq, &send_mq, &hint, &assm_key);
     if (err < 0) {
         printd(DBG_ERROR, "Error attach_send_request: %d\n", err);
         fprintf(stderr, "Error attach_send_request: %d\n", err);
         return -1;
     }
-    uuid_unparse(assm_key, uuid_str);
-    printd(DBG_INFO, "Importing assm key from scheduler: '%s'\n", uuid_str);
+    printd(DBG_INFO, "Importing assm key from scheduler: '%d'\n", key);
 
     /* 'fix' the assembly on the network */
     err = assembly_import(&assm_id, assm_key);
