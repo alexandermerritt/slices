@@ -103,7 +103,6 @@ int join_scheduler(void)
         fprintf(stderr, "Error attach_send_request: %d\n", err);
         return -1;
     }
-    printd(DBG_INFO, "Importing assm key from scheduler: '%d'\n", key);
 
     /* 'fix' the assembly on the network */
     err = assembly_import(&assm_id, assm_key);
