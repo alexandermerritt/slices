@@ -1,14 +1,6 @@
 /**
  * @file runtime.c
- * @author Alex Merritt, merritt.alex@gatech.edu
- * @date 2011-10-25
- *
- * @brief Entry point for applications to enter assembly runtime. Watch for
- * applications to register, accept shared memory locations and assign them
- * assemblies.
- *
- * FIXME This file is a mess. Clean it up later to keep track of all sinks it
- * spawns. And find a reasonable way to specify assembly hint structures/files.
+ * @author Alexander Merritt, merritt.alex@gatech.edu
  */
 
 #define _GNU_SOURCE
@@ -17,8 +9,11 @@
 // System includes
 #include <assert.h>
 #include <errno.h>
+#include <getopt.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdlib.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,11 +28,30 @@
 #include <mq.h>
 #include <util/timer.h>
 
-/*-------------------------------------- EXTERNAL VARIABLES ------------------*/
+//===----------------------------------------------------------------------===//
+// Definitions
+//===----------------------------------------------------------------------===//
 
-/*-------------------------------------- INTERNAL STATE ----------------------*/
+typedef char dns_t[HOST_NAME_MAX];
 
-/* an application process using shadowfax */
+// Configuration flags
+struct flags {
+    int is_master, use_pbs;
+    int quiet; // hush stdout and stderr
+    int nohup; // catch SIGHUP
+};
+
+// Global state
+struct glob {
+    struct flags flags;
+    int pbs_num_nodes;  // valid if --pbs --master
+    dns_t *pbs_nodes;   // valid if --pbs --master
+    dns_t masterDNS;    // valid if --minion
+    struct list_head apps;
+    pthread_mutex_t apps_lock;
+};
+
+// Connecting process
 struct app
 {
     struct list_head link;
@@ -46,12 +60,28 @@ struct app
     pid_t pid;
     unsigned long pid_group; /* e.g. MPI ranks belonging to same app */
 };
-static LIST_HEAD(apps);
+
 #define for_each_app(app, apps) \
     list_for_each_entry(app, &apps, link)
-static pthread_mutex_t apps_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
+//===----------------------------------------------------------------------===//
+// State
+//===----------------------------------------------------------------------===//
+
+static struct glob glob;
+static int sigints_received = 0;
+static const struct option options[] = {
+    {"pbs", no_argument, (int*)&glob.flags.use_pbs, true},
+    {"quiet", no_argument, (int*)&glob.flags.quiet, true},
+    {"nohup", no_argument, (int*)&glob.flags.nohup, true},
+    {"master", no_argument, (int*)&glob.flags.is_master, true},
+    {"minion", required_argument, NULL, 'n'},
+    {NULL, no_argument, NULL, 0} // terminator
+};
+
+//===----------------------------------------------------------------------===//
+// Functions
+//===----------------------------------------------------------------------===//
 
 static void msg_received(msg_event e, pid_t pid, void *data)
 {
@@ -72,9 +102,9 @@ static void msg_received(msg_event e, pid_t pid, void *data)
             INIT_LIST_HEAD(&app->link);
             app->pid = pid;
 
-            pthread_mutex_lock(&apps_lock);
-            list_add(&app->link, &apps);
-            pthread_mutex_unlock(&apps_lock);
+            pthread_mutex_lock(&glob.apps_lock);
+            list_add(&app->link, &glob.apps);
+            pthread_mutex_unlock(&glob.apps_lock);
 
             err = attach_allow(&app->mq, pid); /* open app's mqueue */
             if (err < 0)
@@ -92,13 +122,13 @@ static void msg_received(msg_event e, pid_t pid, void *data)
     case ATTACH_DISCONNECT: /* process is going to die */
     {
         printd(DBG_INFO, "msg ATTACH_DISCONNECT PID %d\n", pid);
-        pthread_mutex_lock(&apps_lock);
-        for_each_app(app, apps)
+        pthread_mutex_lock(&glob.apps_lock);
+        for_each_app(app, glob.apps)
             if ( app->pid == pid )
                 break;
         if ( app )
             list_del(&app->link);
-        pthread_mutex_unlock(&apps_lock);
+        pthread_mutex_unlock(&glob.apps_lock);
         if ( app )
         {
             printd(DBG_INFO, "disconnect: found app state for PID %d\n", pid);
@@ -138,11 +168,11 @@ static void msg_received(msg_event e, pid_t pid, void *data)
         printd(DBG_INFO, "exported key %d\n", key);
 
         /* add application to our list to track */
-        pthread_mutex_lock(&apps_lock);
-        for_each_app(app, apps)
+        pthread_mutex_lock(&glob.apps_lock);
+        for_each_app(app, glob.apps)
             if ( app->pid == pid )
                 break;
-        pthread_mutex_unlock(&apps_lock);
+        pthread_mutex_unlock(&glob.apps_lock);
         if (app) {
             app->asmid = asmid;
             err = attach_send_assembly(&app->mq, key);
@@ -165,71 +195,91 @@ static void msg_received(msg_event e, pid_t pid, void *data)
     }
 }
 
-static void sigint_handler(int sig)
+// Opens PBS_NODEFILE to extract the unique node names.
+// Called only by --master when --pbs
+static int parse_pbs_nodes(void)
 {
-	; // Do nothing, just prevent it from killing us
-}
+    int idx, ret = -1;
+    FILE *file = NULL;
+    char *line = NULL;
+    const char *nodefile = NULL;
+    const int line_len = HOST_NAME_MAX;
 
-static int start_runtime(enum node_type type, const char *main_ip)
-{
-	int err;
-    err = attach_open(msg_received);
-    if ( err < 0 ) {
-        fprintf(stderr, "Could not open attach interface\n");
+    BUG(!glob.flags.is_master || !glob.flags.use_pbs);
+
+    if (!getenv("PBS_ENVIRONMENT")) {
+        fprintf(stderr, ">> Error: PBS environment variables don't seem to exist\n");
         return -1;
     }
-	err = assembly_runtime_init(type, main_ip);
-	if (err < 0) {
-		fprintf(stderr, "Could not initialize assembly runtime\n");
-		return -1;
-	}
-	return 0;
+    BUG(!getenv("PBS_NUM_NODES"));
+    glob.pbs_num_nodes = atoi(getenv("PBS_NUM_NODES"));
+    BUG(glob.pbs_num_nodes < 1);
+
+    nodefile = getenv("PBS_NODEFILE");
+    BUG(!nodefile);
+
+    if (!(file = fopen(nodefile, "r")))
+        goto out;
+    if (!(line = calloc(1, line_len)))
+        goto out;
+    if (!(glob.pbs_nodes = calloc(glob.pbs_num_nodes, sizeof(*glob.pbs_nodes))))
+        goto out;
+
+    if (gethostname(glob.pbs_nodes[0], HOST_NAME_MAX))
+        goto out;
+    *strchr(glob.pbs_nodes[0], '.') = '\0'; // make into short DNS
+    idx = 1;
+
+    char *prev = glob.pbs_nodes[0];
+    while (fgets(line, line_len, file)) {
+        if (!prev || !strstr(line, prev)) {
+            prev = glob.pbs_nodes[idx++];
+            sscanf(line, "%s\n", prev);
+        }
+    }
+    ret = 0;
+
+out:
+    if (ret) {
+        fprintf(stderr, ">> Error: %s: %s\n", __func__, strerror(errno));
+        if (glob.pbs_nodes)
+            free(glob.pbs_nodes);
+        glob.pbs_nodes = NULL;
+    }
+    if (file)
+        fclose(file);
+    if (line)
+        free(line);
+    return ret;
 }
 
-static void shutdown_runtime(void)
+static int parse_args(int argc, char *argv[])
 {
-	int err;
-    /* TODO verify all PIDs have exited */
-	err = attach_close();
-	if (err < 0) {
-		fprintf(stderr, "Could not close attach interface\n");
-	}
-	err = assembly_runtime_shutdown();
-	if (err < 0) {
-		fprintf(stderr, "Could not shutdown assembly runtime\n");
-	}
-    if (err >= 0)
-        printf("\nAssembly runtime shut down.\n");
-}
-
-// TODO use getopt for all the compile flags
-static bool verify_args(int argc, char *argv[], enum node_type *type)
-{
-	const char main_str[] = "main";
-	const char minion_str[] = "minion";
-	if (!argv)
-		return false;
-	if (argc < 2 || argc > 3)
-		return false;
-	if (argc == 2) { // ./runtime main
-		if (strncmp(argv[1], main_str, strlen(main_str)) != 0)
-			return false;
-		*type = NODE_TYPE_MAIN;
-	} else if (argc == 3) { // ./runtime minion <ip-addr>
-		if (strncmp(argv[1], minion_str, strlen(minion_str)) != 0)
-			return false;
-		// TODO verify ip via regex
-		*type = NODE_TYPE_MINION;
-	}
-	return true;
+    int opt, idx;
+    while (-1 != (opt = getopt_long(argc, argv, "", options, &idx)))
+        if (opt == 'n')
+            strncpy(glob.masterDNS, optarg, HOST_NAME_MAX);
+    if (glob.flags.is_master && glob.flags.use_pbs)
+        if (parse_pbs_nodes())
+            return -1;
+    return 0;
 }
 
 static void print_usage(void)
 {
 	const char usage_str[] =
-		"Usage: ./runtime main\n"
-		"       ./runtime minion <ip-addr>\n";
+		"Usage: ./shadowfax --master [--pbs] [FLAGS]..\n"
+        "       ./shadowfax --minion=masterDNS [FLAGS]..\n"
+        "--quiet    Close stdout\n"
+        "--nohup    catch/ignore SIGHUP\n";
 	fprintf(stderr, usage_str);
+}
+
+static void sighandler(int sig)
+{
+    printd(DBG_DEBUG, "sig %s (%d) caught\n", strsignal(sig), sig);
+    if (sig == SIGINT)
+        sigints_received++;
 }
 
 static int setsignals(void)
@@ -237,54 +287,146 @@ static int setsignals(void)
 	struct sigaction action;
 
 	memset(&action, 0, sizeof(action));
-	action.sa_handler = sigint_handler;
+	action.sa_handler = sighandler;
 	sigemptyset(&action.sa_mask);
 	if (0 > sigaction(SIGINT, &action, NULL))
 		return -(errno);
+    if (glob.flags.nohup) {
+        if (0 > sigaction(SIGHUP, &action, NULL))
+            return -(errno);
+    }
 
 	return 0;
 }
 
-/*-------------------------------------- ENTRY -------------------------------*/
+// if master and use_pbs then auto-launch minions
+static int start_others(void)
+{
+    int n, err;
+    const int cmdlen = 256;
+    char cmd[cmdlen];
+    const char ssh[] = "ssh -oStrictHostKeyChecking=no -q -f";
+    for (n = 1; n < glob.pbs_num_nodes; n++) {
+        memset(cmd, 0, sizeof(*cmd) * cmdlen);
+        snprintf(cmd, cmdlen, "%s %s " // ssh node ..
+                "\"source sfmodules; shadowfax --minion=%s --quiet --nohup\"",
+                ssh, glob.pbs_nodes[n], glob.pbs_nodes[0]);
+        printd("%s\n", cmd);
+        err = system(cmd);
+        if (err) {
+            fprintf(stderr, ">> Error launching on %s\n", glob.pbs_nodes[n]);
+            if (n > 1)
+                fprintf(stderr, ">> Other instances exist; kill them manually\n");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+#if 0 // works but kids sends us SIGSTOP when shadowfax is &'d
+static int stop_others(void)
+{
+    int n;
+    const int cmdlen = 256;
+    char cmd[cmdlen];
+    const char ssh[] = "ssh -oStrictHostKeyChecking=no";
+    for (n = 1; n < glob.pbs_num_nodes; n++) {
+        memset(cmd, 0, sizeof(*cmd) * cmdlen);
+        snprintf(cmd, cmdlen, "%s %s " // ssh node ..
+                "\"killall -s SIGINT shadowfax\"",
+                ssh, glob.pbs_nodes[n]);
+        printd("%s\n", cmd);
+        if (-1 == system(cmd))
+            fprintf(stderr, ">> Error stopping instance on %s\n",
+                    glob.pbs_nodes[n]);
+    }
+    // give them time to disconnect
+    if (glob.pbs_num_nodes > 1)
+        sleep(glob.pbs_num_nodes / 4 + 4);
+    return 0;
+}
+#endif
+
+static int start_runtime(void)
+{
+    if (attach_open(msg_received))
+        return -1;
+    if (!glob.flags.is_master) {
+        if (assembly_runtime_init(NODE_TYPE_MINION, glob.masterDNS))
+            return -1;
+    } else {
+        if (assembly_runtime_init(NODE_TYPE_MAIN, NULL))
+            return -1;
+        if (glob.flags.use_pbs && start_others())
+            return -1;
+    }
+	return 0;
+}
+
+static void shutdown_runtime(void)
+{
+    /* TODO verify all PIDs have exited */
+	if (attach_close())
+		fprintf(stderr, ">> Error closing MQ\n");
+#if 0
+    if (glob.flags.is_master && stop_others())
+        fprintf(stderr, ">> Error stopping other instances\n");
+#endif
+	if (assembly_runtime_shutdown())
+		fprintf(stderr, ">> Erro shutting down runtime\n");
+}
+
+static int make_quiet(void)
+{
+    int fd = open("/dev/null", O_APPEND);
+    if (0 > fd)
+        return -1;
+    if (0 > dup2(fd, 1))
+        return -1;
+    if (0 > dup2(fd, 2))
+        return -1;
+    return 0;
+}
+
+//===----------------------------------------------------------------------===//
+// Main
+//===----------------------------------------------------------------------===//
 
 int main(int argc, char *argv[])
 {
-	int err = 0;
 	sigset_t mask;
-	enum node_type type = NODE_TYPE_INVALID;
 
-#ifdef DEBUG
-	printf("(Built with debug symbols)\n");
-#endif
+    memset(&glob, 0, sizeof(glob));
+    INIT_LIST_HEAD(&glob.apps);
+    pthread_mutex_init(&glob.apps_lock, NULL);
 
-	if (!verify_args(argc, argv, &type)) {
-		print_usage();
+	if (parse_args(argc, argv))
 		return -1;
-	}
+    if (!glob.flags.is_master && '\0' == *glob.masterDNS) {
+        print_usage();
+        exit(EXIT_FAILURE);
+    }
+    if (glob.flags.quiet && make_quiet())
+        exit(EXIT_FAILURE);
 
-    /* clean stray message queues so /dev/mqueue doesn't overflow */
     if (0 > attach_clean()) {
-        fprintf(stderr, "> Error cleaning stray MQs\n");
-        return -1;
+        fprintf(stderr, ">> Error cleaning old message queues\n");
+        exit(EXIT_FAILURE);
+    }
+	if (0 > setsignals()) {
+        fprintf(stderr, ">> Error initializing signals\n");
+        exit(EXIT_FAILURE);
+    }
+    if (start_runtime()) {
+        fprintf(stderr, ">> Error starting runtime\n");
+        exit(EXIT_FAILURE);
     }
 
-	if (0 > setsignals())
-		return -1;
-
-	if (argc == 2)
-		err = start_runtime(type, NULL);
-	else if (argc == 3)
-		err = start_runtime(type, argv[2]);
-	if (err < 0) {
-		fprintf(stderr, "Could not initialize. Check your arguments.\n");
-		return -1;
-	}
-
-	// Wait for any signal.
 	sigemptyset(&mask);
-	sigsuspend(&mask);
+    while (sigints_received == 0)
+        sigsuspend(&mask);
 
 	shutdown_runtime();
     attach_clean();
-	return 0;
+    exit(EXIT_SUCCESS);
 }
