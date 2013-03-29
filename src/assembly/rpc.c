@@ -198,7 +198,6 @@ minion_cleanup(void *arg)
 {
 	int err;
 	struct rpc_thread *state = (struct rpc_thread*)arg;
-	struct node_participant *node = NULL;
 
 	state->is_alive = false;
 
@@ -221,17 +220,6 @@ minion_cleanup(void *arg)
 		default:
 			BUG(1);
 			break;
-	}
-
-	// FIXME If a host tries to join more than once, we should not lookup and remove
-	// the participant state unless no minion rpc thread exists which is
-	// assigned to this hostname already.
-
-	if (participant_exists(state->hostname)) {
-		printd(DBG_WARNING, EXIT_STRING "Host %s disconnecting uncleanly\n",
-				state->hostname);
-		err = rm_participant(state->hostname, &node);
-		BUG(err < 0);
 	}
 
 	// XXX TODO Clean up remaining assembly state, too. This is vital.
