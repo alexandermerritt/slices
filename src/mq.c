@@ -244,7 +244,6 @@ int attach_clean(void)
         }
         num_cleaned++;
     }
-    printf("> Cleaned %d stray message queues\n", num_cleaned);
 
     return 0;
 
