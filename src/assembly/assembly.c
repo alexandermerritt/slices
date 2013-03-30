@@ -1176,7 +1176,7 @@ int assembly_export(asmid_t id, assembly_key *key)
 	}
 
 	// TODO should I keep the lock while exporting?
-    *key = getpid();
+    *key = assm->pid;
 	err = export_assembly(*key, assm);
 	if (err < 0) {
 		exit_errno = -EIO;
