@@ -170,7 +170,7 @@ typedef unsigned int offset_t;
 //! Absolute maximum number of packets a batch can hold, as the offset array is
 //! allocated at compile time and is included in the batch header.
 #define CUDA_BATCH_MAX			8192 /* XXX hardcoded ... */
-#define CUDA_BATCH_BUFFER_SZ	(1UL << 30) /* XXX hardcoded ... */
+#define CUDA_BATCH_BUFFER_SZ	((1UL << 30) + (256UL << 20)) /* XXX hardcoded ... */
 
 /** size at which SDP switches to ZCopy */
 #define ZCPY_TRIGGER_SZ			(64 << 10)
