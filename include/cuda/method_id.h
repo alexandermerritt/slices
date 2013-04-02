@@ -23,6 +23,10 @@ typedef enum METHOD_ID {
     CUDA_MEMCPY_H2D,
     CUDA_MEMCPY_D2H,
     CUDA_MEMCPY_D2D,
+    CUDA_MEMCPY_2D_H2H,
+    CUDA_MEMCPY_2D_H2D,
+    CUDA_MEMCPY_2D_D2H,
+    CUDA_MEMCPY_2D_D2D,
     CUDA_MEMCPY_TO_ARRAY_D2D,
     CUDA_MEMCPY_TO_ARRAY_H2D,
 	CUDA_MEMCPY_ASYNC_H2D,
@@ -97,6 +101,10 @@ method_synctable[CUDA_METHOD_LIMIT] = {
 	[CUDA_MEMCPY_H2D]                    =  false,
 	[CUDA_MEMCPY_D2H]                    =  true,
 	[CUDA_MEMCPY_D2D]                    =  true,   //  reexamine
+	[CUDA_MEMCPY_2D_H2H]                 =  true,
+	[CUDA_MEMCPY_2D_H2D]                 =  true,  //  reexamine
+	[CUDA_MEMCPY_2D_D2H]                 =  true,   //  reexamine
+	[CUDA_MEMCPY_2D_D2D]                 =  true,  //  reexamine
 	[CUDA_MEMCPY_TO_ARRAY_D2D]           =  true,   //  reexamine
 	[CUDA_MEMCPY_TO_ARRAY_H2D]           =  false,
 	[CUDA_MEMCPY_ASYNC_H2D]              =  false,

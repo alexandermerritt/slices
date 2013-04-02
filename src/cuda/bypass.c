@@ -58,6 +58,7 @@ void fill_bypass(struct bypass *bypass)
 	bypass->cudaMallocPitch            =  dlsym(cuda_handle,  "cudaMallocPitch");
 	bypass->cudaMemcpyAsync            =  dlsym(cuda_handle,  "cudaMemcpyAsync");
 	bypass->cudaMemcpy                 =  dlsym(cuda_handle,  "cudaMemcpy");
+	bypass->cudaMemcpy2D               =  dlsym(cuda_handle,  "cudaMemcpy2D");
 	bypass->cudaMemcpyFromSymbol       =  dlsym(cuda_handle,  "cudaMemcpyFromSymbol");
 	bypass->cudaMemcpyToArray          =  dlsym(cuda_handle,  "cudaMemcpyToArray");
 	bypass->cudaMemcpyToSymbolAsync    =  dlsym(cuda_handle,  "cudaMemcpyToSymbolAsync");

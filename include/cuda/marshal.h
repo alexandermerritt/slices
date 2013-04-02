@@ -795,7 +795,6 @@ pack_cudaMemcpy(struct cuda_packet *pkt, void *buf,
 			pkt->args[1].argull = 0UL; // offset of src in buf
 			memcpy(buf, src, count);
 			pkt->len = sizeof(*pkt) + count;
-			pkt->is_sync = method_synctable[pkt->method_id];
 		}
 		break;
 		case cudaMemcpyDeviceToHost:
@@ -806,7 +805,6 @@ pack_cudaMemcpy(struct cuda_packet *pkt, void *buf,
 			pkt->args[0].argull = 0UL;
 			pkt->args[1].argp = (void*)src; // gpu ptr
 			pkt->len = sizeof(*pkt);
-			pkt->is_sync = method_synctable[pkt->method_id];
 		}
 		break;
 		case cudaMemcpyDeviceToDevice:
@@ -815,7 +813,6 @@ pack_cudaMemcpy(struct cuda_packet *pkt, void *buf,
 			pkt->args[0].argp = dst; // gpu ptr
 			pkt->args[1].argp = (void*)src; // gpu ptr
 			pkt->len = sizeof(*pkt);
-			pkt->is_sync = method_synctable[pkt->method_id];
 		}
 		break;
 		default:
@@ -915,6 +912,101 @@ extract_cudaMemcpyAsync(struct cuda_packet *pkt, void *buf,
 		cudaStream_t stream)
 {
 	if (pkt->method_id == CUDA_MEMCPY_D2H)
+		memcpy(dst, (void*)((uintptr_t)buf + pkt->args[0].argull), count);
+}
+
+static inline void
+pack_cudaMemcpy2D(struct cuda_packet *pkt, void *buf, void* dst, size_t dpitch,
+        const void* src, size_t spitch, size_t width, size_t height,
+        enum cudaMemcpyKind kind)
+{
+    size_t count = (width * height);
+	pkt->thr_id = pthread_self();
+	switch (kind) {
+		case cudaMemcpyHostToHost:
+		{
+			pkt->method_id = CUDA_MEMCPY_2D_H2H; // why would you call this?
+			memcpy(dst, src, count); // right?!
+		}
+		break;
+		case cudaMemcpyHostToDevice:
+		{
+			// Need to push data DOWN to the gpu
+			pkt->method_id = CUDA_MEMCPY_2D_H2D;
+			pkt->args[0].argp = dst; // gpu ptr
+			pkt->args[1].argull = 0UL; // offset of src in buf
+			memcpy(buf, src, count);
+			pkt->len = sizeof(*pkt) + count;
+		}
+		break;
+		case cudaMemcpyDeviceToHost:
+		{
+			// Need to pull data UP from the gpu
+			pkt->method_id = CUDA_MEMCPY_2D_D2H;
+			// Copy 'count' bytes at this offset into dst later
+			pkt->args[0].argull = 0UL;
+			pkt->args[1].argp = (void*)src; // gpu ptr
+			pkt->len = sizeof(*pkt);
+		}
+		break;
+		case cudaMemcpyDeviceToDevice:
+		{
+			pkt->method_id = CUDA_MEMCPY_2D_D2D;
+			pkt->args[0].argp = dst; // gpu ptr
+			pkt->args[1].argp = (void*)src; // gpu ptr
+			pkt->len = sizeof(*pkt);
+		}
+		break;
+		default:
+			BUG(1);
+	}
+	pkt->args[2].arr_argi[0] = dpitch;
+	pkt->args[2].arr_argi[1] = spitch;
+	pkt->args[3].arr_argi[0] = width;
+	pkt->args[3].arr_argi[1] = height;
+	pkt->is_sync = method_synctable[pkt->method_id];
+}
+
+static inline void
+unpack_cudaMemcpy2D(struct cuda_packet *pkt, void *buf, void **dst,
+        size_t *dpitch, const void **src, size_t *spitch, size_t *width,
+        size_t *height, enum cudaMemcpyKind kind)
+{
+	switch (kind) {
+		case cudaMemcpyHostToDevice:
+		{
+			*dst = pkt->args[0].argp; // gpu ptr
+			*src = (void*)((uintptr_t)buf + pkt->args[1].argull);
+		}
+		break;
+		case cudaMemcpyDeviceToHost:
+		{
+			*dst = (void*)((uintptr_t)buf + pkt->args[0].argull);
+			*src = pkt->args[1].argp; // gpu ptr
+		}
+		break;
+		case cudaMemcpyDeviceToDevice:
+		{
+			*dst = pkt->args[0].argp; // gpu ptr
+			*src = pkt->args[1].argp; // gpu ptr
+		}
+		break;
+		default:
+			BUG(1);
+	}
+	*dpitch = pkt->args[2].arr_argi[0];
+	*spitch = pkt->args[2].arr_argi[1];
+	*width  = pkt->args[3].arr_argi[0];
+	*height = pkt->args[3].arr_argi[1];
+}
+
+static inline void
+extract_cudaMemcpy2D(struct cuda_packet *pkt, void *buf, void *dst,
+        size_t dpitch, const void *src, size_t spitch, size_t width,
+        size_t height, enum cudaMemcpyKind kind)
+{
+    size_t count = (width * height);
+	if (pkt->method_id == CUDA_MEMCPY_2D_D2H)
 		memcpy(dst, (void*)((uintptr_t)buf + pkt->args[0].argull), count);
 }
 

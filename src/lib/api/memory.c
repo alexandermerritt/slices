@@ -285,6 +285,37 @@ cudaError_t assm_cudaMemcpyToSymbolAsync(const char *symbol, const void *src,
     return cerr;
 }
 
+cudaError_t assm_cudaMemcpy2D(void* dst, size_t dpitch, const void* src,
+        size_t spitch, size_t width, size_t height, enum cudaMemcpyKind kind)
+{
+    FUNC_SETUP_CERR;
+    if (VGPU_IS_LOCAL(tinfo->vgpu)) {
+        cerr = bypass.cudaMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
+    } else {
+        init_buf(&buf, tinfo);
+        pack_cudaMemcpy2D(buf, ((struct cuda_packet*)buf) + 1,
+                dst, dpitch, src, spitch, width, height, kind);
+        switch (kind) {
+            case cudaMemcpyHostToHost:
+                return cudaSuccess; /* pack does a memcpy for us */
+            case cudaMemcpyHostToDevice:
+                rpc_ops.memcpy2DH2D(buf, NULL, rpc(tinfo)); break;
+            case cudaMemcpyDeviceToHost:
+                rpc_ops.memcpy2DD2H(buf, NULL, rpc(tinfo)); break;
+            case cudaMemcpyDeviceToDevice:
+                rpc_ops.memcpy2DD2D(buf, NULL, rpc(tinfo)); break;
+			default:
+				fprintf(stderr, "> %s kind %d unhandled\n", __func__, kind);
+				abort();
+        }
+        /* XXX include in timing */
+        extract_cudaMemcpy2D(buf, ((struct cuda_packet*)buf) + 1,
+                dst, dpitch, src, spitch, width, height, kind);
+        cerr = cpkt_ret_err(buf);
+    }
+    return cerr;
+}
+
 /* XXX
  * If the assembly vgpu has a smaller amount of memory than the physical GPU, it
  * should return the difference in that share.

@@ -246,6 +246,7 @@ cudaError_t assm_cudaMemcpyToArray(struct cudaArray*, size_t, size_t, const void
 cudaError_t assm_cudaMemcpyToSymbolAsync(const char*, const void*, size_t, size_t, enum cudaMemcpyKind, cudaStream_t);
 cudaError_t assm_cudaMemcpyToSymbol(const char*, const void*, size_t, size_t, enum cudaMemcpyKind);
 cudaError_t assm_cudaMemcpy(void*, const void*, size_t, enum cudaMemcpyKind);
+cudaError_t assm_cudaMemcpy2D(void *, size_t, const void *, size_t, size_t, size_t, enum cudaMemcpyKind);
 cudaError_t assm_cudaMemGetInfo(size_t*, size_t*);
 cudaError_t assm_cudaMemset(void*, int, size_t);
 cudaError_t assm_cudaRuntimeGetVersion(int*);

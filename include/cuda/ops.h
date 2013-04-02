@@ -62,6 +62,9 @@ struct cuda_ops
 	OPS_FN_PROTO_PTR(memcpyD2D);
 	OPS_FN_PROTO_PTR(memcpyD2H);
 	OPS_FN_PROTO_PTR(memcpyH2D);
+	OPS_FN_PROTO_PTR(memcpy2DD2D);
+	OPS_FN_PROTO_PTR(memcpy2DD2H);
+	OPS_FN_PROTO_PTR(memcpy2DH2D);
 	OPS_FN_PROTO_PTR(memcpyToArrayD2D);
 	OPS_FN_PROTO_PTR(memcpyToArrayH2D);
 	OPS_FN_PROTO_PTR(memGetInfo);

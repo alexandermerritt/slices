@@ -49,6 +49,7 @@ typedef cudaError_t (*fn_cudaMemcpyToArray)(struct cudaArray*, size_t, size_t, c
 typedef cudaError_t (*fn_cudaMemcpyToSymbolAsync)(const char*, const void*, size_t, size_t, enum cudaMemcpyKind, cudaStream_t);
 typedef cudaError_t (*fn_cudaMemcpyToSymbol)(const char*, const void*, size_t, size_t, enum cudaMemcpyKind);
 typedef cudaError_t (*fn_cudaMemcpy)(void*, const void*, size_t, enum cudaMemcpyKind);
+typedef cudaError_t (*fn_cudaMemcpy2D)(void *, size_t, const void *, size_t, size_t, size_t, enum cudaMemcpyKind);
 typedef cudaError_t (*fn_cudaMemGetInfo)(size_t*, size_t*);
 typedef cudaError_t (*fn_cudaMemset)(void*, int, size_t);
 typedef cudaError_t (*fn_cudaRuntimeGetVersion)(int*);
@@ -105,6 +106,7 @@ struct bypass
 	fn_cudaMallocPitch         	cudaMallocPitch;
 	fn_cudaMemcpyAsync         	cudaMemcpyAsync;
 	fn_cudaMemcpy              	cudaMemcpy;
+	fn_cudaMemcpy2D             cudaMemcpy2D;
 	fn_cudaMemcpyFromSymbol    	cudaMemcpyFromSymbol;
 	fn_cudaMemcpyToArray       	cudaMemcpyToArray;
 	fn_cudaMemcpyToSymbolAsync 	cudaMemcpyToSymbolAsync;

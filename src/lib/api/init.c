@@ -65,6 +65,7 @@ void cudaJmpTblConstructor(void)
     preCudaJmp.cudaMemcpyFromSymbol         = assm_cudaMemcpyFromSymbol;
     preCudaJmp.cudaMemcpyToArray            = assm_cudaMemcpyToArray;
     preCudaJmp.cudaMemcpyToSymbol           = assm_cudaMemcpyToSymbol;
+    preCudaJmp.cudaMemcpy2D                 = assm_cudaMemcpy2D;
     preCudaJmp.cudaMemset                   = assm_cudaMemset;
 
     preCudaJmp.cudaStreamCreate             = assm_cudaStreamCreate;

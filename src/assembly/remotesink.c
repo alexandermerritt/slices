@@ -507,6 +507,15 @@ demux(struct cuda_packet *pkt, struct fatcubins *cubins)
 		case CUDA_MEMCPY_H2D:
 			exec_ops.memcpyH2D(pkt);
 			break;
+		case CUDA_MEMCPY_2D_D2D:
+			exec_ops.memcpy2DD2D(pkt);
+			break;
+		case CUDA_MEMCPY_2D_D2H:
+			exec_ops.memcpy2DD2H(pkt);
+			break;
+		case CUDA_MEMCPY_2D_H2D:
+			exec_ops.memcpy2DH2D(pkt);
+			break;
 		case CUDA_MEMCPY_ASYNC_D2D:
 			exec_ops.memcpyAsyncD2D(pkt);
 			break;

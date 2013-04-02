@@ -553,6 +553,63 @@ static OPS_FN_PROTO(CudaMemcpyD2D)
 	return 0;
 }
 
+static OPS_FN_PROTO(CudaMemcpy2DH2D)
+{
+	void *dst;
+	const void *src;
+	size_t count, dpitch, spitch, width, height;
+	enum cudaMemcpyKind kind = cudaMemcpyHostToDevice;
+	unpack_cudaMemcpy2D(pkt, (pkt + 1),
+            &dst, &dpitch, &src, &spitch, &width, &height, kind);
+
+    count = (width * height);
+	pkt->ret_ex_val.err =
+        cudaMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
+
+	printd(DBG_DEBUG, "memcpy2Dh2d dst=%p src=%p count=%lu kind=%u\n",
+			dst, src, count, kind);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMemcpy2DD2H)
+{
+	void *dst;
+	const void *src;
+	size_t count, dpitch, spitch, width, height;
+	enum cudaMemcpyKind kind = cudaMemcpyDeviceToHost;
+	unpack_cudaMemcpy2D(pkt, (pkt + 1),
+            &dst, &dpitch, &src, &spitch, &width, &height, kind);
+
+    count = (width * height);
+	pkt->ret_ex_val.err =
+        cudaMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
+
+	printd(DBG_DEBUG, "memcpy2Dd2h dst=%p src=%p count=%lu kind=%u\n",
+			dst, src, count, kind);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
+static OPS_FN_PROTO(CudaMemcpy2DD2D)
+{
+	void *dst;
+	const void *src;
+	size_t count, dpitch, spitch, width, height;
+	enum cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
+	unpack_cudaMemcpy2D(pkt, (pkt + 1),
+            &dst, &dpitch, &src, &spitch, &width, &height, kind);
+
+    count = (width * height);
+	pkt->ret_ex_val.err =
+        cudaMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
+
+	printd(DBG_DEBUG, "memcpy2Dd2d dst=%p src=%p count=%lu kind=%u\n",
+			dst, src, count, kind);
+	EXAMINE_CUDAERROR(pkt);
+	return 0;
+}
+
 static OPS_FN_PROTO(CudaMemcpyAsyncH2D)
 {
 	printd(DBG_WARNING, "async API not supported; defaulting to sync API\n");
@@ -1043,6 +1100,9 @@ const struct cuda_ops exec_ops =
 	.memcpyD2D = CudaMemcpyD2D,
 	.memcpyD2H = CudaMemcpyD2H,
 	.memcpyH2D = CudaMemcpyH2D,
+	.memcpy2DD2D = CudaMemcpy2DD2D,
+	.memcpy2DD2H = CudaMemcpy2DD2H,
+	.memcpy2DH2D = CudaMemcpy2DH2D,
 	.memcpyToArrayD2D = CudaMemcpyToArrayD2D,
 	.memcpyToArrayH2D = CudaMemcpyToArrayH2D,
 	.memcpyToSymbolAsyncH2D = CudaMemcpyToSymbolAsyncH2D,
