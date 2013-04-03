@@ -90,6 +90,22 @@ int cuda_rpc_close(struct cuda_rpc *rpc)
 		}							\
 	} while(0)
 
+static inline struct cuda_packet *
+last_pkt(struct cuda_rpc *rpc)
+{
+    struct cuda_pkt_batch *b = &rpc->batch;
+    return (struct cuda_packet*)((uintptr_t)b->buffer +
+            (uintptr_t)b->header.offsets[b->header.num_pkts - 1]);
+}
+
+static void
+batch_clear(struct cuda_pkt_batch *batch)
+{
+	batch->header.num_pkts = 0UL;
+	batch->header.bytes_used = 0UL;
+	// don't free buffer storage
+}
+
 static int
 batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 {
@@ -108,11 +124,7 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 #endif
 
 #ifndef NO_PIPELINING
-    struct cuda_packet *last_pkt = NULL;
-    last_pkt = (struct cuda_packet*)
-        ((uintptr_t)batch->buffer +
-         (intptr_t)batch->header.offsets[batch->header.num_pkts - 1]);
-    if (last_pkt->is_sync) { /* only expect a return packet if last is sync */
+    if (last_pkt(rpc)->is_sync) { /* only expect a return packet if last is sync */
 #endif
 
 #if defined(NIC_SDP)
@@ -132,18 +144,10 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 #ifndef NO_PIPELINING
     }
 #endif
-
+	batch_clear(batch);
 	return 0;
 fail:
 	return exit_errno;
-}
-
-static void
-batch_clear(struct cuda_pkt_batch *batch)
-{
-	batch->header.num_pkts = 0UL;
-	batch->header.bytes_used = 0UL;
-	// don't free buffer storage
 }
 
 static int
@@ -152,22 +156,32 @@ batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 	// We append unless we do not have space or the packet holds state for a
 	// synchronous function call
 
-	int err = 0;
+    int err = 0;
 	struct cuda_pkt_batch *batch = &rpc->batch;
 	size_t rpc_size = pkt->len; // len includes size of struct cuda_packet
-	uintptr_t buf_ptr = (uintptr_t)batch->buffer + batch->header.bytes_used;
+	uintptr_t buf_ptr = 0;
+	size_t remaining;
+
+    // if no space for incoming pkt, flush first
+    remaining = (CUDA_BATCH_BUFFER_SZ - batch->header.bytes_used);
+    if (remaining < rpc_size) {
+        printd(DBG_DEBUG, "pre-flushing!\n");
+        BUG(last_pkt(rpc)->is_sync); // should have already been flushed
+        batch_deliver(rpc, pkt);
+    }
 
 	printd(DBG_DEBUG, "pkt %lu offset %lu len %lu\n",
 			batch->header.num_pkts, batch->header.bytes_used, rpc_size);
 
+	buf_ptr = (uintptr_t)batch->buffer + batch->header.bytes_used;
 	batch->header.offsets[batch->header.num_pkts++] = batch->header.bytes_used;
 
 	// We assume we will always have storage space to hold a packet and its
 	// data, and that a "flush" will only occur due to a synchronous packet or
 	// we run out of slots to hold packets. Thus, we batch as aggressively as we
 	// can.
-	size_t remaining_storage = CUDA_BATCH_BUFFER_SZ - batch->header.bytes_used;
-	BUG(remaining_storage < rpc_size);
+	remaining = CUDA_BATCH_BUFFER_SZ - batch->header.bytes_used;
+	BUG(remaining < rpc_size); // true if a single memcpy moves more than size of buffer
 	BUG(batch->header.num_pkts > CUDA_BATCH_MAX);
 	BUG(!batch->buffer);
 
@@ -176,8 +190,8 @@ batch_append_and_flush(struct cuda_rpc *rpc, struct cuda_packet *pkt)
 
 	if (pkt->is_sync || (batch->header.num_pkts >= batch->max)) {
 		printd(DBG_INFO, "\t--> flushing\n");
-		err = batch_deliver(rpc, pkt);
-		batch_clear(batch);
+        // XXX should the return pkt reside at buf[0] instead?
+		err = batch_deliver(rpc, pkt/*return pkt*/);
 	} else {
 		pkt->ret_ex_val.err = cudaSuccess;
 	}
