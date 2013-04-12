@@ -29,6 +29,35 @@
 #include <cuda/method_id.h>
 #include <debug.h>
 
+//===----------------------------------------------------------------------===//
+// Registered variable metastate
+//===----------------------------------------------------------------------===//
+
+// Symbol addresses from __cudaRegisterVar. Used to determine if the symbol
+// parameter in certain functions is actually the address of a variable, or the
+// string name of one of the variables in functions which accept symbols.
+// TODO Make this cleaner code.
+struct cuda_reg_vars cuda_reg_vars;
+
+__attribute__((constructor)) void init_cuda_reg_vars(void)
+{
+    memset(&cuda_reg_vars, 0, sizeof(cuda_reg_vars));
+    cuda_reg_vars.symbs = calloc(MAX_REG_VARS, sizeof(*cuda_reg_vars.symbs));
+    if (!cuda_reg_vars.symbs) {
+        fprintf(stderr, ">> Out of memory\n");
+        exit(1);
+    }
+}
+
+__attribute__((destructor)) void tini_cuda_reg_vars(void)
+{
+    free(cuda_reg_vars.symbs);
+}
+
+//===----------------------------------------------------------------------===//
+// Old still-used marshaling code
+//===----------------------------------------------------------------------===//
+
 /**
  * returns the size of the packet for the string
  * |string_length|string|

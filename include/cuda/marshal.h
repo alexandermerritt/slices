@@ -23,15 +23,12 @@
 #include <cuda/fatcubininfo.h>
 #include <cuda/packet.h>
 
-/*-------------------------------------- INTERNAL STATE ----------------------*/
-
-#define MAX_REGISTERED_VARS 5210
-//! Symbol addresses from __cudaRegisterVar. Used to determine if the symbol
-//! parameter in certain functions is actually the address of a variable, or
-//! the string name of one of the variables in functions which accept symbols.
-//! TODO Make this cleaner code.
-static uintptr_t registered_vars[MAX_REGISTERED_VARS];
-static unsigned int num_registered_vars = 0;
+struct cuda_reg_vars {
+#define MAX_REG_VARS 5210
+    uintptr_t *symbs;
+    size_t symbs_num;
+};
+extern struct cuda_reg_vars cuda_reg_vars;
 
 /*-------------------------------------- INTERNAL FUNCTIONS ------------------*/
 
@@ -43,8 +40,8 @@ static unsigned int num_registered_vars = 0;
 static inline bool __func_symb_param_is_string(const char *symbol)
 {
 	unsigned int symb = 0;
-	while (symb < num_registered_vars)
-		if (registered_vars[symb++] == (uintptr_t)symbol)
+	while (symb < cuda_reg_vars.symbs_num)
+		if (cuda_reg_vars.symbs[symb++] == (uintptr_t)symbol)
 			return false;
 	return true;
 }
@@ -1571,8 +1568,8 @@ pack_cudaRegisterVar(struct cuda_packet *pkt, void *buf,
 	pkt->is_sync = method_synctable[pkt->method_id];
 
 	// Add it to our list of known variable symbols.
-	registered_vars[num_registered_vars++] = (uintptr_t)hostVar;
-	if (num_registered_vars >= MAX_REGISTERED_VARS) BUG(1);
+	cuda_reg_vars.symbs[cuda_reg_vars.symbs_num++] = (uintptr_t)hostVar;
+	if (cuda_reg_vars.symbs_num >= MAX_REG_VARS) BUG(1);
 }
 
 static inline void
