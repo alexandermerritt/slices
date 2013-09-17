@@ -47,9 +47,13 @@ assm_cudaSetDevice(int device)
     /* let it pass through so the driver makes the association */
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
         cerr = bypass.cudaSetDevice(device);
+        BUG(bypass.cudaSetDeviceFlags(cudaDeviceBlockingSync) != cudaSuccess);
+        //printf(">> set device flags to blocking sync\n");
     } else {
         init_buf(&buf, tinfo);
         /* XXX should we send a flushing call to clear the batch queue here? */
+        pack_cudaSetDeviceFlags(buf, cudaDeviceBlockingSync);
+        rpc_ops.setDeviceFlags(buf, NULL, rpc(tinfo));
         pack_cudaSetDevice(buf, device);
         rpc_ops.setDevice(buf, NULL, rpc(tinfo));
         cerr = cpkt_ret_err(buf);
