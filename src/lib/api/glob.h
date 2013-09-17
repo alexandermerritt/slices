@@ -36,6 +36,8 @@ struct tinfo *__lookup(pthread_t tid);
 #define rpc(tinfo)          ((tinfo)->vgpu->rpc)
 #define VGPU_IS_LOCAL(vgpu) ((vgpu)->fixation == VGPU_LOCAL)
 
+#define PER_THREAD_MARSHAL_BUF_SZ   (1UL << 30)
+
 extern struct assembly * assembly_find(asmid_t id);
 extern struct assembly *assm;
 extern struct tinfo tinfos[32];
