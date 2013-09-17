@@ -557,17 +557,16 @@ static OPS_FN_PROTO(CudaMemcpy2DH2D)
 {
 	void *dst;
 	const void *src;
-	size_t count, dpitch, spitch, width, height;
+	size_t dpitch, spitch, width, height;
 	enum cudaMemcpyKind kind = cudaMemcpyHostToDevice;
 	unpack_cudaMemcpy2D(pkt, (pkt + 1),
             &dst, &dpitch, &src, &spitch, &width, &height, kind);
 
-    count = (width * height);
 	pkt->ret_ex_val.err =
         cudaMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
 
-	printd(DBG_DEBUG, "memcpy2Dh2d dst=%p src=%p count=%lu kind=%u\n",
-			dst, src, count, kind);
+	printd(DBG_DEBUG, "memcpy2Dh2d dst=%p src=%p kind=%u\n",
+			dst, src, kind);
 	EXAMINE_CUDAERROR(pkt);
 	return 0;
 }
@@ -576,17 +575,16 @@ static OPS_FN_PROTO(CudaMemcpy2DD2H)
 {
 	void *dst;
 	const void *src;
-	size_t count, dpitch, spitch, width, height;
+	size_t dpitch, spitch, width, height;
 	enum cudaMemcpyKind kind = cudaMemcpyDeviceToHost;
 	unpack_cudaMemcpy2D(pkt, (pkt + 1),
             &dst, &dpitch, &src, &spitch, &width, &height, kind);
 
-    count = (width * height);
 	pkt->ret_ex_val.err =
         cudaMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
 
-	printd(DBG_DEBUG, "memcpy2Dd2h dst=%p src=%p count=%lu kind=%u\n",
-			dst, src, count, kind);
+	printd(DBG_DEBUG, "memcpy2Dd2h dst=%p src=%p kind=%u\n",
+			dst, src, kind);
 	EXAMINE_CUDAERROR(pkt);
 	return 0;
 }
@@ -595,17 +593,16 @@ static OPS_FN_PROTO(CudaMemcpy2DD2D)
 {
 	void *dst;
 	const void *src;
-	size_t count, dpitch, spitch, width, height;
+	size_t dpitch, spitch, width, height;
 	enum cudaMemcpyKind kind = cudaMemcpyDeviceToDevice;
 	unpack_cudaMemcpy2D(pkt, (pkt + 1),
             &dst, &dpitch, &src, &spitch, &width, &height, kind);
 
-    count = (width * height);
 	pkt->ret_ex_val.err =
         cudaMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
 
-	printd(DBG_DEBUG, "memcpy2Dd2d dst=%p src=%p count=%lu kind=%u\n",
-			dst, src, count, kind);
+	printd(DBG_DEBUG, "memcpy2Dd2d dst=%p src=%p kind=%u\n",
+			dst, src, kind);
 	EXAMINE_CUDAERROR(pkt);
 	return 0;
 }
@@ -640,6 +637,8 @@ static OPS_FN_PROTO(CudaMemcpyFromSymbolD2H)
 	struct cuda_fatcubin_info *fatcubin;
 	struct fatcubins *cubins = NULL;
 	GET_CUBIN_VALIST(cubins, pkt);
+
+    printd(DBG_DEBUG, "\n");
 
 	// The application can provide symbols EITHER as a string literal containing
 	// the name of the variable, OR the address directly. Thus 'symbol' will
@@ -725,6 +724,8 @@ static OPS_FN_PROTO(CudaMemcpyToSymbolH2D)
 	struct fatcubins *cubins = NULL;
 	GET_CUBIN_VALIST(cubins, pkt);
 
+	printd(DBG_DEBUG, "called\n");
+
 	unpack_cudaMemcpyToSymbol(pkt, (pkt + 1),
 			&symbol, &src, &count, &offset, cudaMemcpyHostToDevice);
 	// See comments in CudaMemcpyFromSymbolD2H.
@@ -805,6 +806,8 @@ static OPS_FN_PROTO(CudaBindTexture)
 	struct fatcubins *cubins = NULL;
 
 	GET_CUBIN_VALIST(cubins, pkt);
+
+	printd(DBG_DEBUG, "called\n");
 
 	unpack_cudaBindTexture(pkt, &texRef, &new_tex, &devPtr, &desc, &size);
 

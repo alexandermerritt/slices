@@ -12,6 +12,8 @@
  * well as the definitions of a hint, vgpu_mapping, assemblies, etc.
  */
 
+#define _GNU_SOURCE /* for strchrnul */
+
 // System includes
 #include <stdbool.h>
 #include <string.h>
@@ -128,6 +130,41 @@ find_first_remote_node(
 	return true;
 }
 
+/* HACK skip nodes not explicitly listed in the override env variable */
+/* we assume nodes in the env var are short DNS names with no . */
+static bool
+in_nodelist(const char *hostname)
+{
+    char dns[HOST_NAME_MAX];
+    const char *env_nodelist = getenv("REMOTE_NODE_LIST");
+
+    printd(DBG_DEBUG, "REMOTE_NODE_LIST defined to '%s'\n",
+            env_nodelist);
+
+    // if not defined, all nodes valid
+    if (!env_nodelist)
+        return true;
+    memset(dns, 0, HOST_NAME_MAX * sizeof(*dns));
+
+    char *save, *entry, *str = strdup(env_nodelist);
+    if (!str) { fprintf(stderr, "oom\n"); abort(); }
+
+    strncpy(dns, hostname, HOST_NAME_MAX-1);
+    *strchrnul(dns, '.') = '\0';
+    printd(DBG_DEBUG, "comparing against '%s'\n", dns);
+
+    bool found = false;
+    entry = strtok_r(str, ":", &save);
+    do {
+        if (strcmp(dns, entry) == 0)
+            found = true;
+    } while (!found && (entry = strtok_r(NULL, ":", &save)));
+
+    free(str);
+
+    return found;
+}
+
 /**
  * Locate the first remote node we find in the cluster, relative
  * to whom is requesting the assembly. We assume the node list is not empty, and
@@ -158,6 +195,10 @@ find_first_remote_gpu(struct global *global, struct gpu *gpu,
                 continue;
             }
         }
+
+        if (!in_nodelist(node->hostname))
+            continue;
+
         goto found;
     }
 
@@ -272,6 +313,9 @@ find_unmapped_remote_gpu(struct global *global, struct gpu *gpu,
                 continue;
             }
         }
+
+        if (!in_nodelist(node->hostname))
+            continue;
 
         /* locate a gpu on this node which has nothing mapped to it */
         for (id = 0; id < node->num_gpus; id++)

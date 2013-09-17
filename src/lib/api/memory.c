@@ -86,6 +86,7 @@ cudaError_t assm_cudaMallocHost(void **hostPtr, size_t size)
 cudaError_t assm_cudaMalloc(void **devPtr, size_t size)
 {
     FUNC_SETUP_CERR;
+    printd(DBG_DEBUG, "size=%lu\n", size);
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
         cerr = bypass.cudaMalloc(devPtr, size);
     } else {
@@ -244,6 +245,12 @@ cudaError_t assm_cudaMemcpyToSymbol(const char *symbol, const void *src,
         size_t count, size_t offset, enum cudaMemcpyKind kind)
 {
     FUNC_SETUP_CERR;
+
+    printd(DBG_DEBUG, "symb(ptr): %p\n", symbol);
+	if (__func_symb_param_is_string(symbol)) {
+        printd(DBG_DEBUG, "\tsymb(str): '%s'\n", symbol);
+    }
+
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
         cerr = bypass.cudaMemcpyToSymbol(symbol, src, count, offset, kind);
     } else {
@@ -268,7 +275,8 @@ cudaError_t assm_cudaMemcpyToSymbolAsync(const char *symbol, const void *src,
 {
     FUNC_SETUP_CERR;
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
-        cerr = bypass.cudaMemcpyToSymbol(symbol, src, count, offset, kind);
+        cerr = bypass.cudaMemcpyToSymbolAsync(symbol, src, count,
+                offset, kind, stream);
     } else {
         init_buf(&buf, tinfo);
         pack_cudaMemcpyToSymbolAsync(buf, ((struct cuda_packet*)buf) + 1,
@@ -278,7 +286,8 @@ cudaError_t assm_cudaMemcpyToSymbolAsync(const char *symbol, const void *src,
                 return cudaSuccess; /* pack does a memcpy for us */
             case cudaMemcpyHostToDevice:
                 rpc_ops.memcpyToSymbolAsyncH2D(buf, NULL, rpc(tinfo)); break;
-            default: abort();
+            default:
+                BUG("unimplemented direction");
         }
         cerr = cpkt_ret_err(buf);
     }
