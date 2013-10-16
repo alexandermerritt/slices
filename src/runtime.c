@@ -227,7 +227,7 @@ static int parse_pbs_nodes(void)
 
     if (gethostname(glob.pbs_nodes[0], HOST_NAME_MAX))
         goto out;
-    *strchr(glob.pbs_nodes[0], '.') = '\0'; // make into short DNS
+    *strchrnul(glob.pbs_nodes[0], '.') = '\0'; // make into short DNS
     idx = 1;
 
     char *prev = glob.pbs_nodes[0];
