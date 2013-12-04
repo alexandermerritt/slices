@@ -316,9 +316,7 @@ minion_thread(void *arg)
 	}
 
 	// Pull out the PID of the localsink sending us RPCs. When an assembly is
-	// mapped, this first piece of information is sent across. We can use the
-	// localsink PID instead of the application PID so long as they exist in a
-	// 1:1 ratio.
+	// mapped, this first piece of information is sent across.
 	err = conn_get(&state->conn, &state->pid, sizeof(state->pid));
 	if (err < 0) {
 		state->exit_code = -ENETDOWN;
