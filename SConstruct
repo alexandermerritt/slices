@@ -15,6 +15,7 @@ arg_network     = ARGUMENTS.get('network', 'eth')
 arg_pipelining = int(ARGUMENTS.get('pipelining', 1))
 
 ccflags = ['-Wall', '-Wextra', '-Werror']
+ccflags.append('-fcolor-diagnostics')
 ccflags.append('-Winline')
 ccflags.extend(['-Wno-unused-parameter', '-Wno-unused-function'])
 
