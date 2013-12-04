@@ -148,6 +148,7 @@ typedef struct cuda_packet {
 	args_t args[MAX_ARGS];  // arguments to be copied on ring
 	size_t len; //! total bytes of marshalled packet incl appended data
 	bool is_sync; //! whether this func must be interposed/invoked synchronously
+    unsigned long execlat;
 	ret_extra_t ret_ex_val; // return value from call filled in response packet
 } cuda_packet_t;
 

@@ -725,12 +725,15 @@ do_cuda_rpc(
 {
 	int retval = 0;
 	struct cuda_packet *pkt = NULL;
+    struct timer t;
 
 	BUG(!batch->buffer);
 
 	bool has_payload; //! any data an RPC requires is stored after the pkt
 	data_direction direction;
 	payload_size data_size;
+
+    timer_init(CLOCK_REALTIME, &t);
 
 	// pull in the batch of serialized RPCs
 	BAIL_ON_NW_ERR( conn_get(conn, &batch->header, sizeof(batch->header)) );
@@ -742,6 +745,8 @@ do_cuda_rpc(
 
 	pthread_testcancel();
 
+    timer_start(&t); // ignored if batch is not synchronous
+
 	// execute them in-place
 	printd(DBG_INFO, "executing %lu RPCs\n", batch->header.num_pkts);
 	size_t pkt_num;
@@ -752,6 +757,8 @@ do_cuda_rpc(
 			return -1;
 		}
 	}
+
+    pkt->execlat = timer_end(&t, MICROSECONDS);
 
 #ifndef NO_PIPELINING
     if (pkt->is_sync) { /* only send return packet if it is synchronous */

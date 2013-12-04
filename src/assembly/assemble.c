@@ -156,7 +156,7 @@ in_nodelist(const char *hostname)
     bool found = false;
     entry = strtok_r(str, ":", &save);
     do {
-        if (strcmp(dns, entry) == 0)
+        if (strncmp(dns, entry, strlen(dns)) == 0)
             found = true;
     } while (!found && (entry = strtok_r(NULL, ":", &save)));
 

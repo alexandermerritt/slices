@@ -59,6 +59,7 @@ void assm__cudaRegisterFunction(void** fatCubinHandle, const char* hostFun,
     }
 }
 
+extern void dump_flushes(void);
 void assm__cudaUnregisterFatBinary(void** fatCubinHandle)
 {
     FUNC_SETUP;
@@ -74,6 +75,7 @@ void assm__cudaUnregisterFatBinary(void** fatCubinHandle)
     if (scheduler_joined && --num_binaries == 0)
         if (leave_scheduler())
             fprintf(stderr, ">> Error detaching to daemon\n");
+    dump_flushes();
 }
 
 void assm__cudaRegisterVar(void **fatCubinHandle, char *hostVar, char

@@ -106,18 +106,72 @@ batch_clear(struct cuda_pkt_batch *batch)
 	// don't free buffer storage
 }
 
+struct flush
+{
+    struct timespec ts;
+    size_t bytes;
+    unsigned long lat, exec; /* not used if blocking false */
+    bool blocking, has_ret_payload;
+};
+
+#define MAX_HISTORY (8UL << 20)
+unsigned long num_flushes = 0UL;
+struct flush flushes[MAX_HISTORY];
+
+void dump_flushes(void)
+{
+    char filename[256];
+    unsigned long n = 0;
+    struct flush *f;
+    FILE *fp;
+
+    unsigned long v;
+    struct timer t;
+    timer_init(CLOCK_REALTIME, t);
+    timer_start(&t);
+
+    snprintf(filename, 256, "/lustre/medusa/merritt/dump.%d", getpid());
+    fp = fopen(filename, "w");
+    if (!fp)
+        return;
+    fprintf(fp, "bytes latency synchrony time execlat\n");
+    while (n < num_flushes) {
+        f = &flushes[n];
+        fprintf(fp, "%lu %lu %d %lu %lu\n", f->bytes, f->lat, f->blocking,
+                f->ts.tv_sec * 1000000000UL + f->ts.tv_nsec, f->exec);
+        n++;
+    }
+    fclose(fp);
+
+    v = timer_end(&t, MICROSECONDS);
+    printf("> %s %lu usec\n", __func__, v);
+}
+
 static int
 batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 {
 	int exit_errno;
 	struct cuda_pkt_batch *batch = &rpc->batch;
 	size_t payload_len = 0UL;
+    struct flush *f;
+    struct timer t;
 
 	printd(DBG_INFO, "pkts = %lu size = %lu\n",
 			batch->header.num_pkts, batch->header.bytes_used);
 
+    timer_init(CLOCK_REALTIME, &t);
+
+    f = &flushes[num_flushes];
+    clock_gettime(CLOCK_REALTIME, &f->ts);
+    f->bytes = sizeof(batch->header);
+    f->blocking = false;
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, &batch->header, sizeof(batch->header)) );
+
 #if defined(NIC_SDP)
+    f = &flushes[++num_flushes];
+    clock_gettime(CLOCK_REALTIME, &f->ts);
+    f->bytes = batch->header.bytes_used + ZCPY_TRIGGER_SZ;
+    timer_start(&t); // ignored if batch is non-blocking
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->buffer, batch->header.bytes_used + ZCPY_TRIGGER_SZ) );
 #else
 	FAIL_ON_CONN_ERR( conn_put(&rpc->sockconn, batch->buffer, batch->header.bytes_used) );
@@ -128,6 +182,8 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 #endif
 
 #if defined(NIC_SDP)
+        f->blocking = true;
+        f->bytes += sizeof(*return_pkt) + ZCPY_TRIGGER_SZ;
 	    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt) + ZCPY_TRIGGER_SZ) );
 #else
 	    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, return_pkt, sizeof(*return_pkt)) );
@@ -136,14 +192,19 @@ batch_deliver(struct cuda_rpc *rpc, struct cuda_packet *return_pkt)
 	    payload_len = return_pkt->len - sizeof(*return_pkt);
 	    if (payload_len > 0) {
 #if defined(NIC_SDP)
+            f->bytes += payload_len + ZCPY_TRIGGER_SZ;
+            f->has_ret_payload = true;
 		    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len + ZCPY_TRIGGER_SZ) );
 #else
 		    FAIL_ON_CONN_ERR( conn_get(&rpc->sockconn, (return_pkt + 1), payload_len) );
 #endif
 	    }
 #ifndef NO_PIPELINING
+        f->lat = timer_end(&t, MICROSECONDS);
+        f->exec = return_pkt->execlat;
     }
 #endif
+    ++num_flushes;
 	batch_clear(batch);
 	return 0;
 fail:
