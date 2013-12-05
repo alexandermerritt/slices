@@ -311,7 +311,7 @@ static int start_others(void)
         snprintf(cmd, cmdlen, "%s %s " // ssh node ..
                 "\"source sfmodules; shadowfax --minion=%s --quiet --nohup\"",
                 ssh, glob.pbs_nodes[n], glob.pbs_nodes[0]);
-        printd("%s\n", cmd);
+        printd(DEBUG_DBG, "%s", cmd);
         err = system(cmd);
         if (err) {
             fprintf(stderr, ">> Error launching on %s\n", glob.pbs_nodes[n]);

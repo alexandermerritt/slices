@@ -127,7 +127,7 @@ void dump_flushes(void)
 
     unsigned long v;
     struct timer t;
-    timer_init(CLOCK_REALTIME, t);
+    timer_init(CLOCK_REALTIME, &t);
     timer_start(&t);
 
     snprintf(filename, 256, "/lustre/medusa/merritt/dump.%d", getpid());
