@@ -22,15 +22,15 @@ assm_cudaConfigureCall(dim3 gridDim, dim3 blockDim,
 }
 
 cudaError_t
-assm_cudaLaunch(const char* entry)
+assm_cudaLaunch(const void* func)
 {
     FUNC_SETUP_CERR;
 
     if (VGPU_IS_LOCAL(tinfo->vgpu)) {
-        cerr = bypass.cudaLaunch(entry);
+        cerr = bypass.cudaLaunch(func);
     } else {
         init_buf(&buf, tinfo);
-        pack_cudaLaunch(buf, entry);
+        pack_cudaLaunch(buf, func);
         rpc_ops.launch(buf, NULL, rpc(tinfo));
         cerr = cpkt_ret_err(buf);
     }

@@ -193,7 +193,7 @@ cudaError_t assm_cudaMemcpyAsync(void *dst, const void *src, size_t count,
     return cerr;
 }
 
-cudaError_t assm_cudaMemcpyFromSymbol(void *dst, const char *symbol, size_t count,
+cudaError_t assm_cudaMemcpyFromSymbol(void *dst, const void *symbol, size_t count,
         size_t offset, enum cudaMemcpyKind kind)
 {
     FUNC_SETUP_CERR;
@@ -241,7 +241,7 @@ cudaError_t assm_cudaMemcpyToArray( struct cudaArray *dst, size_t wOffset,
     return cerr;
 }
 
-cudaError_t assm_cudaMemcpyToSymbol(const char *symbol, const void *src,
+cudaError_t assm_cudaMemcpyToSymbol(const void *symbol, const void *src,
         size_t count, size_t offset, enum cudaMemcpyKind kind)
 {
     FUNC_SETUP_CERR;
@@ -269,7 +269,7 @@ cudaError_t assm_cudaMemcpyToSymbol(const char *symbol, const void *src,
     return cerr;
 }
 
-cudaError_t assm_cudaMemcpyToSymbolAsync(const char *symbol, const void *src,
+cudaError_t assm_cudaMemcpyToSymbolAsync(const void *symbol, const void *src,
         size_t count, size_t offset,
         enum cudaMemcpyKind kind, cudaStream_t stream)
 {

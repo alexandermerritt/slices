@@ -79,7 +79,7 @@ cudaError_t assm_cudaSetValidDevices(int*, int);
 
 // Execution API
 cudaError_t assm_cudaConfigureCall(dim3, dim3, size_t, cudaStream_t);
-cudaError_t assm_cudaLaunch(const char*);
+cudaError_t assm_cudaLaunch(const void*);
 cudaError_t assm_cudaSetupArgument(const void*, size_t, size_t);
 
 // Hidden API
@@ -107,11 +107,11 @@ cudaError_t assm_cudaMemcpy(void *dst, const void *src,
         size_t count, enum cudaMemcpyKind kind);
 cudaError_t assm_cudaMemcpyAsync(void *dst, const void *src, size_t count,
 		enum cudaMemcpyKind kind, cudaStream_t stream);
-cudaError_t assm_cudaMemcpyFromSymbol(void *dst, const char *symbol, size_t count,
+cudaError_t assm_cudaMemcpyFromSymbol(void *dst, const void *symbol, size_t count,
         size_t offset, enum cudaMemcpyKind kind);
 cudaError_t assm_cudaMemcpyToArray( struct cudaArray *dst, size_t wOffset,
         size_t hOffset, const void *src, size_t count, enum cudaMemcpyKind kind);
-cudaError_t assm_cudaMemcpyToSymbol(const char *symbol, const void *src,
+cudaError_t assm_cudaMemcpyToSymbol(const void *symbol, const void *src,
         size_t count, size_t offset, enum cudaMemcpyKind kind);
 
 // Stream API
