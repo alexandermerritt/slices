@@ -36,6 +36,9 @@ void cudaJmpTblConstructor(void)
     preCudaJmp.cudaSetDeviceFlags           = assm_cudaSetDeviceFlags;
     preCudaJmp.cudaSetValidDevices          = assm_cudaSetValidDevices;
 
+    preCudaJmp.cudaDriverGetVersion         = assm_cudaDriverGetVersion;
+    preCudaJmp.cudaRuntimeGetVersion        = assm_cudaRuntimeGetVersion;
+
     preCudaJmp.cudaConfigureCall            = assm_cudaConfigureCall;
     preCudaJmp.cudaLaunch                   = assm_cudaLaunch;
     preCudaJmp.cudaSetupArgument            = assm_cudaSetupArgument;
